@@ -1,0 +1,21 @@
+appId: com.balaji.ortho.connect
+productName: Balaji Ortho Care Connect
+copyright: "Balaji Ortho Care Center"
+
+directories:
+  output: release
+
+files:
+  - dist/**
+  - electron-main.cjs
+  - package.json
+  - node_modules/**
+
+win:
+  target:
+    - target: portable
+      arch: [x64]
+  artifactName: "BalajiOrthoConnect-${version}-portable.exe"
+
+portable:
+  artifactName: "BalajiOrthoConnect-${version}-portable.exe"
