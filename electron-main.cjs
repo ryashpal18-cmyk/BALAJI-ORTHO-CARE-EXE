@@ -1,22 +1,8 @@
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, shell, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
 let mainWindow;
-
-function getIndexPath() {
-  // Multiple paths try karo - jo mile wahi use karo
-  const candidates = [
-    path.join(__dirname, "dist", "index.html"),
-    path.join(app.getAppPath(), "dist", "index.html"),
-    path.join(process.resourcesPath, "app", "dist", "index.html"),
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  // Fallback
-  return candidates[0];
-}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -34,7 +20,17 @@ function createWindow() {
     autoHideMenuBar: true,
   });
 
-  const indexPath = getIndexPath();
+  const indexPath = path.join(__dirname, "dist", "index.html");
+
+  if (!fs.existsSync(indexPath)) {
+    dialog.showErrorBox(
+      "Error",
+      "dist/index.html not found at: " + indexPath
+    );
+    app.quit();
+    return;
+  }
+
   mainWindow.loadFile(indexPath);
 
   mainWindow.once("ready-to-show", () => {

@@ -7,12 +7,19 @@ directories:
 
 asar: false
 
-# ✅ SIRF YE 3 FILES CHAHIYE - node_modules nahi!
-# Vite sab dist/ mein bundle kar deta hai
 files:
-  - dist/**
-  - electron-main.cjs
-  - package.json
+  - "**/*"
+  - "!src/**"
+  - "!supabase/**"
+  - "!.github/**"
+  - "!*.md"
+  - "!*.log"
+  - "!eslint.config.js"
+  - "!tailwind.config.ts"
+  - "!postcss.config.cjs"
+  - "!tsconfig.json"
+  - "!vite.config.ts"
+  - "!components.json"
 
 win:
   target:
