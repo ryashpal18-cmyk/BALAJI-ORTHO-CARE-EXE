@@ -1,7 +1,22 @@
 const { app, BrowserWindow, shell } = require("electron");
 const path = require("path");
+const fs = require("fs");
 
 let mainWindow;
+
+function getIndexPath() {
+  // Multiple paths try karo - jo mile wahi use karo
+  const candidates = [
+    path.join(__dirname, "dist", "index.html"),
+    path.join(app.getAppPath(), "dist", "index.html"),
+    path.join(process.resourcesPath, "app", "dist", "index.html"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  // Fallback
+  return candidates[0];
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -19,15 +34,14 @@ function createWindow() {
     autoHideMenuBar: true,
   });
 
-  // ✅ FIX: loadFile use karo - file:// protocol ke liye
-  mainWindow.loadFile(path.join(__dirname, "dist", "index.html"));
+  const indexPath = getIndexPath();
+  mainWindow.loadFile(indexPath);
 
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
     mainWindow.maximize();
   });
 
-  // External links browser mein open honge
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("http")) {
       shell.openExternal(url);

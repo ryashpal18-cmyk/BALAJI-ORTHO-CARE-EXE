@@ -5,17 +5,20 @@ copyright: "Balaji Ortho Care Center"
 directories:
   output: release
 
+asar: false
+
+# ✅ SIRF YE 3 FILES CHAHIYE - node_modules nahi!
+# Vite sab dist/ mein bundle kar deta hai
 files:
   - dist/**
   - electron-main.cjs
   - package.json
-  - node_modules/**
 
 win:
   target:
     - target: portable
       arch: [x64]
-  artifactName: "BalajiOrthoConnect-${version}-portable.exe"
+  artifactName: "BalajiOrthoConnect-portable.exe"
 
 portable:
-  artifactName: "BalajiOrthoConnect-${version}-portable.exe"
+  artifactName: "BalajiOrthoConnect-portable.exe"
