@@ -23,9 +23,12 @@ files:
 
 win:
   target:
-    - target: portable
-      arch: [x64]
-  artifactName: "BalajiOrthoConnect-portable.exe"
+    - target: nsis
+      arch:
+        - x64
+  artifactName: "BalajiOrthoConnect-Setup.exe"
 
-portable:
-  artifactName: "BalajiOrthoConnect-portable.exe"
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
