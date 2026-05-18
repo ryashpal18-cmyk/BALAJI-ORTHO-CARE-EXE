@@ -55,7 +55,7 @@ import * as XLSX from "xlsx";
 import html2pdf from "html2pdf.js";
 import { openWhatsAppWeb } from "@/pages/WhatsApp";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
-import { MedicineEntryPopup } from "@/components/MedicineEntryPopup";
+import { sendSMS } from "@/services/smsService";
 
 const statusStyle: Record<string, string> = {
   Paid: "bg-success/10 text-success",
@@ -404,9 +404,7 @@ export default function Billing() {
   const [open, setOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editingBill, setEditingBill] = useState<any>(null);
-  const [medPopup, setMedPopup] = useState<{ open: boolean; patientName: string; invoiceNo: string }>({
-    open: false, patientName: "", invoiceNo: "",
-  });
+
   const [selectedPatient, setSelectedPatient] = useState("");
   const [patientSearch, setPatientSearch] = useState("");
   const [services, setServices] = useState<ServiceItem[]>([{ name: "", amount: "" }]);
@@ -435,7 +433,7 @@ export default function Billing() {
   const filteredBills = (bills || []).filter((bill) => {
     const date = billDate(bill.created_at);
     return date >= fromDate && date <= toDate;
-  });
+  }).slice().sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   const cashTally = filteredBills.reduce(
     (acc, bill) => {
@@ -531,18 +529,22 @@ export default function Billing() {
 
       const patient = result.patients as any;
       const patientName = patient?.name || "Patient";
+      const mobile = patient?.mobile || "";
+
+      // Bill save hone ke baad patient ko SMS bhejo
+      if (mobile) {
+        const invoiceNo = `INV-${result.id.slice(0, 8).toUpperCase()}`;
+        const date = new Date().toLocaleDateString("en-IN");
+        const due = Math.max(totalAmount - paidNum, 0);
+        const smsMsg = `नमस्ते ${patientName} जी 🙏\n\nBalaji Ortho Care Center\n\n📋 बिल नंबर: ${invoiceNo}\n📅 दिनांक: ${date}\n💰 कुल राशि: ₹${totalAmount}\n✅ जमा: ₹${paidNum}\n❗ बकाया: ₹${due}\n\nधन्यवाद 🙏`;
+        sendSMS(mobile, smsMsg, patientName, "bill_saved");
+      }
 
       setSelectedPatient("");
       setServices([{ name: "", amount: "" }]);
       setAmountPaid("");
       setPaymentMode("");
       setOpen(false);
-
-      setMedPopup({
-        open: true,
-        patientName: patientName,
-        invoiceNo: `INV-${result.id.slice(0, 8).toUpperCase()}`,
-      });
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
@@ -1153,12 +1155,7 @@ export default function Billing() {
           </CardContent>
         </Card>
       </div>
-      <MedicineEntryPopup
-        open={medPopup.open}
-        onClose={() => setMedPopup((p) => ({ ...p, open: false }))}
-        patientName={medPopup.patientName}
-        invoiceNo={medPopup.invoiceNo}
-      />
+
     </DashboardLayout>
   );
 }
