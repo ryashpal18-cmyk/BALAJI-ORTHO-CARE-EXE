@@ -11,44 +11,25 @@ import { usePatients } from "@/hooks/useDatabase";
 import { toast } from "@/hooks/use-toast";
 
 const TEMPLATES: Record<string, string> = {
-  welcome: `🙏 Namaste [NAME],
-
-Balaji Ortho Care Center में आपका स्वागत है!
-
-👨‍⚕️ Dr. S. S. Rathore (DMRT | BPT)
-📍 Opp Govt Hospital, Bay Pass Road, Khinwara, Raj. – 306502
-📞 +91 8005707783
-
-🌐 Online Reports & Appointments:
-https://balaji-health-hub.lovable.app/
-
-धन्यवाद! 🙏`,
-  reminder: `Namaste [NAME],
-
-Balaji Ortho Care Center se nivedan hai ki aapka payment pending hai.
-Kripya clinic par jama karein.
-
-📞 +91 8005707783
-🌐 https://balaji-health-hub.lovable.app/
-
-Dhanyawad! 🙏`,
-  followup: `🙏 Namaste [NAME],
-
-Aapka follow-up visit Balaji Ortho Care Center mein due hai.
-Kripya appointment lein.
-
-📞 +91 8005707783
-🌐 https://balaji-health-hub.lovable.app/
-
-Dhanyawad!`,
+  welcome: `🙏 Namaste [NAME],\n\nBalaji Ortho Care Center में आपका स्वागत है!\n\n👨‍⚕️ Dr. S. S. Rathore (DMRT | BPT)\n📍 Opp Govt Hospital, Bay Pass Road, Khinwara, Raj. – 306502\n📞 +91 8005707783\n\n🌐 Online Reports & Appointments:\nhttps://balaji-health-hub.lovable.app/\n\nधन्यवाद! 🙏`,
+  reminder: `Namaste [NAME],\n\nBalaji Ortho Care Center se nivedan hai ki aapka payment pending hai.\nKripya clinic par jama karein.\n\n📞 +91 8005707783\n🌐 https://balaji-health-hub.lovable.app/\n\nDhanyawad! 🙏`,
+  followup: `🙏 Namaste [NAME],\n\nAapka follow-up visit Balaji Ortho Care Center mein due hai.\nKripya appointment lein.\n\n📞 +91 8005707783\n🌐 https://balaji-health-hub.lovable.app/\n\nDhanyawad!`,
   custom: "",
 };
 
+// ✅ IPC ke through Electron main process ko WhatsApp window open karne bolna
 export function openWhatsAppWeb(mobile: string, message: string) {
   const cleanMobile = mobile?.replace(/\D/g, "") || "";
   const num = cleanMobile.startsWith("91") ? cleanMobile : `91${cleanMobile}`;
   const url = `https://web.whatsapp.com/send?phone=${num}&text=${encodeURIComponent(message)}`;
-  window.open(url, "whatsapp_web_window", "width=1000,height=700,scrollbars=yes,resizable=yes");
+
+  // Electron mein IPC se bhejo — same persistent window reuse hogi
+  if (window.ipcRenderer) {
+    window.ipcRenderer.send("open-whatsapp", { url });
+  } else {
+    // Browser fallback (development mein)
+    window.open(url, "whatsapp_web_window", "width=1000,height=700,scrollbars=yes,resizable=yes");
+  }
 }
 
 export default function WhatsApp() {
@@ -86,7 +67,7 @@ export default function WhatsApp() {
       return;
     }
     openWhatsAppWeb(number, message);
-    toast({ title: "✅ WhatsApp Web Opened", description: "Message भेजने के लिए WhatsApp Web खुल गया" });
+    toast({ title: "✅ WhatsApp Web Opened", description: "Same window mein message ready hai" });
   };
 
   return (
@@ -213,9 +194,9 @@ export default function WhatsApp() {
               <div>
                 <p className="text-sm font-medium text-green-800">WhatsApp Web कैसे use करें?</p>
                 <ul className="text-xs text-green-700 mt-1 space-y-1 list-disc pl-4">
-                  <li>पहले <a href="https://web.whatsapp.com" target="_blank" rel="noopener noreferrer" className="underline font-medium">web.whatsapp.com</a> पर जाकर QR code scan करें</li>
-                  <li>एक बार login करने के बाद, यहाँ से सभी messages directly WhatsApp Web से जाएंगे</li>
-                  <li>New tab नहीं खुलेगा — एक popup window में WhatsApp Web खुलेगा</li>
+                  <li>पहली बार — WhatsApp Web window खुलेगी, QR code scan करें</li>
+                  <li>एक बार login के बाद, हर बार same window में message ready होगा</li>
+                  <li>Window बंद करने पर भी login रहेगा — बार बार scan नहीं करना</li>
                 </ul>
               </div>
             </div>
