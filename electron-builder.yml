@@ -8,27 +8,21 @@ directories:
 asar: false
 
 files:
-  - "**/*"
-  - "!src/**"
-  - "!supabase/**"
-  - "!.github/**"
-  - "!*.md"
-  - "!*.log"
-  - "!eslint.config.js"
-  - "!tailwind.config.ts"
-  - "!postcss.config.cjs"
-  - "!tsconfig.json"
-  - "!vite.config.ts"
-  - "!components.json"
+  - dist/**
+  - electron-main.cjs
+  - package.json
 
 win:
   target:
     - target: nsis
-      arch:
-        - x64
-  artifactName: "BalajiOrthoConnect-Setup.exe"
+      arch: [x64]
+  icon: src/assets/logo.png
 
 nsis:
   oneClick: false
-  perMachine: false
   allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: "Balaji Ortho Care Connect"
+  installerIcon: src/assets/logo.png
+  artifactName: "BalajiOrthoConnect-Setup-${version}.exe"
