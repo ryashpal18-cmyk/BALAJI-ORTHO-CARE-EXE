@@ -447,13 +447,20 @@ export default function Billing() {
     { total: 0, received: 0, pending: 0 },
   );
 
-  const filteredPatients = patients?.filter((p) => {
+  const filteredPatients = (patients || [])
+  .filter((p) => {
     if (!patientSearch) return true;
     const q = patientSearch.toLowerCase();
     return (
-      p.name?.toLowerCase().includes(q) || p.mobile?.includes(patientSearch.replace(/\D/g, ""))
+      p.name?.toLowerCase().includes(q) ||
+      p.mobile?.includes(patientSearch.replace(/\D/g, ""))
     );
-  });
+  })
+  .sort(
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+
 
   const addServiceRow = () => setServices((prev) => [...prev, { name: "", amount: "" }]);
   const removeServiceRow = (idx: number) => setServices((prev) => prev.filter((_, i) => i !== idx));
