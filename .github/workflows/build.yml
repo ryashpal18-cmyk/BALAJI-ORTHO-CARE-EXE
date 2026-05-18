@@ -25,12 +25,12 @@ jobs:
       - name: Build React App
         run: npm run build
 
-      - name: Build EXE
-        run: npx electron-builder --win portable --publish=never
+      - name: Build Setup EXE
+        run: npx electron-builder --win nsis --publish=never
 
-      - name: Upload EXE
+      - name: Upload Setup EXE
         uses: actions/upload-artifact@v4
         with:
-          name: BalajiOrthoConnect-EXE
+          name: BalajiOrthoConnect-Setup
           path: release/*.exe
           retention-days: 30
