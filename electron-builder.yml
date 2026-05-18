@@ -9,14 +9,14 @@ asar: false
 
 files:
   - dist/**
-  - electron-main.cjs
+  - main.js
+  - preload.js
   - package.json
 
 win:
   target:
     - target: nsis
       arch: [x64]
-  icon: src/assets/logo.png
 
 nsis:
   oneClick: false
@@ -24,5 +24,4 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: "Balaji Ortho Care Connect"
-  installerIcon: src/assets/logo.png
   artifactName: "BalajiOrthoConnect-Setup-${version}.exe"
