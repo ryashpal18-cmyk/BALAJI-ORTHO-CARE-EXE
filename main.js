@@ -26,47 +26,6 @@ const XRAYS_DIR     = path.join(BACKUP_DIR, 'xray_images');
 // Seed file bundled inside the app's resources
 const SEED_FILE = path.join(__dirname, 'public', 'patients_seed.json');
 
-// ─── AUTO UPDATE CHECK ────────────────────────────────────────────────────────
-const CURRENT_VERSION = '1.0.0';
-const VERSION_URL = 'https://raw.githubusercontent.com/ryashpal18-cmyk/medi-nexus-plus-f5179adc/main/public/version.json';
-
-function checkForUpdate(win) {
-  https.get(VERSION_URL, (res) => {
-    let data = '';
-    res.on('data', chunk => data += chunk);
-    res.on('end', () => {
-      try {
-        const info = JSON.parse(data);
-        if (isNewerVersion(info.version, CURRENT_VERSION)) {
-          win.webContents.executeJavaScript(`
-            if (!document.getElementById('update-banner')) {
-              const b = document.createElement('div');
-              b.id = 'update-banner';
-              b.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#16a34a;color:white;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;z-index:99999;font-size:15px;font-family:sans-serif;box-shadow:0 -2px 10px rgba(0,0,0,0.2);';
-              b.innerHTML = '<span>🎉 Naya update available! v${info.version} — ${info.changelog}</span><a href="${info.exe_url}" target="_blank" style="background:white;color:#16a34a;padding:8px 20px;border-radius:8px;font-weight:bold;text-decoration:none;margin-left:20px;white-space:nowrap;">Download Now</a>';
-              document.body.appendChild(b);
-            }
-          `);
-        }
-      } catch (e) {
-        console.log('[Update] Parse error:', e.message);
-      }
-    });
-  }).on('error', (e) => {
-    console.log('[Update] Check failed:', e.message);
-  });
-}
-
-function isNewerVersion(remote, current) {
-  const r = remote.split('.').map(Number);
-  const c = current.split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
-    if ((r[i] || 0) > (c[i] || 0)) return true;
-    if ((r[i] || 0) < (c[i] || 0)) return false;
-  }
-  return false;
-}
-
 // ─── ENSURE DIRECTORIES ───────────────────────────────────────────────────────
 function ensureDirs() {
   [BACKUP_DIR, XRAYS_DIR].forEach(d => {
@@ -154,7 +113,6 @@ function createWindow() {
   }
 
   mainWindow.webContents.on('did-finish-load', () => {
-    setTimeout(() => checkForUpdate(mainWindow), 4000);
   });
 
   mainWindow.on('closed', () => { mainWindow = null; });
