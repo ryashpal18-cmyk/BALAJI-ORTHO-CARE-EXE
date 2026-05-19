@@ -1,15 +1,13 @@
-/**
- * preload.js — Secure Context Bridge
- * Exposes safe Electron APIs to the React renderer
- * Uses contextIsolation: true for security
- */
-
 'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-// ── Expose window.electron to React app ──────────────────────────────────────
 contextBridge.exposeInMainWorld('electron', {
+
+  // ── Auth ────────────────────────────────────────────────────
+  login:     (data)   => ipcRenderer.invoke('auth:login',  data),
+  checkAuth: ()       => ipcRenderer.invoke('auth:check'),
+  logout:    ()       => ipcRenderer.invoke('auth:logout'),
 
   // ── Patient Operations ──────────────────────────────────────
   savePatient:     (data)   => ipcRenderer.invoke('db:savePatient', data),
@@ -28,29 +26,38 @@ contextBridge.exposeInMainWorld('electron', {
   // ── X-Ray Operations ────────────────────────────────────────
   saveXray:        (data)   => ipcRenderer.invoke('db:saveXray', data),
   getXrays:        (mobile) => ipcRenderer.invoke('db:getXrays', mobile),
-  copyXrayImage:   (srcPath)=> ipcRenderer.invoke('db:copyXrayImage', srcPath),
+  copyXrayImage:   (path)   => ipcRenderer.invoke('db:copyXrayImage', path),
+
+  // ── Fracture / Ortho ────────────────────────────────────────
+  saveFractureCase:   (data) => ipcRenderer.invoke('db:saveFractureCase', data),
+  getFractureCases:   ()     => ipcRenderer.invoke('db:getFractureCases'),
+  updateFractureCase: (data) => ipcRenderer.invoke('db:updateFractureCase', data),
 
   // ── Settings ────────────────────────────────────────────────
   getSettings:     ()       => ipcRenderer.invoke('db:getSettings'),
   saveSettings:    (data)   => ipcRenderer.invoke('db:saveSettings', data),
 
-  // ── Sync Queue ──────────────────────────────────────────────
+  // ── Sync ────────────────────────────────────────────────────
   getPending:      ()       => ipcRenderer.invoke('db:getPending'),
   clearPending:    (ids)    => ipcRenderer.invoke('db:clearPending', ids),
   markSynced:      (data)   => ipcRenderer.invoke('db:markSynced', data),
+  syncNow:         ()       => ipcRenderer.invoke('db:syncNow'),
 
-  // ── Dashboard Stats ─────────────────────────────────────────
+  // ── Online Check ────────────────────────────────────────────
+  isOnline:        ()       => ipcRenderer.invoke('app:isOnline'),
+
+  // ── Stats ───────────────────────────────────────────────────
   getStats:        ()       => ipcRenderer.invoke('db:getStats'),
 
   // ── Shell ────────────────────────────────────────────────────
   openFolder:      (dir)    => ipcRenderer.invoke('shell:openFolder', dir),
   print:           (html)   => ipcRenderer.invoke('shell:print', html),
 
-  // ── App info ─────────────────────────────────────────────────
+  // ── App Paths ─────────────────────────────────────────────────
   getBackupDir:    ()       => ipcRenderer.invoke('app:getBackupDir'),
   getXraysDir:     ()       => ipcRenderer.invoke('app:getXraysDir'),
 
-  // ── Event Listeners (for X-ray capture, etc.) ────────────────
+  // ── Event Listeners ──────────────────────────────────────────
   on: (channel, callback) => {
     const allowed = ['printer-capture-received', 'sync-complete', 'sync-error'];
     if (allowed.includes(channel)) {
@@ -60,13 +67,12 @@ contextBridge.exposeInMainWorld('electron', {
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
 });
 
-// ── Legacy: keep window.ipcRenderer for backward compatibility ───────────────
+// Legacy ipcRenderer
 contextBridge.exposeInMainWorld('ipcRenderer', {
-  send:    (channel, ...args) => ipcRenderer.send(channel, ...args),
-  on:      (channel, callback) => ipcRenderer.on(channel, callback),
-  invoke:  (channel, ...args) => ipcRenderer.invoke(channel, ...args),
-  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
+  send:   (channel, ...args) => ipcRenderer.send(channel, ...args),
+  on:     (channel, cb)      => ipcRenderer.on(channel, cb),
+  invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+  removeAllListeners: (ch)   => ipcRenderer.removeAllListeners(ch),
 });
 
-// ── Flag: running inside Electron ────────────────────────────────────────────
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
