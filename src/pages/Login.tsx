@@ -8,54 +8,53 @@ import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
-const ADMIN_EMAIL = "yashpal18@balajiclinic.local";
+const ADMIN_EMAIL    = "yashpal18@balajiclinic.local";
 const ADMIN_PASSWORD = "Aarya@2019";
+const LOCAL_USERNAME = "Yashpal18";
+const LOCAL_PASSWORD = "Aarya@2019";
 
 export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
-  const { toast } = useToast();
+  const [username, setUsername]         = useState("");
+  const [password, setPassword]         = useState("");
+  const [loading, setLoading]           = useState(false);
+  const navigate                         = useNavigate();
+  const { toast }                        = useToast();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
-    try {
-      // Map username to email
-      if (username !== "Yashpal18" || password !== "Aarya@2019") {
-        toast({ title: "Login Failed", description: "Invalid username or password", variant: "destructive" });
-        setLoading(false);
-        return;
-      }
+    // ── Step 1: Local credentials check (offline bhi kaam karega) ──
+    if (username !== LOCAL_USERNAME || password !== LOCAL_PASSWORD) {
+      toast({
+        title: "Login Failed",
+        description: "Invalid username or password",
+        variant: "destructive",
+      });
+      setLoading(false);
+      return;
+    }
 
-      // Ensure admin user exists (idempotent)
+    // ── Step 2: Offline login — seedha dashboard pe jao ──
+    localStorage.setItem("isLoggedIn", "true");
+    localStorage.setItem("userName", username);
+
+    // ── Step 3: Online hai toh Supabase bhi login karo (background mein) ──
+    try {
       await supabase.functions.invoke("create-admin-user", {
         body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
       });
-
-      // Sign in with Supabase Auth
-      const { error } = await supabase.auth.signInWithPassword({
-        email: ADMIN_EMAIL,
+      await supabase.auth.signInWithPassword({
+        email:    ADMIN_EMAIL,
         password: ADMIN_PASSWORD,
       });
-
-      if (error) throw error;
-
-      localStorage.setItem("isLoggedIn", "true");
-      localStorage.setItem("userName", username);
-      navigate("/dashboard");
-    } catch (err: any) {
-      toast({
-        title: "Login Failed",
-        description: err.message || "Something went wrong",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
+    } catch (_) {
+      // Internet nahi — koi baat nahi, local login ho gaya
     }
+
+    setLoading(false);
+    navigate("/dashboard");
   };
 
   return (
@@ -67,12 +66,8 @@ export default function Login() {
           </div>
           <div>
             <h1 className="font-heading font-bold text-xl">Balaji Ortho Care</h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              Dr. S. S. Rathore (DMRT | BPT)
-            </p>
-            <p className="text-[10px] text-muted-foreground">
-              Khinwara, Rajasthan – 306502
-            </p>
+            <p className="text-xs text-muted-foreground mt-1">Dr. S. S. Rathore (DMRT | BPT)</p>
+            <p className="text-[10px] text-muted-foreground">Khinwara, Rajasthan – 306502</p>
           </div>
         </CardHeader>
         <CardContent>
