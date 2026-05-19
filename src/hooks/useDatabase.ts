@@ -87,8 +87,11 @@ export function usePatients() {
 export function useUpdateBill() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (bill: { id: string; amount: number; amount_paid: number; status: string }) => {
-      const { data, error } = await supabase.from("billing").update({ amount: bill.amount, amount_paid: bill.amount_paid, status: bill.status }).eq("id", bill.id).select().single();
+    mutationFn: async (bill: { id: string; amount: number; amount_paid: number; status: string; service?: string; payment_mode?: string }) => {
+      const updateData: any = { amount: bill.amount, amount_paid: bill.amount_paid, status: bill.status };
+      if (bill.service !== undefined) updateData.service = bill.service;
+      if (bill.payment_mode !== undefined) updateData.payment_mode = bill.payment_mode;
+      const { data, error } = await supabase.from("billing").update(updateData).eq("id", bill.id).select().single();
       if (error) throw error;
       return data;
     },
