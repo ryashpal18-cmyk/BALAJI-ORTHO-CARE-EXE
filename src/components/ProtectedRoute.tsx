@@ -3,17 +3,46 @@ import { Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const [loading, setLoading] = useState(true);
+  const [loading,       setLoading]       = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setAuthenticated(!!session);
-      setLoading(false);
-    });
+    const checkAuth = async () => {
+      // ── Offline check: localStorage mein login hai? ──
+      const isLoggedIn = localStorage.getItem("isLoggedIn");
+      if (isLoggedIn === "true") {
+        setAuthenticated(true);
+        setLoading(false);
 
+        // Background mein Supabase session bhi refresh karo (optional)
+        supabase.auth.getSession().catch(() => {});
+        return;
+      }
+
+      // ── Online check: Supabase session ──
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          localStorage.setItem("isLoggedIn", "true");
+          setAuthenticated(true);
+        } else {
+          setAuthenticated(false);
+        }
+      } catch (_) {
+        setAuthenticated(false);
+      }
+
+      setLoading(false);
+    };
+
+    checkAuth();
+
+    // Supabase auth change listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthenticated(!!session);
+      if (session) {
+        localStorage.setItem("isLoggedIn", "true");
+        setAuthenticated(true);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -27,9 +56,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!authenticated) {
-    return <Navigate to="/login" replace />;
-  }
+  if (!authenticated) return <Navigate to="/login" replace />;
 
   return <>{children}</>;
 }
