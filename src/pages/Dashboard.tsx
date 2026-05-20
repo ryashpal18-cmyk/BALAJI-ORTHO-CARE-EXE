@@ -145,7 +145,7 @@ export default function Dashboard() {
           </Button>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 dash-animate dash-animate-1">
           <StatCard title="Today's Patients" value={todayBills?.length ?? 0} icon={Users} variant="primary" />
           <StatCard title="Appointments" value={stats?.todayAppointments ?? 0} icon={Calendar} variant="secondary" />
           <StatCard title="Pending Payments" value={`₹${pendingTotal.toLocaleString()}`} icon={Receipt} variant="warning" />
@@ -153,7 +153,7 @@ export default function Dashboard() {
         </div>
 
         {/* Today's Patients */}
-        <Card>
+        <Card className="dash-card dash-animate dash-animate-2">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base font-heading flex items-center gap-2">
@@ -197,7 +197,7 @@ export default function Dashboard() {
 
         {/* Pending Dues */}
         {pendingBills && pendingBills.length > 0 && (
-          <Card className="border-warning/30">
+          <Card className="border-warning/30 dash-card dash-animate dash-animate-3">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base font-heading flex items-center gap-2 text-warning">
