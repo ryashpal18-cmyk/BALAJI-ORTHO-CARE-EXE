@@ -1,55 +1,35 @@
 import {
-  LayoutDashboard,
-  BedDouble,
-  Calendar,
-  Receipt,
-  Activity,
-  FileText,
-  BarChart3,
-  Settings,
-  Stethoscope,
-  LogOut,
-  MessageCircle,
-  MessageSquare,
-  Pill,
-  Bone,
-  ClipboardList,
+  LayoutDashboard, BedDouble, Calendar, Receipt, Activity,
+  FileText, BarChart3, Settings, Stethoscope, LogOut,
+  MessageCircle, MessageSquare, Pill, Bone, ClipboardList,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import logo from "@/assets/logo.png";
 import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarFooter,
-  SidebarHeader,
-  useSidebar,
+  Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
+  SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
+  SidebarFooter, SidebarHeader, useSidebar,
 } from "@/components/ui/sidebar";
 
 const menuItems = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "OPD", url: "/opd", icon: Stethoscope },
-  { title: "IPD / Beds", url: "/ipd", icon: BedDouble },
-  { title: "Appointments", url: "/appointments", icon: Calendar },
-  { title: "Billing", url: "/billing", icon: Receipt },
-  { title: "Cash Tally", url: "/cash-tally", icon: Receipt },
-  { title: "Medicine Master", url: "/medicine-master", icon: Pill },
-  { title: "Patient Medicine", url: "/patient-medicine", icon: ClipboardList },
+  { title: "Dashboard",           url: "/dashboard",           icon: LayoutDashboard },
+  { title: "OPD",                 url: "/opd",                 icon: Stethoscope },
+  { title: "IPD / Beds",          url: "/ipd",                 icon: BedDouble },
+  { title: "Appointments",        url: "/appointments",        icon: Calendar },
+  { title: "Billing",             url: "/billing",             icon: Receipt },
+  { title: "Cash Tally",          url: "/cash-tally",          icon: Receipt },
+  { title: "Medicine Master",     url: "/medicine-master",     icon: Pill },
+  { title: "Patient Medicine",    url: "/patient-medicine",    icon: ClipboardList },
   { title: "Medicine Commission", url: "/medicine-commission", icon: Pill },
-  { title: "Physiotherapy", url: "/physiotherapy", icon: Activity },
-  { title: "Ortho / Fracture", url: "/ortho", icon: Bone },
-  { title: "Reports / X-Ray", url: "/reports", icon: FileText },
-  { title: "Analytics", url: "/analytics", icon: BarChart3 },
-  { title: "WhatsApp", url: "/whatsapp", icon: MessageCircle },
-  { title: "SMS Logs", url: "/sms-logs", icon: MessageSquare },
-  { title: "Settings", url: "/settings", icon: Settings },
+  { title: "Physiotherapy",       url: "/physiotherapy",       icon: Activity },
+  { title: "Ortho / Fracture",    url: "/ortho",               icon: Bone },
+  { title: "Reports / X-Ray",     url: "/reports",             icon: FileText },
+  { title: "Analytics",           url: "/analytics",           icon: BarChart3 },
+  { title: "WhatsApp",            url: "/whatsapp",            icon: MessageCircle },
+  { title: "SMS Logs",            url: "/sms-logs",            icon: MessageSquare },
+  { title: "Settings",            url: "/settings",            icon: Settings },
 ];
 
 export function AppSidebar() {
@@ -67,17 +47,31 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
-      <SidebarHeader className="p-4">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-white flex items-center justify-center flex-shrink-0 overflow-hidden">
-            <img src={logo} alt="Balaji Ortho Care Center" className="h-full w-full object-contain" />
+      {/* ── Header ── */}
+      <SidebarHeader style={{ padding: "0", background: "transparent" }}>
+        <div style={{
+          padding: collapsed ? "16px 10px" : "16px",
+          borderBottom: "1px solid rgba(255,255,255,0.08)",
+          display: "flex", alignItems: "center", gap: "12px",
+        }}>
+          <div style={{
+            height: "40px", width: "40px", borderRadius: "12px",
+            background: "rgba(255,255,255,0.15)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0, overflow: "hidden",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+          }}>
+            <img src={logo} alt="Balaji" style={{ height: "100%", width: "100%", objectFit: "contain" }} />
           </div>
           {!collapsed && (
-            <div className="flex flex-col min-w-0">
-              <span className="font-heading font-bold text-sm text-sidebar-primary-foreground truncate">
+            <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+              <span style={{
+                fontWeight: 800, fontSize: "13px", color: "white",
+                letterSpacing: "0.3px", lineHeight: 1.2,
+              }}>
                 Balaji Ortho Care
               </span>
-              <span className="text-[10px] text-sidebar-foreground/60 truncate">
+              <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.55)", marginTop: "2px" }}>
                 Dr. S. S. Rathore
               </span>
             </div>
@@ -85,41 +79,96 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
 
-      <SidebarContent>
+      {/* ── Menu ── */}
+      <SidebarContent style={{ padding: "8px 0" }}>
         <SidebarGroup>
-          <SidebarGroupLabel className="text-sidebar-foreground/40 uppercase text-[10px] tracking-widest">
-            Menu
-          </SidebarGroupLabel>
+          {!collapsed && (
+            <SidebarGroupLabel style={{
+              fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase",
+              color: "rgba(255,255,255,0.35)", padding: "8px 16px 4px",
+            }}>
+              Navigation
+            </SidebarGroupLabel>
+          )}
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink
-                      to={item.url}
-                      end={item.url === "/"}
-                      className="text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                      activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
-                    >
-                      <item.icon className="h-4 w-4 mr-2 flex-shrink-0" />
-                      {!collapsed && <span>{item.title}</span>}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {menuItems.map((item) => {
+                const isActive = location.pathname === item.url;
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild>
+                      <NavLink
+                        to={item.url}
+                        end={item.url === "/"}
+                        style={{
+                          display: "flex", alignItems: "center",
+                          gap: "10px",
+                          padding: collapsed ? "10px 14px" : "9px 14px",
+                          margin: "1px 8px",
+                          borderRadius: "10px",
+                          fontSize: "13px",
+                          fontWeight: isActive ? 600 : 400,
+                          color: isActive ? "white" : "rgba(255,255,255,0.65)",
+                          background: isActive
+                            ? "linear-gradient(135deg, rgba(30,87,176,0.9), rgba(30,180,100,0.5))"
+                            : "transparent",
+                          boxShadow: isActive ? "0 2px 8px rgba(0,0,0,0.2)" : "none",
+                          transition: "all 0.15s ease",
+                          textDecoration: "none",
+                        }}
+                        activeClassName=""
+                        className="sidebar-link"
+                      >
+                        <item.icon style={{
+                          width: "16px", height: "16px", flexShrink: 0,
+                          color: isActive ? "white" : "rgba(255,255,255,0.55)",
+                        }} />
+                        {!collapsed && <span style={{ truncate: "true" }}>{item.title}</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="p-3">
+      {/* ── Footer ── */}
+      <SidebarFooter style={{
+        padding: "8px",
+        borderTop: "1px solid rgba(255,255,255,0.08)",
+      }}>
+        {/* Clinic info strip */}
+        {!collapsed && (
+          <div style={{
+            padding: "8px 10px",
+            borderRadius: "10px",
+            background: "rgba(255,255,255,0.06)",
+            marginBottom: "6px",
+          }}>
+            <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.5)", lineHeight: 1.5 }}>
+              🏥 Balaji Ortho Care Center<br/>
+              <span style={{ color: "rgba(255,255,255,0.35)" }}>Khinwara, Rajasthan – 306502</span>
+            </p>
+          </div>
+        )}
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              className="text-sidebar-foreground/50 hover:text-destructive"
               onClick={handleLogout}
+              style={{
+                display: "flex", alignItems: "center", gap: "10px",
+                padding: "9px 10px", borderRadius: "10px",
+                color: "rgba(255,100,100,0.85)",
+                cursor: "pointer", width: "100%",
+                transition: "all 0.15s ease",
+                background: "transparent",
+                border: "none",
+                fontSize: "13px",
+              }}
             >
-              <LogOut className="h-4 w-4 mr-2" />
+              <LogOut style={{ width: "16px", height: "16px" }} />
               {!collapsed && <span>Logout</span>}
             </SidebarMenuButton>
           </SidebarMenuItem>

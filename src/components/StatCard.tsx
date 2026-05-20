@@ -1,5 +1,4 @@
 import { LucideIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 interface StatCardProps {
   title: string;
@@ -9,35 +8,70 @@ interface StatCardProps {
   variant?: "default" | "primary" | "secondary" | "success" | "warning" | "destructive";
 }
 
-const variantStyles = {
-  default: "bg-card",
-  primary: "bg-primary/10",
-  secondary: "bg-secondary/10",
-  success: "bg-success/10",
-  warning: "bg-warning/10",
-  destructive: "bg-destructive/10",
+const gradients: Record<string, string> = {
+  primary:     "linear-gradient(135deg, #1a3a6b 0%, #1e57b0 100%)",
+  secondary:   "linear-gradient(135deg, #1877c4 0%, #38b6ff 100%)",
+  success:     "linear-gradient(135deg, #1a6b3a 0%, #1eb85c 100%)",
+  warning:     "linear-gradient(135deg, #b87c1a 0%, #f5a623 100%)",
+  destructive: "linear-gradient(135deg, #7b1a1a 0%, #e03e3e 100%)",
+  default:     "linear-gradient(135deg, #3a4a6b 0%, #5a7ab0 100%)",
 };
 
-const iconStyles = {
-  default: "text-muted-foreground",
-  primary: "text-primary",
-  secondary: "text-secondary",
-  success: "text-success",
-  warning: "text-warning",
-  destructive: "text-destructive",
+const iconBg: Record<string, string> = {
+  primary:     "rgba(255,255,255,0.22)",
+  secondary:   "rgba(255,255,255,0.22)",
+  success:     "rgba(255,255,255,0.22)",
+  warning:     "rgba(255,255,255,0.22)",
+  destructive: "rgba(255,255,255,0.22)",
+  default:     "rgba(255,255,255,0.22)",
 };
 
 export function StatCard({ title, value, icon: Icon, trend, variant = "default" }: StatCardProps) {
   return (
-    <div className="stat-card">
-      <div className="flex items-start justify-between">
+    <div
+      className="stat-card"
+      style={{
+        background: gradients[variant],
+        color: "white",
+        border: "none",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      {/* Decorative circle */}
+      <div style={{
+        position: "absolute", top: "-18px", right: "-18px",
+        width: "80px", height: "80px", borderRadius: "50%",
+        background: "rgba(255,255,255,0.08)",
+      }} />
+      <div style={{
+        position: "absolute", bottom: "-24px", right: "28px",
+        width: "60px", height: "60px", borderRadius: "50%",
+        background: "rgba(255,255,255,0.06)",
+      }} />
+
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", position: "relative", zIndex: 1 }}>
         <div>
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <p className="text-2xl font-bold font-heading mt-1">{value}</p>
-          {trend && <p className="text-xs text-success mt-1">{trend}</p>}
+          <p style={{ fontSize: "12px", fontWeight: 500, opacity: 0.85, marginBottom: "6px", letterSpacing: "0.3px" }}>
+            {title}
+          </p>
+          <p style={{ fontSize: "26px", fontWeight: 800, lineHeight: 1, fontFamily: "'Segoe UI', sans-serif" }}>
+            {value}
+          </p>
+          {trend && (
+            <p style={{ fontSize: "11px", marginTop: "6px", opacity: 0.85, fontWeight: 500 }}>
+              {trend}
+            </p>
+          )}
         </div>
-        <div className={cn("h-10 w-10 rounded-lg flex items-center justify-center", variantStyles[variant])}>
-          <Icon className={cn("h-5 w-5", iconStyles[variant])} />
+        <div style={{
+          height: "42px", width: "42px", borderRadius: "12px",
+          background: iconBg[variant],
+          display: "flex", alignItems: "center", justifyContent: "center",
+          backdropFilter: "blur(4px)",
+          flexShrink: 0,
+        }}>
+          <Icon style={{ width: "22px", height: "22px", color: "white" }} />
         </div>
       </div>
     </div>
