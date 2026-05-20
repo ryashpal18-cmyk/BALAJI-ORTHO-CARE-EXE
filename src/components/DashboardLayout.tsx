@@ -9,16 +9,22 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { useFollowupsAround } from "@/hooks/useOrtho";
+import bg1 from "@/assets/dash-bg1.png";
+import bg2 from "@/assets/dash-bg2.png";
+import bg3 from "@/assets/dash-bg3.png";
 
 interface DashboardLayoutProps { children: React.ReactNode; }
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
+const BG_IMAGES = [bg1, bg2, bg3];
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [query, setQuery]       = useState("");
   const [results, setResults]   = useState<any[]>([]);
   const [showDrop, setShowDrop] = useState(false);
   const [loading, setLoading]   = useState(false);
+  const [bgIdx, setBgIdx]       = useState(0);
+  const [fading, setFading]     = useState(false);
   const navigate = useNavigate();
   const wrapRef  = useRef<HTMLDivElement>(null);
 
@@ -29,6 +35,18 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     (c: any) => c.next_followup_date && c.next_followup_date < t && c.plaster_status === "Active",
   );
   const notifCount = todayFu.length + missedFu.length;
+
+  // ── Background auto-slide every 6 seconds ──
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setFading(true);
+      setTimeout(() => {
+        setBgIdx(prev => (prev + 1) % BG_IMAGES.length);
+        setFading(false);
+      }, 700);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -61,10 +79,40 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
   return (
     <SidebarProvider>
-      <div style={{ minHeight: "100vh", display: "flex", width: "100%" }}>
-        <AppSidebar />
+      <div style={{ minHeight: "100vh", display: "flex", width: "100%", position: "relative" }}>
 
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        {/* ── Animated Background ── */}
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 0,
+            backgroundImage: `url(${BG_IMAGES[bgIdx]})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            backgroundRepeat: "no-repeat",
+            opacity: fading ? 0 : 1,
+            transition: "opacity 0.7s ease-in-out",
+          }}
+        />
+        {/* Overlay — keeps text readable */}
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1,
+            background: "rgba(235, 243, 255, 0.72)",
+            backdropFilter: "blur(1px)",
+          }}
+        />
+
+        {/* Sidebar */}
+        <div style={{ position: "relative", zIndex: 10 }}>
+          <AppSidebar />
+        </div>
+
+        {/* Right column */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, position: "relative", zIndex: 5 }}>
 
           {/* ── TOP HEADER ── */}
           <header
@@ -73,13 +121,14 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               height: "56px",
               display: "flex", alignItems: "center", justifyContent: "space-between",
               padding: "0 20px", gap: "16px",
-              background: "linear-gradient(135deg, #ffffff 0%, #f0f5ff 100%)",
-              borderBottom: "1px solid #e4ecfa",
-              boxShadow: "0 2px 12px rgba(30,87,176,0.08)",
+              background: "rgba(255,255,255,0.88)",
+              backdropFilter: "blur(12px)",
+              borderBottom: "1px solid rgba(228,236,250,0.8)",
+              boxShadow: "0 2px 16px rgba(30,87,176,0.10)",
               position: "sticky", top: 0, zIndex: 30,
             }}
           >
-            {/* Left: trigger + search */}
+            {/* Left */}
             <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: 1 }}>
               <SidebarTrigger style={{ color: "#1e57b0" }} />
 
@@ -95,7 +144,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     paddingLeft: "34px", paddingRight: query ? "32px" : "12px",
                     height: "36px", borderRadius: "10px",
                     border: "1.5px solid #d5dde8",
-                    background: "#f4f7fd",
+                    background: "rgba(244,247,253,0.9)",
                     fontSize: "13px",
                   }}
                   value={query}
@@ -157,15 +206,33 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               </div>
             </div>
 
-            {/* Right: bell + avatar */}
+            {/* Right */}
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              {/* Slide dots */}
+              <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
+                {BG_IMAGES.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { setFading(true); setTimeout(() => { setBgIdx(i); setFading(false); }, 300); }}
+                    style={{
+                      width: i === bgIdx ? "18px" : "7px",
+                      height: "7px",
+                      borderRadius: "4px",
+                      background: i === bgIdx ? "#1e57b0" : "#c0cce8",
+                      border: "none", cursor: "pointer", padding: 0,
+                      transition: "all 0.35s ease",
+                    }}
+                  />
+                ))}
+              </div>
+
               {/* Bell */}
               <Popover>
                 <PopoverTrigger asChild>
                   <button style={{
                     position: "relative", width: "36px", height: "36px",
                     borderRadius: "10px", border: "1.5px solid #e4ecfa",
-                    background: "#f4f7fd", display: "flex", alignItems: "center", justifyContent: "center",
+                    background: "rgba(244,247,253,0.9)", display: "flex", alignItems: "center", justifyContent: "center",
                     cursor: "pointer",
                   }}>
                     <Bell style={{ width: "16px", height: "16px", color: "#1e57b0" }} />
