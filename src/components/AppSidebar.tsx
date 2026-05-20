@@ -12,8 +12,9 @@ import {
   SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
   SidebarFooter, SidebarHeader, useSidebar,
 } from "@/components/ui/sidebar";
+import { getCurrentRole, getCurrentPerms } from "@/lib/appConfig";
 
-const menuItems = [
+const ALL_MENU_ITEMS = [
   { title: "Dashboard",           url: "/dashboard",           icon: LayoutDashboard },
   { title: "OPD",                 url: "/opd",                 icon: Stethoscope },
   { title: "IPD / Beds",          url: "/ipd",                 icon: BedDouble },
@@ -25,7 +26,7 @@ const menuItems = [
   { title: "Medicine Commission", url: "/medicine-commission", icon: Pill },
   { title: "Physiotherapy",       url: "/physiotherapy",       icon: Activity },
   { title: "Ortho / Fracture",    url: "/ortho",               icon: Bone },
-  { title: "Reports / X-Ray",     url: "/reports",             icon: FileText },
+  { title: "Reports / X-Ray",    url: "/reports",             icon: FileText },
   { title: "Analytics",           url: "/analytics",           icon: BarChart3 },
   { title: "WhatsApp",            url: "/whatsapp",            icon: MessageCircle },
   { title: "SMS Logs",            url: "/sms-logs",            icon: MessageSquare },
@@ -34,16 +35,31 @@ const menuItems = [
 
 export function AppSidebar() {
   const { state } = useSidebar();
-  const collapsed = state === "collapsed";
-  const location = useLocation();
-  const navigate = useNavigate();
+  const collapsed  = state === "collapsed";
+  const location   = useLocation();
+  const navigate   = useNavigate();
+  const role       = getCurrentRole();
+  const perms      = getCurrentPerms();
+  const isAdmin    = role === "admin";
+
+  // Filter menu based on role
+  const menuItems = ALL_MENU_ITEMS.filter(item => {
+    if (isAdmin) return true;           // Admin sees everything
+    if (item.url === "/settings") return false; // Staff can't access settings
+    return perms.includes(item.url);    // Staff sees only allowed pages
+  });
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     localStorage.removeItem("isLoggedIn");
     localStorage.removeItem("userName");
+    localStorage.removeItem("bocc_user_role");
+    localStorage.removeItem("bocc_user_perms");
     navigate("/login");
   };
+
+  const userName = localStorage.getItem("userName") || "DR";
+  const initials = isAdmin ? "DR" : userName.substring(0, 2).toUpperCase();
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
@@ -72,7 +88,7 @@ export function AppSidebar() {
                 Balaji Ortho Care
               </span>
               <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.55)", marginTop: "2px" }}>
-                Dr. S. S. Rathore
+                {isAdmin ? "Dr. S. S. Rathore" : userName}
               </span>
             </div>
           )}
@@ -123,7 +139,7 @@ export function AppSidebar() {
                           width: "16px", height: "16px", flexShrink: 0,
                           color: isActive ? "white" : "rgba(255,255,255,0.55)",
                         }} />
-                        {!collapsed && <span style={{ truncate: "true" }}>{item.title}</span>}
+                        {!collapsed && <span>{item.title}</span>}
                       </NavLink>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -135,21 +151,17 @@ export function AppSidebar() {
       </SidebarContent>
 
       {/* ── Footer ── */}
-      <SidebarFooter style={{
-        padding: "8px",
-        borderTop: "1px solid rgba(255,255,255,0.08)",
-      }}>
-        {/* Clinic info strip */}
+      <SidebarFooter style={{ padding: "8px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
         {!collapsed && (
           <div style={{
-            padding: "8px 10px",
-            borderRadius: "10px",
-            background: "rgba(255,255,255,0.06)",
-            marginBottom: "6px",
+            padding: "8px 10px", borderRadius: "10px",
+            background: "rgba(255,255,255,0.06)", marginBottom: "6px",
           }}>
             <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.5)", lineHeight: 1.5 }}>
-              🏥 Balaji Ortho Care Center<br/>
-              <span style={{ color: "rgba(255,255,255,0.35)" }}>Khinwara, Rajasthan – 306502</span>
+              🏥 Balaji Ortho Care Center<br />
+              <span style={{ color: "rgba(255,255,255,0.35)" }}>
+                {isAdmin ? "Admin" : `Staff · ${menuItems.length} pages`}
+              </span>
             </p>
           </div>
         )}
@@ -163,8 +175,7 @@ export function AppSidebar() {
                 color: "rgba(255,100,100,0.85)",
                 cursor: "pointer", width: "100%",
                 transition: "all 0.15s ease",
-                background: "transparent",
-                border: "none",
+                background: "transparent", border: "none",
                 fontSize: "13px",
               }}
             >
