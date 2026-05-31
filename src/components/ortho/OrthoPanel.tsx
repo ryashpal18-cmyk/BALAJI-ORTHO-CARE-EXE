@@ -1,11 +1,21 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Bone, CalendarClock, AlertTriangle, Plus, MessageCircle, Search } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import {
+  Bone, CalendarClock, AlertTriangle, Plus,
+  MessageCircle, Search, Send, MessageSquare,
+  CheckSquare, Square, Loader2,
+} from "lucide-react";
 import { useFollowupsAround, useFractureCases } from "@/hooks/useOrtho";
 import { useNavigate } from "react-router-dom";
-import { useMemo, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useMemo, useState, useCallback } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { sendSMS } from "@/services/smsService";
+import { useToast } from "@/hooks/use-toast";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const tomorrowStr = () => {
@@ -14,12 +24,274 @@ const tomorrowStr = () => {
   return d.toISOString().slice(0, 10);
 };
 
+// ──────────────────────────────────────────────
+// Custom SMS Dialog
+// ──────────────────────────────────────────────
+type SmsPatient = {
+  id: string;
+  name: string;
+  mobile: string;
+  body_part: string | null;
+  side: string | null;
+  next_followup_date: string | null;
+};
+
+const DEFAULT_TEMPLATE =
+  `नमस्ते {{naam}},\n\nBalaji Ortho Care Center से सूचना:\n\n{{message}}\n\nधन्यवाद 🙏`;
+
+function fmtDateHindi(d?: string | null) {
+  if (!d) return "-";
+  try { return new Date(d).toLocaleDateString("hi-IN"); } catch { return d; }
+}
+
+function resolveTemplate(template: string, patient: SmsPatient, customBody: string) {
+  return template
+    .replace(/{{naam}}/g, patient.name)
+    .replace(/{{mobile}}/g, patient.mobile)
+    .replace(/{{body_part}}/g, `${patient.side || ""} ${patient.body_part || ""}`.trim() || "-")
+    .replace(/{{followup}}/g, fmtDateHindi(patient.next_followup_date))
+    .replace(/{{message}}/g, customBody);
+}
+
+interface CustomSmsDialogProps {
+  open: boolean;
+  onClose: () => void;
+  patients: SmsPatient[];
+}
+
+function CustomSmsDialog({ open, onClose, patients }: CustomSmsDialogProps) {
+  const { toast } = useToast();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [customBody, setCustomBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const [results, setResults] = useState<{ name: string; ok: boolean }[]>([]);
+  const [step, setStep] = useState<"compose" | "done">("compose");
+
+  // Reset on open
+  const handleOpenChange = useCallback(
+    (val: boolean) => {
+      if (!val) {
+        setSelected(new Set());
+        setCustomBody("");
+        setResults([]);
+        setStep("compose");
+        onClose();
+      }
+    },
+    [onClose],
+  );
+
+  const allSelected = selected.size === patients.length && patients.length > 0;
+
+  const toggleAll = () => {
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(patients.map((p) => p.id)));
+  };
+
+  const toggleOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  // Live preview for first selected patient
+  const previewPatient = patients.find((p) => selected.has(p.id));
+  const preview = previewPatient
+    ? resolveTemplate(DEFAULT_TEMPLATE, previewPatient, customBody)
+    : null;
+
+  const handleSend = async () => {
+    if (!customBody.trim()) {
+      toast({ title: "Message likh please", description: "SMS message khali hai.", variant: "destructive" });
+      return;
+    }
+    if (selected.size === 0) {
+      toast({ title: "Patient select karo", description: "Koi patient selected nahi.", variant: "destructive" });
+      return;
+    }
+    setSending(true);
+    const targetPatients = patients.filter((p) => selected.has(p.id));
+    const res: { name: string; ok: boolean }[] = [];
+    for (const p of targetPatients) {
+      const msg = resolveTemplate(DEFAULT_TEMPLATE, p, customBody);
+      const ok = await sendSMS(p.mobile, msg, p.name, "ortho_custom");
+      res.push({ name: p.name, ok });
+    }
+    setSending(false);
+    setResults(res);
+    setStep("done");
+    const sentCount = res.filter((r) => r.ok).length;
+    toast({
+      title: `SMS भेजे: ${sentCount}/${res.length}`,
+      description: sentCount === res.length ? "सभी successfully भेजे गए 🎉" : "कुछ SMS fail हुए।",
+      variant: sentCount === res.length ? "default" : "destructive",
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <MessageSquare className="h-5 w-5 text-primary" />
+            Custom SMS — Ortho Patients
+          </DialogTitle>
+        </DialogHeader>
+
+        {step === "compose" ? (
+          <>
+            {/* Patient list */}
+            <div className="space-y-2 flex-1 overflow-hidden flex flex-col">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-muted-foreground">
+                  Patients ({patients.length})
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1 text-xs"
+                  onClick={toggleAll}
+                >
+                  {allSelected ? (
+                    <CheckSquare className="h-4 w-4 text-primary" />
+                  ) : (
+                    <Square className="h-4 w-4" />
+                  )}
+                  {allSelected ? "Deselect All" : "Select All"}
+                </Button>
+              </div>
+
+              <ScrollArea className="h-44 border rounded-md p-2">
+                {patients.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    कोई active plaster patient नहीं।
+                  </p>
+                )}
+                <div className="space-y-1">
+                  {patients.map((p) => (
+                    <div
+                      key={p.id}
+                      className={`flex items-center gap-3 px-2 py-1.5 rounded-md cursor-pointer transition-colors ${
+                        selected.has(p.id) ? "bg-primary/10" : "hover:bg-muted"
+                      }`}
+                      onClick={() => toggleOne(p.id)}
+                    >
+                      <Checkbox
+                        id={`sms-pt-${p.id}`}
+                        checked={selected.has(p.id)}
+                        onCheckedChange={() => toggleOne(p.id)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{p.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {p.mobile} &middot; {`${p.side || ""} ${p.body_part || ""}`.trim() || "-"}
+                        </p>
+                      </div>
+                      {p.next_followup_date && (
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          FU: {fmtDateHindi(p.next_followup_date)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+
+              {/* Message */}
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">
+                  Custom Message{" "}
+                  <span className="text-xs text-muted-foreground font-normal">
+                    (Variables: {"{{"} naam {"}}"}, {"{{"} followup {"}}"}, {"{{"} body_part {"}}"} )
+                  </span>
+                </Label>
+                <Textarea
+                  placeholder="यहाँ अपना message लिखें..."
+                  className="min-h-[80px] text-sm"
+                  value={customBody}
+                  onChange={(e) => setCustomBody(e.target.value)}
+                />
+              </div>
+
+              {/* Preview */}
+              {preview && customBody.trim() && (
+                <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+                  <p className="text-xs font-semibold text-primary mb-1 uppercase tracking-wide">
+                    Preview ({previewPatient?.name})
+                  </p>
+                  <pre className="text-xs whitespace-pre-wrap font-sans text-foreground">
+                    {preview}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button variant="outline" onClick={() => handleOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSend}
+                disabled={sending || selected.size === 0 || !customBody.trim()}
+                className="gap-2"
+              >
+                {sending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    Send to {selected.size} Patient{selected.size !== 1 ? "s" : ""}
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </>
+        ) : (
+          // Done screen
+          <>
+            <ScrollArea className="flex-1 max-h-64">
+              <div className="space-y-1 p-1">
+                {results.map((r, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-center justify-between px-3 py-2 rounded-md text-sm ${
+                      r.ok ? "bg-green-50 dark:bg-green-950/20" : "bg-red-50 dark:bg-red-950/20"
+                    }`}
+                  >
+                    <span>{r.name}</span>
+                    <Badge variant={r.ok ? "default" : "destructive"}>
+                      {r.ok ? "✓ Sent" : "✗ Failed"}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+            <DialogFooter>
+              <Button onClick={() => handleOpenChange(false)}>Close</Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ──────────────────────────────────────────────
+// Main OrthoPanel
+// ──────────────────────────────────────────────
 export function OrthoPanel() {
   const navigate = useNavigate();
   const { data: cases } = useFractureCases();
   const { data: followups } = useFollowupsAround();
   const [calOpen, setCalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [smsOpen, setSmsOpen] = useState(false);
 
   const { activePlaster, todayFu, missedFu, tomorrowFu } = useMemo(() => {
     const t = todayStr();
@@ -56,6 +328,25 @@ export function OrthoPanel() {
   const dayItems = selectedDate
     ? calendarDays.find((d) => d.date === selectedDate)?.items || []
     : [];
+
+  // Build SMS patient list — Active plaster patients with mobile number
+  const smsPatients: SmsPatient[] = useMemo(() => {
+    return (cases || [])
+      .filter(
+        (c: any) =>
+          c.plaster_status === "Active" &&
+          c.patients?.mobile &&
+          c.patients?.name,
+      )
+      .map((c: any) => ({
+        id: c.id,
+        name: c.patients.name,
+        mobile: c.patients.mobile,
+        body_part: c.body_part,
+        side: c.side,
+        next_followup_date: c.next_followup_date,
+      }));
+  }, [cases]);
 
   return (
     <div className="space-y-4 mt-6">
@@ -153,7 +444,7 @@ export function OrthoPanel() {
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-heading">⚡ Quick Actions</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <CardContent className="grid grid-cols-1 sm:grid-cols-4 gap-2">
           <Button variant="outline" onClick={() => navigate("/ortho")} className="gap-2 justify-start">
             <Plus className="h-4 w-4" /> New Fracture Entry
           </Button>
@@ -163,9 +454,24 @@ export function OrthoPanel() {
           <Button variant="outline" onClick={() => navigate("/opd")} className="gap-2 justify-start">
             <Search className="h-4 w-4" /> Search Patient
           </Button>
+          {/* ✅ NEW: Custom SMS button */}
+          <Button
+            variant="outline"
+            onClick={() => setSmsOpen(true)}
+            className="gap-2 justify-start border-primary/40 text-primary hover:bg-primary/10"
+          >
+            <MessageSquare className="h-4 w-4" />
+            Custom SMS
+            {smsPatients.length > 0 && (
+              <Badge variant="secondary" className="ml-auto text-[10px] h-4 px-1">
+                {smsPatients.length}
+              </Badge>
+            )}
+          </Button>
         </CardContent>
       </Card>
 
+      {/* Calendar dialog */}
       <Dialog open={calOpen} onOpenChange={setCalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -191,6 +497,13 @@ export function OrthoPanel() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ✅ Custom SMS Dialog */}
+      <CustomSmsDialog
+        open={smsOpen}
+        onClose={() => setSmsOpen(false)}
+        patients={smsPatients}
+      />
     </div>
   );
 }
