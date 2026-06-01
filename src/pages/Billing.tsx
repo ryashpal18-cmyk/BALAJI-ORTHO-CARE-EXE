@@ -100,9 +100,11 @@ function getWhatsAppBillMessage(
   paid: number,
   billNo: string,
   date: string,
+  pdfUrl?: string | null,
 ) {
   const due = Math.max(amount - paid, 0);
   const appUrl = `${window.location.origin}/reports`;
+  const pdfLine = pdfUrl ? `\n📄 बिल PDF Download करें:\n${pdfUrl}\n` : "";
   return `नमस्ते ${patient} जी 🙏
 
 Balaji Ortho Care Center में आपका 
@@ -113,8 +115,10 @@ Balaji Ortho Care Center में आपका
 📅 दिनांक: ${date}
 💰 कुल राशि: ₹${amount}
 ✅ जमा: ₹${paid}
-❗ बकाया: ₹${due}
-
+❗ बकाया: ₹${due}${pdfLine}
+━━━━━━━━━━━━━━
+🌐 हमारी वेबसाइट:
+https://balaji-health-hub.lovable.app
 ━━━━━━━━━━━━━━
 🩻 X-Ray रिपोर्ट समझ नहीं आई?
 
@@ -547,7 +551,12 @@ const filteredPatients = patients
         const invoiceNo = `INV-${result.id.slice(0, 8).toUpperCase()}`;
         const date = new Date().toLocaleDateString("en-IN");
         const due = Math.max(totalAmount - paidNum, 0);
-        const smsMsg = `नमस्ते ${patientName} जी 🙏\n\nBalaji Ortho Care Center\n\n📋 बिल नंबर: ${invoiceNo}\n📅 दिनांक: ${date}\n💰 कुल राशि: ₹${totalAmount}\n✅ जमा: ₹${paidNum}\n❗ बकाया: ₹${due}\n\nधन्यवाद 🙏`;
+        // PDF URL agar already generate hua ho to include karo
+        const pdfUrl = (result as any).invoice_pdf_url || null;
+        const pdfLine = pdfUrl
+          ? `\n📄 बिल PDF: ${pdfUrl}`
+          : "";
+        const smsMsg = `नमस्ते ${patientName} जी 🙏\n\nBalaji Ortho Care Center\n\n📋 बिल नंबर: ${invoiceNo}\n📅 दिनांक: ${date}\n💰 कुल राशि: ₹${totalAmount}\n✅ जमा: ₹${paidNum}\n❗ बकाया: ₹${due}${pdfLine}\n\n🌐 हमारी वेबसाइट: https://balaji-health-hub.lovable.app\n\nधन्यवाद 🙏`;
         sendSMS(mobile, smsMsg, patientName, "bill_saved");
       }
 
@@ -586,6 +595,7 @@ const filteredPatients = patients
       Number((bill as any).amount_paid || 0),
       `INV-${bill.id.slice(0, 8).toUpperCase()}`,
       new Date(bill.created_at).toLocaleDateString("en-IN"),
+      (bill as any).invoice_pdf_url || null,
     );
     openWhatsAppWeb(mobile, msg);
   };
@@ -649,6 +659,7 @@ const filteredPatients = patients
           paidNum,
           `INV-${editingBill.id.slice(0, 8).toUpperCase()}`,
           new Date(editingBill.created_at).toLocaleDateString("en-IN"),
+          (updatedBill as any).invoice_pdf_url || null,
         );
         openWhatsAppWeb(mobile, msg);
       }

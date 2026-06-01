@@ -14,9 +14,9 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Save, MessageCircle, CalendarDays, Plane, Send, Bone, Trash2, BellRing, Shield } from "lucide-react";
+import { Save, MessageCircle, CalendarDays, Plane, Send, Bone, Trash2, BellRing, Shield, PowerOff, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
-import { useAddFractureCase, useFractureCases, useFollowupsAround } from "@/hooks/useOrtho";
+import { useAddFractureCase, useFractureCases, useFollowupsAround, useUpdateFractureCase } from "@/hooks/useOrtho";
 import { useAddPatient, useSearchPatients } from "@/hooks/useDatabase";
 import { sendSMS } from "@/services/smsService";
 
@@ -54,6 +54,9 @@ const tplFollowupReminder = (name: string, date: string) =>
 const tplPrecaution = (name: string, bodyPart: string, nextDate: string) =>
   `नमस्ते ${name} जी 🙏\n\nआपके प्लास्टर की जानकारी:\nशरीर का हिस्सा: ${bodyPart || "—"}\nअगली विजिट: ${nextDate ? fmtShort(nextDate) : "—"}\n\nसावधानियां:\n✅ प्लास्टर गीला न होने दें\n✅ भारी वजन न उठाएं\n✅ सूजन पर तुरंत आएं\n✅ Follow-up जरूर करवाएं\n\nDr. Rathore\nBalaji Ortho Care Center 🏥`;
 
+const tplDeactivate = (name: string, bodyPart: string) =>
+  `नमस्ते ${name} जी 🙏\n\nबधाई हो! 🎉\n\nआपका प्लास्टर (${bodyPart || "—"}) हटा दिया गया है।\n\nसावधानियां अभी भी रखें:\n✅ धीरे-धीरे चलें\n✅ भारी काम से बचें\n✅ जरूरत पड़े तो तुरंत संपर्क करें\n\nस्वस्थ रहें, खुश रहें 💪\nDr. Rathore\nBalaji Ortho Care Center 🏥`;
+
 export default function Ortho() {
   const todayIso = new Date().toISOString().slice(0, 10);
 
@@ -75,6 +78,31 @@ export default function Ortho() {
   const nextFollowup = useMemo(() => addDaysISO(plasterDate, Number(followupDays) || 7), [plasterDate, followupDays]);
 
   const addCase = useAddFractureCase();
+  const updateCase = useUpdateFractureCase();
+  const [deactivateTarget, setDeactivateTarget] = useState<any>(null);
+  const [deactivateBusy, setDeactivateBusy] = useState(false);
+
+  const handleDeactivate = async () => {
+    if (!deactivateTarget) return;
+    setDeactivateBusy(true);
+    try {
+      await updateCase.mutateAsync({ id: deactivateTarget.id, plaster_status: "Removed" } as any);
+      const n = deactivateTarget.patients?.name || "Patient";
+      const mob = deactivateTarget.patients?.mobile || "";
+      if (mob) {
+        const ok = await sendSMS(mob, tplDeactivate(n, deactivateTarget.body_part || ""), n, "plaster_removed");
+        toast[ok ? "success" : "error"](ok ? `✅ SMS भेजा - ${n}` : "Plaster removed, SMS failed");
+      } else {
+        toast.success("Plaster status Removed हो गया");
+      }
+      setDeactivateTarget(null);
+      refetchCases(); refetchFollowups();
+    } catch (e: any) {
+      toast.error(e.message || "Update failed");
+    } finally {
+      setDeactivateBusy(false);
+    }
+  };
   const { data: cases, refetch: refetchCases } = useFractureCases();
   const { data: followups, refetch: refetchFollowups } = useFollowupsAround();
 
@@ -527,7 +555,7 @@ export default function Ortho() {
                         <TableHead>Plaster</TableHead>
                         <TableHead>Next FU</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead></TableHead>
+                        <TableHead>Action</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -541,10 +569,25 @@ export default function Ortho() {
                           <TableCell>{c.plaster_type} · {c.plaster_date ? fmt(c.plaster_date) : ""}</TableCell>
                           <TableCell>{c.next_followup_date ? fmt(c.next_followup_date) : "—"}</TableCell>
                           <TableCell><Badge variant={c.plaster_status === "Active" ? "default" : "secondary"}>{c.plaster_status}</Badge></TableCell>
-                          <TableCell onClick={(e) => e.stopPropagation()}>
+                          <TableCell onClick={(e) => e.stopPropagation()} className="space-x-1">
                             <Button size="sm" variant="outline" className="gap-1" onClick={() => openDetail(c)}>
                               <MessageCircle className="h-3 w-3" /> SMS
                             </Button>
+                            {c.plaster_status === "Active" && (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="gap-1"
+                                onClick={() => setDeactivateTarget(c)}
+                              >
+                                <PowerOff className="h-3 w-3" /> Deactivate
+                              </Button>
+                            )}
+                            {c.plaster_status !== "Active" && (
+                              <Badge variant="secondary" className="text-[10px] gap-1">
+                                <CheckCircle2 className="h-3 w-3 text-green-500" /> Removed
+                              </Badge>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -595,6 +638,30 @@ export default function Ortho() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* ── Deactivate Confirm Dialog ── */}
+      <AlertDialog open={!!deactivateTarget} onOpenChange={(o) => !o && setDeactivateTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Plaster Deactivate करें?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{deactivateTarget?.patients?.name}</strong> का{" "}
+              <strong>{deactivateTarget?.body_part}</strong> प्लास्टर Removed mark होगा
+              और patient को एक SMS भेजा जाएगा। यह action undo नहीं होगा।
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deactivateBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeactivate}
+              disabled={deactivateBusy}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {deactivateBusy ? "Processing..." : "Deactivate & SMS भेजो"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }
