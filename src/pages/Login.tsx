@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Eye, EyeOff, User, Lock, Shield, Phone } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import loginBg from "@/assets/login-bg.png";
 import { getStaffUsers, STORAGE_KEYS } from "@/lib/appConfig";
+import bg1 from "@/assets/dash-bg1.png";
+import bg2 from "@/assets/dash-bg2.png";
+import bg3 from "@/assets/dash-bg3.png";
 
+const SLIDES = [bg1, bg2, bg3];
 const ADMIN_EMAIL    = "yashpal18@balajiclinic.local";
 const ADMIN_PASSWORD = "Aarya@2019";
 const LOCAL_USERNAME = "Yashpal18";
@@ -16,20 +19,33 @@ export default function Login() {
   const [username, setUsername]         = useState("");
   const [password, setPassword]         = useState("");
   const [loading, setLoading]           = useState(false);
+  const [bgIndex, setBgIndex]           = useState(0);
+  const [fade, setFade]                 = useState(true);
   const navigate                         = useNavigate();
   const { toast }                        = useToast();
+
+  // Background slideshow
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setFade(false);
+      setTimeout(() => {
+        setBgIndex((i) => (i + 1) % SLIDES.length);
+        setFade(true);
+      }, 600);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
-    // ── 1. Check Admin credentials ──
+    // 1. Admin credentials
     if (username === LOCAL_USERNAME && password === LOCAL_PASSWORD) {
       localStorage.setItem("isLoggedIn", "true");
       localStorage.setItem("userName", username);
       localStorage.setItem(STORAGE_KEYS.USER_ROLE, "admin");
-      localStorage.removeItem(STORAGE_KEYS.USER_PERMS);  // admin has all perms
-
+      localStorage.removeItem(STORAGE_KEYS.USER_PERMS);
       try {
         await supabase.functions.invoke("create-admin-user", {
           body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
@@ -38,25 +54,22 @@ export default function Login() {
           email: ADMIN_EMAIL, password: ADMIN_PASSWORD,
         });
       } catch (_) {}
-
       setLoading(false);
       navigate("/dashboard");
       return;
     }
 
-    // ── 2. Check Staff credentials from localStorage ──
+    // 2. Staff credentials
     const staffUsers = getStaffUsers();
     const staffUser  = staffUsers.find(
-      u => u.username.toLowerCase() === username.toLowerCase() && u.password === password
+      (u) => u.username.toLowerCase() === username.toLowerCase() && u.password === password
     );
-
     if (staffUser) {
       localStorage.setItem("isLoggedIn", "true");
       localStorage.setItem("userName", staffUser.displayName);
       localStorage.setItem(STORAGE_KEYS.USER_ROLE, "staff");
       localStorage.setItem(STORAGE_KEYS.USER_PERMS, JSON.stringify(staffUser.allowedPages));
       setLoading(false);
-      // Navigate to first allowed page or dashboard
       const firstPage = staffUser.allowedPages.includes("/dashboard")
         ? "/dashboard"
         : staffUser.allowedPages[0] || "/dashboard";
@@ -64,12 +77,8 @@ export default function Login() {
       return;
     }
 
-    // ── 3. Wrong credentials ──
-    toast({
-      title: "Login Failed",
-      description: "Username ya password galat hai",
-      variant: "destructive",
-    });
+    // 3. Wrong credentials
+    toast({ title: "Login Failed", description: "Username ya password galat hai", variant: "destructive" });
     setLoading(false);
   };
 
@@ -80,13 +89,39 @@ export default function Login() {
       position: "relative", fontFamily: "'Segoe UI', sans-serif",
       overflow: "hidden",
     }}>
-      {/* Full-screen background */}
+      {/* Slideshow background */}
       <div style={{
         position: "absolute", inset: 0,
-        backgroundImage: `url(${loginBg})`,
+        backgroundImage: `url(${SLIDES[bgIndex]})`,
         backgroundSize: "cover", backgroundPosition: "center center",
         backgroundRepeat: "no-repeat", zIndex: 0,
+        transition: "opacity 0.6s ease-in-out",
+        opacity: fade ? 1 : 0,
       }} />
+
+      {/* Dark overlay */}
+      <div style={{
+        position: "absolute", inset: 0, zIndex: 1,
+        background: "linear-gradient(135deg, rgba(10,25,60,0.55) 0%, rgba(0,0,0,0.35) 100%)",
+      }} />
+
+      {/* Slide dots */}
+      <div style={{
+        position: "absolute", bottom: "60px", left: "50%",
+        transform: "translateX(-50%)", zIndex: 3,
+        display: "flex", gap: "8px",
+      }}>
+        {SLIDES.map((_, i) => (
+          <div key={i} onClick={() => { setFade(false); setTimeout(() => { setBgIndex(i); setFade(true); }, 300); }}
+            style={{
+              width: i === bgIndex ? "22px" : "8px", height: "8px",
+              borderRadius: "4px", cursor: "pointer",
+              background: i === bgIndex ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.4)",
+              transition: "all 0.3s ease",
+            }}
+          />
+        ))}
+      </div>
 
       {/* Main content */}
       <div style={{
@@ -99,11 +134,12 @@ export default function Login() {
           width: "340px",
           background: "rgba(255,255,255,0.97)",
           borderRadius: "18px",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.28)",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
           padding: "32px 28px 24px",
           display: "flex", flexDirection: "column", alignItems: "center",
         }}>
-          {/* Icon */}
+
+          {/* Logo icon */}
           <div style={{
             width: "58px", height: "58px", borderRadius: "16px",
             background: "linear-gradient(135deg, #1e57b0, #1877c4)",
@@ -139,14 +175,14 @@ export default function Login() {
                 }} />
                 <input
                   type="text" placeholder="Enter username"
-                  value={username} onChange={e => setUsername(e.target.value)} required
+                  value={username} onChange={(e) => setUsername(e.target.value)} required
                   style={{
                     width: "100%", height: "42px", paddingLeft: "34px", paddingRight: "12px",
                     border: "1.5px solid #d5dde8", borderRadius: "9px", fontSize: "13px",
                     color: "#1a2a4a", outline: "none", background: "#f8fafc", boxSizing: "border-box",
                   }}
-                  onFocus={e => (e.target.style.borderColor = "#1e57b0")}
-                  onBlur={e  => (e.target.style.borderColor = "#d5dde8")}
+                  onFocus={(e) => (e.target.style.borderColor = "#1e57b0")}
+                  onBlur={(e)  => (e.target.style.borderColor = "#d5dde8")}
                 />
               </div>
             </div>
@@ -161,14 +197,14 @@ export default function Login() {
                 }} />
                 <input
                   type={showPassword ? "text" : "password"} placeholder="Enter password"
-                  value={password} onChange={e => setPassword(e.target.value)} required
+                  value={password} onChange={(e) => setPassword(e.target.value)} required
                   style={{
                     width: "100%", height: "42px", paddingLeft: "34px", paddingRight: "40px",
                     border: "1.5px solid #d5dde8", borderRadius: "9px", fontSize: "13px",
                     color: "#1a2a4a", outline: "none", background: "#f8fafc", boxSizing: "border-box",
                   }}
-                  onFocus={e => (e.target.style.borderColor = "#1e57b0")}
-                  onBlur={e  => (e.target.style.borderColor = "#d5dde8")}
+                  onFocus={(e) => (e.target.style.borderColor = "#1e57b0")}
+                  onBlur={(e)  => (e.target.style.borderColor = "#d5dde8")}
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)}
                   style={{
@@ -184,12 +220,16 @@ export default function Login() {
 
             <button type="submit" disabled={loading} style={{
               width: "100%", height: "44px",
-              background: "linear-gradient(135deg, #1a3a6b, #1e57b0)",
+              background: loading
+                ? "#6b8ab0"
+                : "linear-gradient(135deg, #1a3a6b, #1e57b0)",
               color: "white", border: "none", borderRadius: "9px",
               fontSize: "14px", fontWeight: 700,
               cursor: loading ? "not-allowed" : "pointer",
-              opacity: loading ? 0.7 : 1, marginTop: "2px",
-              boxShadow: "0 4px 14px rgba(30,87,176,0.32)", letterSpacing: "0.4px",
+              marginTop: "4px",
+              boxShadow: "0 4px 14px rgba(30,87,176,0.32)",
+              letterSpacing: "0.4px",
+              transition: "opacity 0.2s",
             }}>
               {loading ? "Signing in..." : "Sign In"}
             </button>
