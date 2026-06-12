@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Upload, FileText, Image, Download } from "lucide-react";
+import { Upload, FileText, Image, Download, Maximize2 } from "lucide-react";
+import XRayViewer from "@/components/XRayViewer";
 import { useXrayReports, useAddXrayReport, usePatients } from "@/hooks/useDatabase";
 import { supabase } from "@/integrations/supabase/client";
 import { useState } from "react";
@@ -38,6 +39,7 @@ export default function Reports() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [selectedSavedReport, setSelectedSavedReport] = useState<any>(null);
+  const [xrayViewerOpen, setXrayViewerOpen] = useState(false);
   const savedAiReports = reports?.filter((r: any) => r.report_data) || [];
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -109,7 +111,11 @@ export default function Reports() {
             <h1 className="module-header">Reports & X-Ray</h1>
             <p className="text-sm text-muted-foreground">Upload and manage medical reports</p>
           </div>
-          <Dialog open={open} onOpenChange={setOpen}>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" className="gap-2" onClick={() => setXrayViewerOpen(true)}>
+              <Maximize2 className="h-4 w-4" />🩻 X-Ray Viewer Kholo
+            </Button>
+            <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button className="gap-2"><Upload className="h-4 w-4" />Upload Report</Button>
             </DialogTrigger>
@@ -147,7 +153,14 @@ export default function Reports() {
               </form>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
+
+        <Dialog open={xrayViewerOpen} onOpenChange={setXrayViewerOpen}>
+          <DialogContent className="max-w-full w-screen h-screen p-0 m-0 rounded-none border-0">
+            <XRayViewer />
+          </DialogContent>
+        </Dialog>
 
         <Card>
           <CardHeader>
