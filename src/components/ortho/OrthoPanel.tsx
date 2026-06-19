@@ -64,7 +64,7 @@ function CustomSmsDialog({ open, onClose, patients }: CustomSmsDialogProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [customBody, setCustomBody] = useState("");
   const [sending, setSending] = useState(false);
-  const [results, setResults] = useState<{ name: string; ok: boolean }[]>([]);
+  const [results, setResults] = useState<{ name: string; ok: boolean; queued: boolean }[]>([]);
   const [step, setStep] = useState<"compose" | "done">("compose");
 
   // Reset on open
@@ -113,20 +113,22 @@ function CustomSmsDialog({ open, onClose, patients }: CustomSmsDialogProps) {
     }
     setSending(true);
     const targetPatients = patients.filter((p) => selected.has(p.id));
-    const res: { name: string; ok: boolean }[] = [];
+    const res: { name: string; ok: boolean; queued: boolean }[] = [];
     for (const p of targetPatients) {
       const msg = resolveTemplate(DEFAULT_TEMPLATE, p, customBody);
-      const ok = await sendSMS(p.mobile, msg, p.name, "ortho_custom");
-      res.push({ name: p.name, ok });
+      const r = await sendSMS(p.mobile, msg, p.name, "ortho_custom");
+      res.push({ name: p.name, ok: r.ok, queued: r.queued });
     }
     setSending(false);
     setResults(res);
     setStep("done");
-    const sentCount = res.filter((r) => r.ok).length;
+    const sentCount = res.filter((r) => r.ok && !r.queued).length;
+    const queuedCount = res.filter((r) => r.queued).length;
     toast({
-      title: `SMS भेजे: ${sentCount}/${res.length}`,
-      description: sentCount === res.length ? "सभी successfully भेजे गए 🎉" : "कुछ SMS fail हुए।",
-      variant: sentCount === res.length ? "default" : "destructive",
+      title: queuedCount > 0 ? `SMS: ${sentCount} भेजे, ${queuedCount} pending` : `SMS भेजे: ${sentCount}/${res.length}`,
+      description: queuedCount > 0
+        ? "Internet aane par baaki SMS automatically bhej diye jayenge 🎉"
+        : "सभी successfully भेजे गए 🎉",
     });
   };
 
@@ -261,12 +263,12 @@ function CustomSmsDialog({ open, onClose, patients }: CustomSmsDialogProps) {
                   <div
                     key={i}
                     className={`flex items-center justify-between px-3 py-2 rounded-md text-sm ${
-                      r.ok ? "bg-green-50 dark:bg-green-950/20" : "bg-red-50 dark:bg-red-950/20"
+                      r.queued ? "bg-amber-50 dark:bg-amber-950/20" : "bg-green-50 dark:bg-green-950/20"
                     }`}
                   >
                     <span>{r.name}</span>
-                    <Badge variant={r.ok ? "default" : "destructive"}>
-                      {r.ok ? "✓ Sent" : "✗ Failed"}
+                    <Badge variant={r.queued ? "secondary" : "default"}>
+                      {r.queued ? "⏳ Pending" : "✓ Sent"}
                     </Badge>
                   </div>
                 ))}
