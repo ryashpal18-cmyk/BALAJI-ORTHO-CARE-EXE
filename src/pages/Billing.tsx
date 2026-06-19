@@ -63,21 +63,6 @@ const statusStyle: Record<string, string> = {
   Partial: "bg-info/10 text-info",
 };
 
-const SERVICE_OPTIONS = [
-  "OPD Consultation",
-  "X-Ray",
-  "Physiotherapy",
-  "Procedure",
-  "IPD Stay",
-  "Plaster",
-  "MOT Charge",
-  "Medicine",
-  "Dressing",
-  "Injection",
-  "Blood Test",
-  "Other",
-];
-
 const toLocalDateInput = (date: Date) => {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
@@ -473,7 +458,10 @@ const filteredPatients = patients
   const addServiceRow = () => setServices((prev) => [...prev, { name: "", amount: "" }]);
   const removeServiceRow = (idx: number) => setServices((prev) => prev.filter((_, i) => i !== idx));
   const updateService = (idx: number, field: keyof ServiceItem, value: string) => {
-    setServices((prev) => prev.map((s, i) => (i === idx ? { ...s, [field]: value } : s)));
+    // "name" field free-text hai ab — | aur : characters allow nahi karte kyunki
+    // bill ka service string isi format me save hota hai: "naam:amount|naam:amount".
+    const safeValue = field === "name" ? value.replace(/[|:]/g, "") : value;
+    setServices((prev) => prev.map((s, i) => (i === idx ? { ...s, [field]: safeValue } : s)));
   };
 
   const totalAmount = services.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
@@ -714,41 +702,61 @@ const filteredPatients = patients
     toast({ title: "Exported!", description: "Excel file download हो गई" });
   };
 
+  const serviceNameRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const serviceAmountRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const billFormRef = useRef<HTMLFormElement | null>(null);
+
+  const focusServiceName = (idx: number) => {
+    requestAnimationFrame(() => serviceNameRefs.current[idx]?.focus());
+  };
+
+  const handleServiceNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, idx: number) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      serviceAmountRefs.current[idx]?.focus();
+    }
+  };
+
+  const handleServiceAmountKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, idx: number) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const isLastRow = idx === services.length - 1;
+    const current = services[idx];
+    if (isLastRow) {
+      if (!current.name && !current.amount) {
+        // Khali row par dobara Enter dabaya — matlab bill complete hai, seedha submit karo.
+        billFormRef.current?.requestSubmit();
+        return;
+      }
+      addServiceRow();
+      focusServiceName(idx + 1);
+    } else {
+      serviceNameRefs.current[idx + 1]?.focus();
+    }
+  };
+
   const renderServiceForm = () => (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label>Services</Label>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={addServiceRow}
-          className="h-7 text-xs gap-1"
-        >
-          <Plus className="h-3 w-3" /> Add Service
-        </Button>
-      </div>
+      <Label>Services</Label>
       <div className="space-y-2 max-h-48 overflow-y-auto">
         {services.map((s, idx) => (
           <div key={idx} className="flex gap-2 items-center">
-            <Select value={s.name} onValueChange={(v) => updateService(idx, "name", v)}>
-              <SelectTrigger className="flex-1 h-9">
-                <SelectValue placeholder="Service" />
-              </SelectTrigger>
-              <SelectContent>
-                {SERVICE_OPTIONS.map((opt) => (
-                  <SelectItem key={opt} value={opt}>
-                    {opt}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Input
+              ref={(el) => (serviceNameRefs.current[idx] = el)}
+              placeholder="Item / Service name likhein..."
+              className="flex-1 h-9"
+              value={s.name}
+              onChange={(e) => updateService(idx, "name", e.target.value)}
+              onKeyDown={(e) => handleServiceNameKeyDown(e, idx)}
+            />
+            <Input
+              ref={(el) => (serviceAmountRefs.current[idx] = el)}
               type="number"
               placeholder="₹"
               className="w-24 h-9"
               value={s.amount}
               onChange={(e) => updateService(idx, "amount", e.target.value)}
+              onKeyDown={(e) => handleServiceAmountKeyDown(e, idx)}
             />
             {services.length > 1 && (
               <Button
@@ -764,6 +772,18 @@ const filteredPatients = patients
           </div>
         ))}
       </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          addServiceRow();
+          focusServiceName(services.length);
+        }}
+        className="h-7 text-xs gap-1 w-full"
+      >
+        <Plus className="h-3 w-3" /> Add Service
+      </Button>
     </div>
   );
 
@@ -844,13 +864,23 @@ const filteredPatients = patients
                 <DialogHeader>
                   <DialogTitle className="font-heading">New Bill</DialogTitle>
                 </DialogHeader>
-                <form onSubmit={handleAdd} className="space-y-4">
+                <form ref={billFormRef} onSubmit={handleAdd} className="space-y-4">
                   <div className="space-y-2">
                     <Label>Patient (Search by name or mobile)</Label>
                     <Input
                       placeholder="🔍 Type name or mobile number..."
                       value={patientSearch}
                       onChange={(e) => setPatientSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          const top = filteredPatients?.[0];
+                          if (top) {
+                            setSelectedPatient(top.id);
+                            focusServiceName(0);
+                          }
+                        }
+                      }}
                       className="mb-2"
                     />
                     <Select value={selectedPatient} onValueChange={setSelectedPatient}>
@@ -973,7 +1003,7 @@ const filteredPatients = patients
             <DialogHeader>
               <DialogTitle className="font-heading">Edit Bill</DialogTitle>
             </DialogHeader>
-            <form onSubmit={handleEditSave} className="space-y-4">
+            <form ref={billFormRef} onSubmit={handleEditSave} className="space-y-4">
               <div className="p-3 bg-muted/50 rounded-lg">
                 <p className="text-sm font-medium">
                   Patient:{" "}
