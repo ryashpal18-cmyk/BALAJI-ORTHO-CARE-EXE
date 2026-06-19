@@ -9,16 +9,22 @@ import {
   Settings, Building2, Phone, MapPin, LayoutDashboard,
   Users, Eye, EyeOff, Trash2, Plus, ShieldCheck, UserPlus,
   Palette, ToggleLeft, ToggleRight, KeyRound, Check,
+  HardDriveDownload, FolderOpen, Clock, CalendarCheck, Loader2, FileJson, FileSpreadsheet,
 } from "lucide-react";
 import {
   getStaffUsers, saveStaffUsers, getDashModules, saveDashModules,
   getAppTheme, saveAppTheme, ALL_PAGES, getCurrentRole,
   StaffUser, DashModules, AppTheme,
 } from "@/lib/appConfig";
+import {
+  runBackupNow, listBackupFiles, openBackupFolder, getBackupFolderPath,
+  getLastBackupAt, isDailyBackupEnabled, isWeeklyBackupEnabled,
+  setDailyBackupEnabled, setWeeklyBackupEnabled,
+} from "@/lib/backup";
 import { toast } from "@/hooks/use-toast";
 
 // ── Tab type ──
-type Tab = "clinic" | "dashboard" | "users";
+type Tab = "clinic" | "dashboard" | "users" | "backup";
 
 // ── Preset colors ──
 const COLORS = [
@@ -64,10 +70,81 @@ export default function SettingsPage() {
   const [selPages,     setSelPages]     = useState<string[]>(["/dashboard"]);
   const [editingUser,  setEditingUser]  = useState<StaffUser | null>(null);
 
+  // ── Backup ──
+  const [backupRunning, setBackupRunning] = useState(false);
+  const [lastBackupAt, setLastBackupAt]   = useState<string | null>(getLastBackupAt());
+  const [dailyOn,      setDailyOn]        = useState(isDailyBackupEnabled());
+  const [weeklyOn,     setWeeklyOn]       = useState(isWeeklyBackupEnabled());
+  const [backupFiles,  setBackupFiles]    = useState<{ name: string; size: number; mtime: number }[]>([]);
+  const [backupDir,    setBackupDir]      = useState<string | null>(null);
+  const [isElectron,   setIsElectron]     = useState(false);
+
   // ── Apply theme to CSS vars on change ──
   useEffect(() => {
     applyThemeToDom(theme);
   }, [theme]);
+
+  // ── Backup tab: load folder/file info when opened ──
+  useEffect(() => {
+    if (tab !== "backup") return;
+    setIsElectron(!!(window as any).electron?.backupGetDir);
+    refreshBackupInfo();
+  }, [tab]);
+
+  const refreshBackupInfo = async () => {
+    const dir = await getBackupFolderPath();
+    setBackupDir(dir);
+    const files = await listBackupFiles();
+    setBackupFiles(files);
+  };
+
+  const handleBackupNow = async () => {
+    setBackupRunning(true);
+    const res = await runBackupNow("manual");
+    setBackupRunning(false);
+    if (res.ok) {
+      setLastBackupAt(getLastBackupAt());
+      await refreshBackupInfo();
+      const totalRecords = Object.values(res.recordCounts).reduce((a, b) => a + b, 0);
+      toast({
+        title: "✅ Backup complete",
+        description: res.mode === "electron"
+          ? `${totalRecords} records backup ho gaye - Documents/Balaji_Ortho_Backups folder mein`
+          : `${totalRecords} records backup ho gaye - download folder check karein`,
+      });
+    } else {
+      toast({
+        title: "Backup mein problem aayi",
+        description: res.error || "Phir try karein",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleToggleDaily = () => {
+    const next = !dailyOn;
+    setDailyOn(next);
+    setDailyBackupEnabled(next);
+  };
+
+  const handleToggleWeekly = () => {
+    const next = !weeklyOn;
+    setWeeklyOn(next);
+    setWeeklyBackupEnabled(next);
+  };
+
+  const formatBackupTime = (iso: string | null) => {
+    if (!iso) return "Abhi tak koi backup nahi hua";
+    try {
+      return new Date(iso).toLocaleString("hi-IN", { dateStyle: "medium", timeStyle: "short" });
+    } catch { return iso; }
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
 
   const applyThemeToDom = (t: AppTheme) => {
     // Convert hex to HSL for CSS vars
@@ -209,6 +286,10 @@ export default function SettingsPage() {
               User Management
             </button>
           )}
+          <button style={TAB_STYLE(tab === "backup")} onClick={() => setTab("backup")}>
+            <HardDriveDownload style={{ width: "14px", height: "14px", display: "inline", marginRight: "6px" }} />
+            Backup
+          </button>
         </div>
 
         {/* ══════════ TAB 1: CLINIC INFO ══════════ */}
@@ -655,6 +736,162 @@ export default function SettingsPage() {
               <div>
                 <strong>Admin Note:</strong> Staff users sirf unhi pages pe ja sakte hain jo aapne unhe diye hain.
                 Settings page sirf Admin ke liye hota hai — staff use nahi kar sakta.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ══════════ TAB 4: BACKUP ══════════ */}
+        {tab === "backup" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <Card className="dash-card">
+              <CardHeader>
+                <CardTitle style={{ fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <HardDriveDownload style={{ width: "16px", height: "16px", color: "#1e57b0" }} />
+                  Data Backup
+                </CardTitle>
+              </CardHeader>
+              <CardContent style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                <p style={{ fontSize: "13px", color: "#5a6a84" }}>
+                  Pura clinic data (patients, billing, appointments, fracture cases, prescriptions, etc.)
+                  ek JSON file (full restore) aur Excel file (padhne ke liye) ke roop mein backup hota hai
+                  {isElectron ? " — seedha aapke Documents folder mein save hoga." : "."}
+                </p>
+
+                {/* Last backup info */}
+                <div style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "12px 16px", borderRadius: "10px",
+                  background: "#f0f6ff", border: "1.5px solid #d6e6fb",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <Clock style={{ width: "15px", height: "15px", color: "#1e57b0" }} />
+                    <span style={{ fontSize: "12.5px", color: "#1a3a6b" }}>
+                      Last backup: <strong>{formatBackupTime(lastBackupAt)}</strong>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Manual backup button */}
+                <Button
+                  onClick={handleBackupNow}
+                  disabled={backupRunning}
+                  style={{ width: "fit-content", gap: "8px" }}
+                >
+                  {backupRunning ? (
+                    <Loader2 style={{ width: "14px", height: "14px" }} className="animate-spin" />
+                  ) : (
+                    <HardDriveDownload style={{ width: "14px", height: "14px" }} />
+                  )}
+                  {backupRunning ? "Backup ho raha hai..." : "Backup Now"}
+                </Button>
+
+                {/* Auto backup toggles */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>
+                  <p style={{ fontSize: "12px", fontWeight: 700, color: "#1a2a4a", textTransform: "uppercase", letterSpacing: "0.4px" }}>
+                    Automatic Backup
+                  </p>
+                  <div style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "12px 16px", borderRadius: "10px",
+                    border: "1.5px solid #e4ecfa", background: "rgba(255,255,255,0.8)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <CalendarCheck style={{ width: "16px", height: "16px", color: "#1e57b0" }} />
+                      <div>
+                        <p style={{ fontSize: "13px", fontWeight: 600, color: "#1a2a4a" }}>Daily Backup</p>
+                        <p style={{ fontSize: "11px", color: "#8a9ab0" }}>Har din app khulne par automatic backup</p>
+                      </div>
+                    </div>
+                    <ToggleSwitch on={dailyOn} onToggle={handleToggleDaily} />
+                  </div>
+                  <div style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "12px 16px", borderRadius: "10px",
+                    border: "1.5px solid #e4ecfa", background: "rgba(255,255,255,0.8)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <CalendarCheck style={{ width: "16px", height: "16px", color: "#16a34a" }} />
+                      <div>
+                        <p style={{ fontSize: "13px", fontWeight: 600, color: "#1a2a4a" }}>Weekly Backup</p>
+                        <p style={{ fontSize: "11px", color: "#8a9ab0" }}>Har Sunday ek extra weekly backup copy</p>
+                      </div>
+                    </div>
+                    <ToggleSwitch on={weeklyOn} onToggle={handleToggleWeekly} />
+                  </div>
+                  <p style={{ fontSize: "11px", color: "#8a9ab0", marginTop: "2px" }}>
+                    Auto-backup ke liye internet zaroori hai (latest data fetch karne ke liye). Jab bhi app khula ho
+                    aur internet ho, system khud check kar leta hai.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Backup folder + file list — Electron only */}
+            {isElectron && (
+              <Card className="dash-card">
+                <CardHeader>
+                  <CardTitle style={{ fontSize: "15px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <FolderOpen style={{ width: "16px", height: "16px", color: "#1e57b0" }} />
+                      Backup Files
+                    </span>
+                    <Button variant="outline" size="sm" onClick={openBackupFolder} style={{ fontSize: "12px", gap: "6px" }}>
+                      <FolderOpen style={{ width: "13px", height: "13px" }} />
+                      Folder Kholo
+                    </Button>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {backupDir && (
+                    <p style={{ fontSize: "11px", color: "#8a9ab0", wordBreak: "break-all" }}>{backupDir}</p>
+                  )}
+                  {backupFiles.length === 0 ? (
+                    <p style={{ fontSize: "12.5px", color: "#8a9ab0", padding: "8px 0" }}>
+                      Abhi tak koi backup file nahi hai. "Backup Now" dabaye.
+                    </p>
+                  ) : (
+                    <div style={{ maxHeight: "260px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
+                      {backupFiles.map((f) => (
+                        <div key={f.name} style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px",
+                          padding: "9px 12px", borderRadius: "9px",
+                          border: "1.5px solid #eef2f7", background: "#fafbfd",
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                            {f.name.endsWith(".xlsx") ? (
+                              <FileSpreadsheet style={{ width: "15px", height: "15px", color: "#16a34a", flexShrink: 0 }} />
+                            ) : (
+                              <FileJson style={{ width: "15px", height: "15px", color: "#1e57b0", flexShrink: 0 }} />
+                            )}
+                            <span style={{ fontSize: "12px", color: "#1a2a4a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {f.name}
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+                            <span style={{ fontSize: "11px", color: "#8a9ab0" }}>{formatFileSize(f.size)}</span>
+                            <span style={{ fontSize: "11px", color: "#8a9ab0" }}>
+                              {new Date(f.mtime).toLocaleDateString("hi-IN", { day: "2-digit", month: "short" })}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            <div style={{
+              padding: "12px 16px", borderRadius: "10px",
+              background: "#fff7ed", border: "1.5px solid #fed7aa",
+              fontSize: "12px", color: "#9a3412",
+              display: "flex", alignItems: "flex-start", gap: "8px",
+            }}>
+              <ShieldCheck style={{ width: "15px", height: "15px", marginTop: "1px", flexShrink: 0 }} />
+              <div>
+                <strong>Suggestion:</strong> Har hafte ek backup file ko pen-drive ya Google Drive mein bhi copy kar lena
+                accha rahega — system crash ya laptop change hone par bhi data surakshit rahega.
               </div>
             </div>
           </div>
