@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { isOnline } from "@/lib/offlineSync";
+import { offlineInsert } from "@/lib/offlineQuery";
 
 type AiReport = {
   studyType?: string;
@@ -78,6 +80,13 @@ export default function AIXrayReport() {
 
     setReport(null);
 
+    const online = await isOnline();
+    if (!online) {
+      setError("AI X-Ray analysis ke liye internet chahiye (live AI call hai, queue nahi ho sakti). Internet aane par phir try karein — baaki sab kuch (billing, patients, SMS) offline kaam karta rahega.");
+      setLoading(false);
+      return;
+    }
+
     const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
     if (!GEMINI_KEY) {
       setError("Gemini API key configured nahi hai. VITE_GEMINI_API_KEY env variable set karein.");
@@ -134,7 +143,7 @@ Respond ONLY with valid JSON no markdown no extra text:
       setReport(reportData);
 
       try {
-        await supabase.from("xray_reports").insert({
+        await offlineInsert("xray_reports", {
           patient_name: name || "Unknown",
 
           patient_age: age || null,

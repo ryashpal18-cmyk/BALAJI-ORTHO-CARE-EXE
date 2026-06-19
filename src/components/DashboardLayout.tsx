@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { useFollowupsAround } from "@/hooks/useOrtho";
+import { SyncStatusBadge } from "@/components/SyncStatusBadge";
 import bg1 from "@/assets/dash-bg1.png";
 import bg2 from "@/assets/dash-bg2.png";
 import bg3 from "@/assets/dash-bg3.png";
@@ -225,6 +226,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                   />
                 ))}
               </div>
+
+              {/* Offline / sync status */}
+              <SyncStatusBadge />
 
               {/* Bell */}
               <Popover>
