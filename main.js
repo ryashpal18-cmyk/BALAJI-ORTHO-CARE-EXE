@@ -26,6 +26,14 @@ const AUTH_FILE     = path.join(BACKUP_DIR, 'auth.json');
 
 const SEED_FILE = path.join(__dirname, 'public', 'patients_seed.json');
 
+// Naya, clean backup system — purane hardcoded C:\ path se alag, taaki legacy
+// system se collide na ho. app.getPath('documents') Windows/Mac/Linux teeno
+// par sahi user-writable folder deta hai.
+const APP_BACKUP_DIR = path.join(app.getPath('documents'), 'Balaji_Ortho_Backups');
+function ensureAppBackupDir() {
+  if (!fs.existsSync(APP_BACKUP_DIR)) fs.mkdirSync(APP_BACKUP_DIR, { recursive: true });
+}
+
 let mainWindow;
 let whatsappWindow = null;
 
@@ -78,8 +86,8 @@ function initFiles() {
   if (!fs.existsSync(SETTINGS_FILE)) writeJSON(SETTINGS_FILE, {
     centerName:  'Balaji Ortho Care Center',
     doctorName:  'Dr. S. S. Rathore',
-    supabaseUrl: 'https://eczphdmiieqsfqicuwrg.supabase.co',
-    supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjenBoZG1paWVxc2ZxaWN1d3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMTgwMjcsImV4cCI6MjA5MjY5NDAyN30.B8M8g-hQfkBRwSaNIyS1tTJO1B0-Aqp2qZN-813Cc2U',
+    supabaseUrl: 'https://idcxmeczzfnipmybikue.supabase.co',
+    supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkY3htZWN6emZuaXBteWJpa3VlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzODc4OTIsImV4cCI6MjA5MDk2Mzg5Mn0.WdbFTPLnUC5U3YFL6Y8dgWETit-aFspgf8RA-A6HaFc',
     autoSync:    true
   });
   if (!fs.existsSync(AUTH_FILE)) writeJSON(AUTH_FILE, {
@@ -101,14 +109,25 @@ function addPending(item) {
 }
 
 // ─── INTERNET CHECK ───────────────────────────────────────────────────────────
-function checkInternet() {
+// Ek host fail ho (DNS blip, ISP issue) to doosre host se confirm karte hain,
+// taaki ek galat negative ki wajah se app "offline" na maan le jab internet
+// asal me chal raha ho.
+function pingHost(url) {
   return new Promise((resolve) => {
-    const req = https.get('https://eczphdmiieqsfqicuwrg.supabase.co', { timeout: 5000 }, (res) => {
+    const req = https.get(url, { timeout: 5000 }, (res) => {
       resolve(res.statusCode < 500);
     });
     req.on('error', () => resolve(false));
     req.on('timeout', () => { req.destroy(); resolve(false); });
   });
+}
+
+async function checkInternet() {
+  const primary = await pingHost('https://idcxmeczzfnipmybikue.supabase.co');
+  if (primary) return true;
+  // Fallback host — Supabase project khud down/unreachable ho sakta hai par
+  // baaki internet chal raha ho, isliye general connectivity bhi confirm karo.
+  return pingHost('https://www.google.com/generate_204');
 }
 
 // ─── SUPABASE REST UPSERT ─────────────────────────────────────────────────────
@@ -487,6 +506,52 @@ ipcMain.handle('shell:print',      async (_e, html) => {
 
 ipcMain.handle('app:getBackupDir', async () => BACKUP_DIR);
 ipcMain.handle('app:getXraysDir',  async () => XRAYS_DIR);
+
+// ─── NEW APP DATA BACKUP (Settings → Backup tab) ──────────────────────────
+ipcMain.handle('backup:getDir', async () => {
+  ensureAppBackupDir();
+  return APP_BACKUP_DIR;
+});
+
+ipcMain.handle('backup:writeJson', async (_e, { fileName, jsonString }) => {
+  try {
+    ensureAppBackupDir();
+    const safeName = String(fileName || 'backup.json').replace(/[/\\]/g, '_');
+    const fullPath = path.join(APP_BACKUP_DIR, safeName);
+    fs.writeFileSync(fullPath, jsonString, 'utf-8');
+    return { success: true, path: fullPath };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('backup:writeBinary', async (_e, { fileName, base64Data }) => {
+  try {
+    ensureAppBackupDir();
+    const safeName = String(fileName || 'backup.xlsx').replace(/[/\\]/g, '_');
+    const fullPath = path.join(APP_BACKUP_DIR, safeName);
+    fs.writeFileSync(fullPath, Buffer.from(base64Data, 'base64'));
+    return { success: true, path: fullPath };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('backup:list', async () => {
+  try {
+    ensureAppBackupDir();
+    const files = fs.readdirSync(APP_BACKUP_DIR)
+      .filter(f => f.endsWith('.json') || f.endsWith('.xlsx'))
+      .map(f => {
+        const stat = fs.statSync(path.join(APP_BACKUP_DIR, f));
+        return { name: f, size: stat.size, mtime: stat.mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+    return { success: true, files };
+  } catch (e) { return { success: false, error: e.message, files: [] }; }
+});
+
+ipcMain.handle('backup:openFolder', async () => {
+  ensureAppBackupDir();
+  shell.openPath(APP_BACKUP_DIR);
+  return { success: true };
+});
 
 ipcMain.on('open-external-url', (_e, url) => {
   if (url && typeof url === 'string') shell.openExternal(url).catch(() => {});
