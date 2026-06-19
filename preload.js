@@ -57,6 +57,13 @@ contextBridge.exposeInMainWorld('electron', {
   getBackupDir:    ()       => ipcRenderer.invoke('app:getBackupDir'),
   getXraysDir:     ()       => ipcRenderer.invoke('app:getXraysDir'),
 
+  // ── App Data Backup (Settings → Backup tab) ─────────────────────
+  backupGetDir:       ()      => ipcRenderer.invoke('backup:getDir'),
+  backupWriteJson:    (data)  => ipcRenderer.invoke('backup:writeJson', data),
+  backupWriteBinary:  (data)  => ipcRenderer.invoke('backup:writeBinary', data),
+  backupList:         ()      => ipcRenderer.invoke('backup:list'),
+  backupOpenFolder:   ()      => ipcRenderer.invoke('backup:openFolder'),
+
   // ── Event Listeners ──────────────────────────────────────────
   on: (channel, callback) => {
     const allowed = ['printer-capture-received', 'sync-complete', 'sync-error'];
