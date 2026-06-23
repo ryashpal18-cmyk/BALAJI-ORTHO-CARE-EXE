@@ -48,7 +48,7 @@ import {
   useUpdateBill,
   useDeleteBill,
 } from "@/hooks/useDatabase";
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import * as XLSX from "xlsx";
@@ -56,6 +56,7 @@ import html2pdf from "html2pdf.js";
 import { openWhatsAppWeb } from "@/pages/WhatsApp";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { sendSMS } from "@/services/smsService";
+import { getServiceCatalog, learnServiceItems } from "@/lib/appConfig";
 
 const statusStyle: Record<string, string> = {
   Paid: "bg-success/10 text-success",
@@ -530,6 +531,9 @@ const filteredPatients = patients
 
       toast({ title: "✅ Bill Saved", description: "Bill successfully save ho gaya" });
 
+      // Jo bhi items type kiye the, unhe catalog mein yaad kar lo
+      learnServiceItems(validServices.map((s) => ({ name: s.name, amount: parseFloat(s.amount) || 0 })));
+
       const patient = result.patients as any;
       const patientName = patient?.name || "Patient";
       const mobile = patient?.mobile || "";
@@ -710,9 +714,58 @@ const filteredPatients = patients
     requestAnimationFrame(() => serviceNameRefs.current[idx]?.focus());
   };
 
+  // ── Service catalog autocomplete state ──
+  const [suggestions, setSuggestions] = useState<{ name: string; rate: number }[]>([]);
+  const [activeSugIdx, setActiveSugIdx] = useState(-1);
+  const [sugForRow, setSugForRow] = useState<number>(-1);
+
+  const showSuggestions = (query: string, idx: number) => {
+    if (!query.trim()) { setSuggestions([]); setSugForRow(-1); return; }
+    const catalog = getServiceCatalog();
+    const q = query.toLowerCase();
+    const matched = catalog
+      .filter((c) => c.name.toLowerCase().includes(q))
+      .sort((a, b) => a.name.toLowerCase().indexOf(q) - b.name.toLowerCase().indexOf(q))
+      .slice(0, 6);
+    setSuggestions(matched);
+    setSugForRow(idx);
+    setActiveSugIdx(matched.length > 0 ? 0 : -1);
+  };
+
+  const applySuggestion = (item: { name: string; rate: number }, idx: number) => {
+    updateService(idx, "name", item.name);
+    updateService(idx, "amount", String(item.rate));
+    setSuggestions([]); setSugForRow(-1); setActiveSugIdx(-1);
+    // Amount field par focus — Enter dabakar aage badhte rahenge
+    requestAnimationFrame(() => serviceAmountRefs.current[idx]?.focus());
+  };
+
   const handleServiceNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, idx: number) => {
+    // Agar suggestions khule hain to arrow/enter unhe handle kare
+    if (suggestions.length > 0 && sugForRow === idx) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveSugIdx((p) => Math.min(p + 1, suggestions.length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveSugIdx((p) => Math.max(p - 1, 0));
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const pick = activeSugIdx >= 0 ? suggestions[activeSugIdx] : suggestions[0];
+        if (pick) { applySuggestion(pick, idx); return; }
+      }
+      if (e.key === "Escape") {
+        setSuggestions([]); setSugForRow(-1); return;
+      }
+    }
+    // No suggestions — Enter moves to amount
     if (e.key === "Enter") {
       e.preventDefault();
+      setSuggestions([]); setSugForRow(-1);
       serviceAmountRefs.current[idx]?.focus();
     }
   };
@@ -724,7 +777,6 @@ const filteredPatients = patients
     const current = services[idx];
     if (isLastRow) {
       if (!current.name && !current.amount) {
-        // Khali row par dobara Enter dabaya — matlab bill complete hai, seedha submit karo.
         billFormRef.current?.requestSubmit();
         return;
       }
@@ -740,15 +792,53 @@ const filteredPatients = patients
       <Label>Services</Label>
       <div className="space-y-2 max-h-48 overflow-y-auto">
         {services.map((s, idx) => (
-          <div key={idx} className="flex gap-2 items-center">
-            <Input
-              ref={(el) => (serviceNameRefs.current[idx] = el)}
-              placeholder="Item / Service name likhein..."
-              className="flex-1 h-9"
-              value={s.name}
-              onChange={(e) => updateService(idx, "name", e.target.value)}
-              onKeyDown={(e) => handleServiceNameKeyDown(e, idx)}
-            />
+          <div key={idx} className="flex gap-2 items-start">
+            <div className="relative flex-1">
+              <Input
+                ref={(el) => (serviceNameRefs.current[idx] = el)}
+                placeholder="Item/Service type karo..."
+                className="h-9 w-full"
+                value={s.name}
+                autoComplete="off"
+                onChange={(e) => {
+                  updateService(idx, "name", e.target.value);
+                  showSuggestions(e.target.value, idx);
+                }}
+                onKeyDown={(e) => handleServiceNameKeyDown(e, idx)}
+                onBlur={() => setTimeout(() => { setSuggestions([]); setSugForRow(-1); }, 150)}
+              />
+              {/* Suggestion dropdown */}
+              {sugForRow === idx && suggestions.length > 0 && (
+                <div style={{
+                  position: "absolute", top: "100%", left: 0, right: 0, zIndex: 999,
+                  background: "#fff", border: "1.5px solid #1e57b0",
+                  borderRadius: "8px", boxShadow: "0 4px 16px rgba(30,87,176,0.12)",
+                  marginTop: "2px", overflow: "hidden",
+                }}>
+                  {suggestions.map((sug, si) => (
+                    <div
+                      key={sug.name}
+                      onMouseDown={() => applySuggestion(sug, idx)}
+                      style={{
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        background: si === activeSugIdx ? "#e8f0fe" : "transparent",
+                        fontSize: "13px",
+                      }}
+                      onMouseEnter={() => setActiveSugIdx(si)}
+                    >
+                      <span style={{ color: "#1a2a4a", fontWeight: si === activeSugIdx ? 600 : 400 }}>
+                        {sug.name}
+                      </span>
+                      <span style={{ color: "#1e57b0", fontWeight: 700, fontSize: "12px" }}>
+                        ₹{sug.rate}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <Input
               ref={(el) => (serviceAmountRefs.current[idx] = el)}
               type="number"
@@ -759,11 +849,8 @@ const filteredPatients = patients
               onKeyDown={(e) => handleServiceAmountKeyDown(e, idx)}
             />
             {services.length > 1 && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-destructive"
+              <Button type="button" variant="ghost" size="icon"
+                className="h-8 w-8 text-destructive mt-0.5"
                 onClick={() => removeServiceRow(idx)}
               >
                 <Trash2 className="h-3 w-3" />
@@ -772,14 +859,8 @@ const filteredPatients = patients
           </div>
         ))}
       </div>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          addServiceRow();
-          focusServiceName(services.length);
-        }}
+      <Button type="button" variant="outline" size="sm"
+        onClick={() => { addServiceRow(); focusServiceName(services.length); }}
         className="h-7 text-xs gap-1 w-full"
       >
         <Plus className="h-3 w-3" /> Add Service
