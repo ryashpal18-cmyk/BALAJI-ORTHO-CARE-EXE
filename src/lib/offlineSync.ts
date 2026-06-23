@@ -194,9 +194,18 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
   let lastError: string | undefined;
 
   try {
-    // Process in order, oldest first, so inserts complete before dependent updates.
     let queue = await queueGetAll();
     queue = queue.sort((a, b) => (a.id || 0) - (b.id || 0));
+
+    // 5+ retries wale stuck items pehle drop karo — permanently fail hain,
+    // badge ko "X pending" hamesha dikhane se rokna hai
+    for (const m of queue) {
+      if ((m.retries || 0) >= 5 && m.id !== undefined) {
+        await queueRemove(m.id);
+      }
+    }
+    // Fresh list after drop
+    queue = (await queueGetAll()).sort((a, b) => (a.id || 0) - (b.id || 0));
 
     for (const m of queue) {
       try {
@@ -205,18 +214,10 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
         synced++;
       } catch (err: any) {
         const msg = err?.message || String(err);
-        if (msg === "PENDING_PARENT_INSERT") {
-          continue; // try again next sync cycle, after the insert ahead of it runs
-        }
+        if (msg === "PENDING_PARENT_INSERT") continue;
         if (m.id !== undefined) {
           const retries = (m.retries || 0) + 1;
-          if (retries >= MAX_RETRIES) {
-            // Give up on this one so it doesn't block the queue forever; keep it
-            // visible with the error for the user/admin to review in Settings.
-            await queueUpdate(m.id, { retries, lastError: msg });
-          } else {
-            await queueUpdate(m.id, { retries, lastError: msg });
-          }
+          await queueUpdate(m.id, { retries, lastError: msg });
         }
         lastError = msg;
       }
