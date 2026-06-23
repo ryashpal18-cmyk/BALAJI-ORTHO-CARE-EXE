@@ -280,8 +280,16 @@ function openWhatsAppWindow(url) {
       nodeIntegration:  false,
       contextIsolation: true,
       webSecurity:      true,
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      partition:        'persist:whatsapp',   // Session save — dobara QR scan nahi karni
+      // Chrome 124+ user-agent — WhatsApp Web older Chrome ko reject karta hai
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
     }
+  });
+
+  // session-level par bhi user-agent set karo (kuch requests header se override lete hain)
+  whatsappWindow.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
+    details.requestHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+    callback({ requestHeaders: details.requestHeaders });
   });
 
   whatsappWindow.loadURL(url);
