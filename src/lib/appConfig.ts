@@ -4,11 +4,12 @@
 export const STORAGE_KEYS = {
   IS_LOGGED_IN:    "isLoggedIn",
   USER_NAME:       "userName",
-  USER_ROLE:       "bocc_user_role",       // 'admin' | 'staff'
-  USER_PERMS:      "bocc_user_perms",      // JSON array of allowed paths
-  STAFF_USERS:     "bocc_staff_users",     // JSON array of staff users
-  DASH_MODULES:    "bocc_dash_modules",    // JSON object of module visibility
-  APP_THEME:       "bocc_app_theme",       // JSON object for theme
+  USER_ROLE:       "bocc_user_role",
+  USER_PERMS:      "bocc_user_perms",
+  STAFF_USERS:     "bocc_staff_users",
+  DASH_MODULES:    "bocc_dash_modules",
+  APP_THEME:       "bocc_app_theme",
+  SERVICE_CATALOG: "bocc_service_catalog", // { id, name, rate }[]
 };
 
 // ── Types ──
@@ -84,3 +85,46 @@ export const ALL_PAGES = [
   { path: "/whatsapp",            label: "WhatsApp" },
   { path: "/sms-logs",            label: "SMS Logs" },
 ];
+
+// ── Service Catalog (billing autocomplete) ──
+export interface ServiceCatalogItem {
+  id: string;
+  name: string;
+  rate: number;
+}
+
+export const getServiceCatalog = (): ServiceCatalogItem[] => {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.SERVICE_CATALOG) || "[]"); } catch { return []; }
+};
+
+export const saveServiceCatalog = (items: ServiceCatalogItem[]) =>
+  localStorage.setItem(STORAGE_KEYS.SERVICE_CATALOG, JSON.stringify(items));
+
+/**
+ * Bill save hone ke baad silently call hota hai — har service item ko
+ * catalog mein yaad kar leta hai. Agar naam pehli baar aaya to nayi
+ * entry banti hai, agar pehle se hai to rate update ho jata hai.
+ */
+export const learnServiceItems = (items: { name: string; amount: number }[]) => {
+  if (!items.length) return;
+  const catalog = getServiceCatalog();
+  const byName = new Map(catalog.map((c) => [c.name.toLowerCase().trim(), c]));
+  for (const { name, amount } of items) {
+    const trimmed = name.trim();
+    if (!trimmed || !amount) continue;
+    const key = trimmed.toLowerCase();
+    const existing = byName.get(key);
+    if (existing) {
+      existing.rate = amount; // rate update
+    } else {
+      const item: ServiceCatalogItem = {
+        id: `svc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        name: trimmed,
+        rate: amount,
+      };
+      catalog.push(item);
+      byName.set(key, item);
+    }
+  }
+  saveServiceCatalog(catalog);
+};
