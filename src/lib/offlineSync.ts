@@ -182,7 +182,10 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
 
 export async function runSync(): Promise<{ synced: number; pending: number }> {
   if (syncing) return { synced: 0, pending: (await queueGetAll()).length };
-  const online = await isOnline();
+  
+  // navigator.onLine use karo — instant hai, Supabase ping slow hoti thi
+  // jisse sync run hi nahi karta tha even when internet was fine.
+  const online = typeof navigator !== "undefined" ? navigator.onLine : true;
   if (!online) return { synced: 0, pending: (await queueGetAll()).length };
 
   syncing = true;
