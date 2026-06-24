@@ -84,11 +84,16 @@ export default function SettingsPage() {
   const [logsDir,        setLogsDir]        = useState<string | null>(null);
   const [snapshotDir,    setSnapshotDir]    = useState<string | null>(null);
   const [isElectron,   setIsElectron]     = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<{
-    hasUpdate: boolean; currentVersion: string; latestVersion: string; releaseUrl: string; downloadUrl: string;
-  } | null>(null);
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [updateError, setUpdateError] = useState<string | null>(null);
+
+  // ── Auto-Updater state machine ──
+  type UpdateStage =
+    | 'idle' | 'checking' | 'not-available' | 'available'
+    | 'downloading' | 'downloaded' | 'error';
+  const [updateStage,   setUpdateStage]   = useState<UpdateStage>('idle');
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [updateCurrent, setUpdateCurrent] = useState<string | null>(null);
+  const [updatePercent, setUpdatePercent] = useState<number>(0);
+  const [updateError,   setUpdateError]   = useState<string | null>(null);
 
   // ── Apply theme to CSS vars on change ──
   useEffect(() => {
@@ -102,45 +107,90 @@ export default function SettingsPage() {
     refreshBackupInfo();
   }, [tab]);
 
-  // ── About tab: load version + diagnostics info when opened ──
+  // ── About tab: load version + listen to updater events ──
   useEffect(() => {
     if (tab !== "about") return;
+    const electron = (window as any).electron;
     (async () => {
-      const electron = (window as any).electron;
       if (electron?.getAppVersion) {
         const info = await electron.getAppVersion();
         setAppVersionInfo(info);
+        setUpdateCurrent(info.version);
       }
       if (electron?.getLogsDir) setLogsDir(await electron.getLogsDir());
       if (electron?.getSafetySnapshotDir) setSnapshotDir(await electron.getSafetySnapshotDir());
     })();
+
+    // updater:status events sun lo
+    if (electron?.on) {
+      electron.on('updater:status', (payload: any) => {
+        switch (payload.event) {
+          case 'checking':
+            setUpdateStage('checking');
+            setUpdateError(null);
+            break;
+          case 'available':
+            setUpdateStage('available');
+            setUpdateVersion(payload.latestVersion);
+            setUpdateCurrent(payload.currentVersion);
+            break;
+          case 'not-available':
+            setUpdateStage('not-available');
+            setUpdateCurrent(payload.currentVersion);
+            break;
+          case 'progress':
+            setUpdateStage('downloading');
+            setUpdatePercent(payload.percent ?? 0);
+            break;
+          case 'downloaded':
+            setUpdateStage('downloaded');
+            setUpdateVersion(payload.latestVersion);
+            break;
+          case 'error':
+            setUpdateStage('error');
+            setUpdateError(payload.error || 'Update fail hua');
+            break;
+        }
+      });
+    }
+
+    // Tab open hote hi silently check karo
     handleCheckForUpdate();
+
+    return () => {
+      electron?.removeAllListeners?.('updater:status');
+    };
   }, [tab]);
 
   const handleCheckForUpdate = async () => {
     const electron = (window as any).electron;
     if (!electron?.checkForUpdate) return;
-    setCheckingUpdate(true);
+    setUpdateStage('checking');
     setUpdateError(null);
     try {
-      const res = await electron.checkForUpdate();
-      if (res?.success) {
-        setUpdateInfo(res);
-      } else {
-        setUpdateError(res?.error || "Update check fail hua");
-      }
+      await electron.checkForUpdate();
+      // result 'updater:status' event se aayega
     } catch (e: any) {
-      setUpdateError(e?.message || "Update check fail hua");
-    } finally {
-      setCheckingUpdate(false);
+      setUpdateStage('error');
+      setUpdateError(e?.message || 'Update check fail hua');
     }
   };
 
-  const handleOpenUpdateLink = async () => {
+  const handleDownloadUpdate = async () => {
     const electron = (window as any).electron;
-    const url = updateInfo?.downloadUrl || updateInfo?.releaseUrl;
-    if (!url) return;
-    await electron?.openExternal?.(url);
+    if (!electron?.downloadUpdate) return;
+    setUpdateStage('downloading');
+    setUpdatePercent(0);
+    try {
+      await electron.downloadUpdate();
+    } catch (e: any) {
+      setUpdateStage('error');
+      setUpdateError(e?.message || 'Download fail hua');
+    }
+  };
+
+  const handleInstallUpdate = () => {
+    (window as any).electron?.installUpdate?.();
   };
 
   const handleOpenLogsFolder = async () => {
@@ -1021,40 +1071,111 @@ export default function SettingsPage() {
                   Software Update
                 </CardTitle>
               </CardHeader>
-              <CardContent style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                {checkingUpdate ? (
-                  <p style={{ fontSize: "12.5px", color: "#5a6a84", display: "flex", alignItems: "center", gap: "6px" }}>
-                    <Loader2 style={{ width: "14px", height: "14px" }} className="animate-spin" />
+              <CardContent style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+
+                {/* ── CHECKING ── */}
+                {updateStage === 'checking' && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#5a6a84", fontSize: "13px" }}>
+                    <Loader2 style={{ width: "15px", height: "15px" }} className="animate-spin" />
                     Update check ho raha hai...
-                  </p>
-                ) : updateError ? (
-                  <p style={{ fontSize: "12.5px", color: "#9a3412" }}>{updateError}</p>
-                ) : updateInfo?.hasUpdate ? (
+                  </div>
+                )}
+
+                {/* ── UP TO DATE ── */}
+                {updateStage === 'not-available' && (
+                  <div style={{
+                    padding: "10px 14px", borderRadius: "10px",
+                    background: "#f0fdf4", border: "1.5px solid #bbf7d0",
+                    fontSize: "13px", color: "#15803d", fontWeight: 600,
+                  }}>
+                    ✅ Aap latest version (v{updateCurrent}) use kar rahe hain.
+                  </div>
+                )}
+
+                {/* ── UPDATE AVAILABLE ── */}
+                {updateStage === 'available' && (
                   <div style={{
                     padding: "12px 14px", borderRadius: "10px",
-                    background: "#f0fdf4", border: "1.5px solid #bbf7d0",
+                    background: "#fffbeb", border: "1.5px solid #fcd34d",
                     display: "flex", flexDirection: "column", gap: "8px",
                   }}>
-                    <p style={{ fontSize: "13px", fontWeight: 600, color: "#15803d" }}>
-                      🎉 Naya version available: v{updateInfo.latestVersion}
+                    <p style={{ fontSize: "13px", fontWeight: 700, color: "#92400e" }}>
+                      🎉 Naya version available: v{updateVersion}
                     </p>
-                    <p style={{ fontSize: "11.5px", color: "#5a6a84" }}>
-                      Aapka current version: v{updateInfo.currentVersion}. Niche button se .exe download karein
-                      aur seedha install kar dein — uninstall karne ki zarurat nahi, purane version ke upar
-                      hi update ho jayega.
+                    <p style={{ fontSize: "11.5px", color: "#78350f" }}>
+                      Aapka current version v{updateCurrent} hai. Niche button dabao — app apne aap
+                      download karke install kar dega. Uninstall karne ki <strong>zarurat nahi</strong>.
                     </p>
-                    <Button size="sm" onClick={handleOpenUpdateLink} style={{ width: "fit-content", gap: "6px" }}>
+                    <Button size="sm" onClick={handleDownloadUpdate}
+                      style={{ width: "fit-content", gap: "6px", background: "#d97706", border: "none" }}>
                       <HardDriveDownload style={{ width: "14px", height: "14px" }} />
-                      Update Download Karein
+                      Abhi Download Karein
                     </Button>
                   </div>
-                ) : updateInfo ? (
-                  <p style={{ fontSize: "12.5px", color: "#16a34a" }}>
-                    ✅ Aap latest version (v{updateInfo.currentVersion}) use kar rahe hain.
-                  </p>
-                ) : null}
+                )}
+
+                {/* ── DOWNLOADING (progress bar) ── */}
+                {updateStage === 'downloading' && (
+                  <div style={{
+                    padding: "12px 14px", borderRadius: "10px",
+                    background: "#eff6ff", border: "1.5px solid #93c5fd",
+                    display: "flex", flexDirection: "column", gap: "8px",
+                  }}>
+                    <p style={{ fontSize: "13px", fontWeight: 600, color: "#1e40af" }}>
+                      ⬇️ Download ho raha hai... {updatePercent}%
+                    </p>
+                    <div style={{
+                      height: "8px", borderRadius: "999px",
+                      background: "#dbeafe", overflow: "hidden",
+                    }}>
+                      <div style={{
+                        height: "100%", borderRadius: "999px",
+                        background: "#3b82f6",
+                        width: `${updatePercent}%`,
+                        transition: "width 0.3s ease",
+                      }} />
+                    </div>
+                    <p style={{ fontSize: "11px", color: "#3b82f6" }}>
+                      Kripya wait karein, band mat karein...
+                    </p>
+                  </div>
+                )}
+
+                {/* ── DOWNLOADED — INSTALL READY ── */}
+                {updateStage === 'downloaded' && (
+                  <div style={{
+                    padding: "12px 14px", borderRadius: "10px",
+                    background: "#f0fdf4", border: "1.5px solid #86efac",
+                    display: "flex", flexDirection: "column", gap: "8px",
+                  }}>
+                    <p style={{ fontSize: "13px", fontWeight: 700, color: "#15803d" }}>
+                      ✅ v{updateVersion} download complete!
+                    </p>
+                    <p style={{ fontSize: "11.5px", color: "#166534" }}>
+                      Install button dabao — app band hokar update install karega aur dobara khul jayega.
+                    </p>
+                    <Button size="sm" onClick={handleInstallUpdate}
+                      style={{ width: "fit-content", gap: "6px", background: "#16a34a", border: "none" }}>
+                      <HardDriveDownload style={{ width: "14px", height: "14px" }} />
+                      Install Karein &amp; Restart
+                    </Button>
+                  </div>
+                )}
+
+                {/* ── ERROR ── */}
+                {updateStage === 'error' && (
+                  <div style={{
+                    padding: "10px 14px", borderRadius: "10px",
+                    background: "#fff1f2", border: "1.5px solid #fca5a5",
+                    fontSize: "12.5px", color: "#9a3412",
+                  }}>
+                    ⚠️ {updateError}
+                  </div>
+                )}
+
                 <Button
-                  variant="outline" size="sm" onClick={handleCheckForUpdate} disabled={checkingUpdate}
+                  variant="outline" size="sm" onClick={handleCheckForUpdate}
+                  disabled={updateStage === 'checking' || updateStage === 'downloading'}
                   style={{ width: "fit-content", fontSize: "12px" }}
                 >
                   Dobara Check Karein
