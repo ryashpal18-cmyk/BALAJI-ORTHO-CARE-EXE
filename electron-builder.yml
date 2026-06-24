@@ -11,6 +11,7 @@ files:
   - dist/**
   - main.js
   - preload.js
+  - logger.cjs
   - package.json
 
 win:
