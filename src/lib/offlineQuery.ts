@@ -1,10 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
 // Offline-aware query/mutation helpers
-//
-// Ye file har table ke liye generic "cache-first, network-refresh" read aur
-// "queue-if-offline, sync-later" write logic deti hai. useDatabase.ts aur
-// useOrtho.ts ke andar saare hooks isi par bante hain — taaki har page
-// automatically offline-capable ho jaye, bina alag-alag jagah dohrana.
 // ─────────────────────────────────────────────────────────────────────────
 
 import { supabase } from "@/integrations/supabase/client";
@@ -18,13 +13,6 @@ import {
   tempId,
 } from "./offlineDb";
 
-/**
- * Offline-first list fetch: returns cached rows immediately if offline /
- * on error, otherwise fetches fresh rows, caches them, and returns them.
- *
- * `fetcher` should run the real Supabase query and return the raw rows
- * (already including any joined relations) exactly as the UI expects them.
- */
 export async function offlineFetch<T = any>(
   table: string,
   fetcher: () => Promise<T[]>,
@@ -39,26 +27,15 @@ export async function offlineFetch<T = any>(
 
   try {
     const rows = await fetcher();
-    // Cache replace only makes sense for plain table snapshots; callers that
-    // pass filtered/joined queries still benefit from caching the rows they
-    // got (keyed by id), so other filtered views can read a superset later.
     await cacheReplaceTable(table, rows as any[], idField);
     return rows;
   } catch (err) {
-    // Network blip mid-request — fall back to whatever is cached so the UI
-    // still shows usable data instead of an error screen.
     const cached = await cacheGetAll(table);
     if (cached.length) return cached as T[];
     throw err;
   }
 }
 
-/**
- * Like offlineFetch, but for queries scoped to a subset (e.g. "today's
- * appointments"). Caches results into the same per-table cache (upsert,
- * not full replace) so cache stays a superset across different filtered
- * views, and falls back to client-side filtering of the cache when offline.
- */
 export async function offlineFetchScoped<T = any>(
   table: string,
   fetcher: () => Promise<T[]>,
@@ -87,11 +64,6 @@ export async function offlineFetchScoped<T = any>(
   }
 }
 
-/**
- * Offline-first insert: tries Supabase directly when online. When offline
- * (or the request fails), saves the row locally with a temp id and queues
- * it for background sync — UI gets an immediate, usable row either way.
- */
 export async function offlineInsert(
   table: string,
   payload: any,
@@ -104,23 +76,31 @@ export async function offlineInsert(
     try {
       const { data, error } = await supabase.from(table as any).insert(payload).select().single();
       if (error) throw error;
+
+      // ✅ FIX: Agar patient insert hua to billing cache mein bhi patient naam update karo
       await cacheUpsertRow(table, data, idField);
+      if (table === "patients") {
+        await _updatePatientNameInBillingCache(data);
+      }
+
       return data;
     } catch (err) {
-      // fall through to offline path below so the user's work isn't lost
+      // fall through to offline path
     }
   }
 
   const localRow = { ...payload, [idField]: payload[idField] || tempId(), _pendingSync: true };
   await cacheUpsertRow(table, localRow, idField);
   await queueAdd({ table, op: "insert", payload: localRow, tempId: localRow[idField] });
+
+  // ✅ FIX: Offline patient insert pe bhi billing cache update karo
+  if (table === "patients") {
+    await _updatePatientNameInBillingCache(localRow);
+  }
+
   return localRow;
 }
 
-/**
- * Offline-first update: tries Supabase directly when online; otherwise
- * patches the cached row locally and queues the update for later sync.
- */
 export async function offlineUpdate(
   table: string,
   rowId: string,
@@ -149,10 +129,6 @@ export async function offlineUpdate(
   return merged;
 }
 
-/**
- * Offline-first delete: tries Supabase directly when online; otherwise
- * removes the row from local cache and queues the delete for later sync.
- */
 export async function offlineDelete(table: string, rowId: string): Promise<void> {
   const online = await isOnline();
 
@@ -169,4 +145,34 @@ export async function offlineDelete(table: string, rowId: string): Promise<void>
 
   await cacheDeleteRow(table, rowId);
   await queueAdd({ table, op: "delete", rowId });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ✅ HELPER: Billing cache mein patient naam inject karo
+// Jab bhi naya patient aaye — cached billing rows mein uska naam daal do
+// taaki offline billing mein naam dikh sake
+// ─────────────────────────────────────────────────────────────────────────
+async function _updatePatientNameInBillingCache(patient: any) {
+  try {
+    const patientId = patient?.id;
+    if (!patientId) return;
+
+    const billingRows = await cacheGetAll("billing");
+    for (const bill of billingRows) {
+      if (bill.patient_id === patientId) {
+        // billing row mein patients joined object inject karo
+        const updatedBill = {
+          ...bill,
+          patients: {
+            name: patient.name || "",
+            mobile: patient.mobile || "",
+            address: patient.address || "",
+          },
+        };
+        await cacheUpsertRow("billing", updatedBill, "id");
+      }
+    }
+  } catch {
+    // helper failure kabhi UI rok nahi sakta
+  }
 }
