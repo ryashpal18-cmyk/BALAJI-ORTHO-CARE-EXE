@@ -414,17 +414,20 @@ export default function Billing() {
   const navPatientConsumedRef = useRef(false);
 
   // OPD se "navigate('/billing', { state: { patientId, patientName } })" karke aate hain —
-  // patient list load hote hi usko select karo aur New Bill dialog khol do.
+  // Pehle patients list mein dhoondo; offline naye patient ka ID "local_xxx" hota hai
+  // aur cache refresh hone mein thodi der lag sakti hai — isliye match nahi mile to bhi
+  // navState ke patientId + patientName se seedha dialog khol do.
   useEffect(() => {
     const navState = location.state as { patientId?: string; patientName?: string } | null;
-    if (!navState?.patientId || !patients || navPatientConsumedRef.current) return;
-    const match = patients.find((p: any) => p.id === navState.patientId);
-    if (match) {
-      setSelectedPatient(match.id);
-      setPatientSearch(match.name || navState.patientName || "");
-      setOpen(true);
-      navPatientConsumedRef.current = true; // dobara re-trigger na ho
-    }
+    if (!navState?.patientId || navPatientConsumedRef.current) return;
+
+    const match = patients?.find((p: any) => p.id === navState.patientId);
+
+    // Match mila ya nahi — dono case mein dialog kholo
+    setSelectedPatient(match?.id || navState.patientId);
+    setPatientSearch(match?.name || navState.patientName || "");
+    setOpen(true);
+    navPatientConsumedRef.current = true;
   }, [location.state, patients]);
 
 
@@ -473,9 +476,15 @@ const filteredPatients = patients
 })
 
 .sort(
- (a,b)=>
- new Date(b.created_at).getTime() -
- new Date(a.created_at).getTime()
+ (a,b)=>{
+   // _pendingSync wale (naye offline patients) hamesha upar
+   if (a._pendingSync && !b._pendingSync) return -1;
+   if (!a._pendingSync && b._pendingSync) return 1;
+   // created_at missing ho to naye maano (upar rakho)
+   const ta = a.created_at ? new Date(a.created_at).getTime() : Date.now();
+   const tb = b.created_at ? new Date(b.created_at).getTime() : Date.now();
+   return tb - ta;
+ }
 );
 
   const addServiceRow = () => setServices((prev) => [...prev, { name: "", amount: "" }]);
