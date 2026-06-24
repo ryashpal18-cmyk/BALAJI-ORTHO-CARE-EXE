@@ -4,7 +4,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { queueGetAll, queueRemove, queueUpdate, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, QueuedMutation } from "./offlineDb";
-import { logger } from "./logger";
+
 
 declare global {
   interface Window {
@@ -53,13 +53,13 @@ if (typeof window !== "undefined") {
     const really = await isOnline();
     emitNetworkChange(really);
     if (really) {
-      logger.info("SYNC", "Internet aa gayi — sync + data download shuru");
+      console.info("Internet aa gayi — sync + data download shuru");
       runSync();
       downloadAllDataToCache(); // ✅ Internet aate hi fresh data download karo
     }
   });
   window.addEventListener("offline", () => {
-    logger.warn("SYNC", "Internet chali gayi — offline mode");
+    console.warn("Internet chali gayi — offline mode");
     emitNetworkChange(false);
   });
 }
@@ -78,7 +78,7 @@ export async function downloadAllDataToCache(): Promise<void> {
   if (!online) return;
 
   downloadInProgress = true;
-  logger.info("SYNC", "Poora data PC mein download ho raha hai...");
+  console.info("Poora data PC mein download ho raha hai...");
 
   try {
     // 1. Patients — sabse pehle (baaki sab iske upar depend karte hain)
@@ -88,7 +88,7 @@ export async function downloadAllDataToCache(): Promise<void> {
       .order("name");
     if (patients && patients.length > 0) {
       await cacheReplaceTable("patients", patients);
-      logger.info("SYNC", `${patients.length} patients PC mein save ho gaye`);
+      console.info(`${patients.length} patients PC mein save ho gaye`);
     }
 
     // 2. Billing — patient naam ke saath (joined)
@@ -98,7 +98,7 @@ export async function downloadAllDataToCache(): Promise<void> {
       .order("created_at", { ascending: false });
     if (billing && billing.length > 0) {
       await cacheReplaceTable("billing", billing);
-      logger.info("SYNC", `${billing.length} bills PC mein save ho gaye`);
+      console.info(`${billing.length} bills PC mein save ho gaye`);
     }
 
     // 3. Appointments
@@ -108,7 +108,7 @@ export async function downloadAllDataToCache(): Promise<void> {
       .order("date", { ascending: false });
     if (appointments && appointments.length > 0) {
       await cacheReplaceTable("appointments", appointments);
-      logger.info("SYNC", `${appointments.length} appointments PC mein save ho gaye`);
+      console.info(`${appointments.length} appointments PC mein save ho gaye`);
     }
 
     // 4. Prescriptions
@@ -119,7 +119,7 @@ export async function downloadAllDataToCache(): Promise<void> {
       .limit(500);
     if (prescriptions && prescriptions.length > 0) {
       await cacheReplaceTable("prescriptions", prescriptions);
-      logger.info("SYNC", `${prescriptions.length} prescriptions PC mein save ho gaye`);
+      console.info(`${prescriptions.length} prescriptions PC mein save ho gaye`);
     }
 
     // 5. Physiotherapy sessions
@@ -130,7 +130,7 @@ export async function downloadAllDataToCache(): Promise<void> {
       .limit(500);
     if (physio && physio.length > 0) {
       await cacheReplaceTable("physiotherapy_sessions", physio);
-      logger.info("SYNC", `${physio.length} physio sessions PC mein save ho gaye`);
+      console.info(`${physio.length} physio sessions PC mein save ho gaye`);
     }
 
     // 6. Beds
@@ -140,12 +140,12 @@ export async function downloadAllDataToCache(): Promise<void> {
       .order("bed_number", { ascending: true });
     if (beds && beds.length > 0) {
       await cacheReplaceTable("beds", beds);
-      logger.info("SYNC", `${beds.length} beds PC mein save ho gaye`);
+      console.info(`${beds.length} beds PC mein save ho gaye`);
     }
 
-    logger.info("SYNC", "✅ Saara data PC mein save ho gaya — ab offline bhi kaam karega");
+    console.info("✅ Saara data PC mein save ho gaya — ab offline bhi kaam karega");
   } catch (err) {
-    logger.error("SYNC", "Data download mein error aaya", err);
+    console.error("Data download mein error aaya");
   } finally {
     downloadInProgress = false;
   }
@@ -175,9 +175,9 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     const payload = { ...m.payload };
     if (m.tempId) delete payload.id;
     const { data, error } = await supabase.from(table).insert(payload).select().single();
-    if (error) { logger.error("SUPABASE", `Insert failed — table: ${table}`, error); throw error; }
+    if (error) { console.error(`Insert failed — table: ${table}`); throw error; }
     if (m.tempId && data) await cacheReplaceRowKey(table, m.tempId, data, "id");
-    logger.info("SYNC", `Insert sync OK — table: ${table}`);
+    console.info(`Insert sync OK — table: ${table}`);
     return;
   }
 
@@ -185,8 +185,8 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     if (!m.rowId) throw new Error("update mutation missing rowId");
     if (m.rowId.startsWith("local_")) throw new Error("PENDING_PARENT_INSERT");
     const { error } = await supabase.from(table).update(m.payload).eq("id", m.rowId);
-    if (error) { logger.error("SUPABASE", `Update failed — table: ${table}`, error); throw error; }
-    logger.info("SYNC", `Update sync OK — table: ${table}`);
+    if (error) { console.error(`Update failed — table: ${table}`); throw error; }
+    console.info(`Update sync OK — table: ${table}`);
     return;
   }
 
@@ -194,22 +194,22 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     if (!m.rowId) throw new Error("delete mutation missing rowId");
     if (m.rowId.startsWith("local_")) { await cacheDeleteRow(table, m.rowId); return; }
     const { error } = await supabase.from(table).delete().eq("id", m.rowId);
-    if (error) { logger.error("SUPABASE", `Delete failed — table: ${table}`, error); throw error; }
+    if (error) { console.error(`Delete failed — table: ${table}`); throw error; }
     return;
   }
 
   if (m.op === "sms") {
     const { mobile, message, patientName, smsType } = m.payload;
-    logger.info("SMS", `SMS bhej raha hai — patient: ${patientName}`);
+    console.info(`SMS bhej raha hai — patient: ${patientName}`);
     const res = await fetch(import.meta.env.VITE_TEXTBEE_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_TEXTBEE_API_KEY },
       body: JSON.stringify({ deviceId: import.meta.env.VITE_TEXTBEE_DEVICE_ID, recipients: [mobile], message }),
     });
-    if (!res.ok) { logger.error("SMS", `SMS fail (${res.status})`); throw new Error(`SMS gateway error (${res.status})`); }
+    if (!res.ok) { console.error(`SMS fail (${res.status})`); throw new Error(`SMS gateway error (${res.status})`); }
     try {
       await supabase.from("sms_logs" as any).insert({ patient_name: patientName, mobile, message, status: "sent", sms_type: smsType } as any);
-    } catch { logger.warn("SMS", "SMS gaya par log save nahi hua"); }
+    } catch { console.warn("SMS gaya par log save nahi hua"); }
     return;
   }
 
@@ -222,11 +222,11 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     const ext = (fileName || "").split(".").pop() || "jpg";
     const path = `${patientId}/${caseId}/${Date.now()}.${ext}`;
     const { error: upErr } = await supabase.storage.from("xray-files").upload(path, blob, { upsert: false });
-    if (upErr) { logger.error("DICOM", `X-ray upload fail`, upErr); throw upErr; }
+    if (upErr) { console.error(`X-ray upload fail`); throw upErr; }
     const { data: signed } = await supabase.storage.from("xray-files").createSignedUrl(path, 60 * 60 * 24 * 365);
     const file_url = signed?.signedUrl || path;
     const { error } = await supabase.from("fracture_xrays" as any).insert({ fracture_case_id: caseId, patient_id: patientId, file_url } as any);
-    if (error) { logger.error("DICOM", `X-ray DB insert fail`, error); throw error; }
+    if (error) { console.error(`X-ray DB insert fail`); throw error; }
     return;
   }
 }
@@ -246,7 +246,7 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
     let queue = await queueGetAll();
     queue = queue.sort((a, b) => (a.id || 0) - (b.id || 0));
 
-    if (queue.length > 0) logger.info("SYNC", `Sync shuru — ${queue.length} items pending`);
+    if (queue.length > 0) console.info(`Sync shuru — ${queue.length} items pending`);
 
     for (const m of queue) {
       try {
@@ -256,18 +256,18 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
       } catch (err: any) {
         const msg = err?.message || String(err);
         if (msg === "PENDING_PARENT_INSERT") continue;
-        logger.error("SYNC", `Mutation fail — op: ${m.op}, table: ${m.table}`, msg);
+        console.error(`Mutation fail — op: ${m.op});
         if (m.id !== undefined) {
           const retries = (m.retries || 0) + 1;
           await queueUpdate(m.id, { retries, lastError: msg });
-          if (retries >= MAX_RETRIES) logger.error("SYNC", `MAX RETRIES — permanently failed! op: ${m.op}`, m);
+          if (retries >= MAX_RETRIES) console.error(`MAX RETRIES — permanently failed! op: ${m.op}`);
         }
         lastError = msg;
       }
     }
 
     if (synced > 0) {
-      logger.info("SYNC", `✅ Sync complete — ${synced} items upload ho gaye`);
+      console.info(`✅ Sync complete — ${synced} items upload ho gaye`);
       // ✅ Sync ke baad fresh data download karo
       await downloadAllDataToCache();
     }
@@ -285,13 +285,13 @@ let autoSyncStarted = false;
 export function startAutoSync() {
   if (autoSyncStarted) return;
   autoSyncStarted = true;
-  logger.info("SYNC", "Auto-sync engine start");
+  console.info("Auto-sync engine start");
 
   // App start hone ke 3 second baad pehle data download karo
   setTimeout(async () => {
     const online = typeof navigator !== "undefined" ? navigator.onLine : false;
     if (online) {
-      logger.info("SYNC", "App start — pehle data download ho raha hai");
+      console.info("App start — pehle data download ho raha hai");
       await downloadAllDataToCache();
       await runSync();
     }
@@ -304,3 +304,4 @@ export function startAutoSync() {
     if (online) runSync();
   }, 30000);
 }
+
