@@ -11,6 +11,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require('electron')
 const path  = require('path');
 const fs    = require('fs');
 const https = require('https');
+const { autoUpdater } = require('electron-updater');
 const logger = require('./logger.cjs');
 
 // Process-level crash/error handlers jitni jaldi ho sake set kar do, taaki
@@ -651,60 +652,71 @@ ipcMain.handle('app:getVersion', async () => ({
   platform: process.platform,
 }));
 
-// ─── UPDATE CHECK (GitHub Releases — manual download, no auto-install) ───────
-const UPDATE_REPO = 'ryashpal18-cmyk/BALAJI-ORTHO-CARE-EXE';
+// ─── AUTO-UPDATER (electron-updater — GitHub Releases, silent download) ──────
+// electron-updater NSIS ke saath background mein .exe download kar leta hai,
+// fir ek click par install + restart ho jaata hai — uninstall zaruri nahi.
 
-function compareVersions(a, b) {
-  const pa = a.replace(/^v/i, '').split('.').map(Number);
-  const pb = b.replace(/^v/i, '').split('.').map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] || 0, nb = pb[i] || 0;
-    if (na > nb) return 1;
-    if (na < nb) return -1;
+autoUpdater.autoDownload    = false; // pehle user ko poochho, tab download
+autoUpdater.autoInstallOnAppQuit = false;
+
+// Renderer ko update events forward karo
+function sendUpdateStatus(event, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('updater:status', { event, ...payload });
   }
-  return 0;
 }
 
+autoUpdater.on('checking-for-update',  ()      => sendUpdateStatus('checking'));
+autoUpdater.on('update-not-available', (info)  => sendUpdateStatus('not-available', { currentVersion: app.getVersion() }));
+autoUpdater.on('error',                (err)   => {
+  logger.logError('auto-updater', err.message);
+  sendUpdateStatus('error', { error: err.message });
+});
+autoUpdater.on('update-available', (info) => {
+  logger.logInfo('auto-updater', `Naya version available: ${info.version}`);
+  sendUpdateStatus('available', {
+    latestVersion:  info.version,
+    currentVersion: app.getVersion(),
+    notes:          info.releaseNotes || '',
+  });
+});
+autoUpdater.on('download-progress', (progress) => {
+  sendUpdateStatus('progress', {
+    percent:        Math.round(progress.percent),
+    transferred:    progress.transferred,
+    total:          progress.total,
+    bytesPerSecond: progress.bytesPerSecond,
+  });
+});
+autoUpdater.on('update-downloaded', (info) => {
+  logger.logInfo('auto-updater', `Download complete: ${info.version}`);
+  sendUpdateStatus('downloaded', { latestVersion: info.version });
+});
+
+// IPC: React se check trigger karna
 ipcMain.handle('app:checkForUpdate', async () => {
   try {
-    const data = await new Promise((resolve, reject) => {
-      const req = https.request({
-        hostname: 'api.github.com',
-        path: `/repos/${UPDATE_REPO}/releases/latest`,
-        method: 'GET',
-        headers: { 'User-Agent': 'BalajiOrthoCare-App' },
-      }, (res) => {
-        let body = '';
-        res.on('data', (c) => (body += c));
-        res.on('end', () => {
-          if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
-          try { resolve(JSON.parse(body)); } catch (e) { reject(e); }
-        });
-      });
-      req.on('error', reject);
-      req.setTimeout(10000, () => { req.destroy(); reject(new Error('timeout')); });
-      req.end();
-    });
-
-    const latestVersion = (data.tag_name || '').replace(/^v/i, '');
-    const currentVersion = app.getVersion();
-    const hasUpdate = latestVersion && compareVersions(latestVersion, currentVersion) > 0;
-
-    // .exe asset dhoondo (NSIS installer) — agar nahi mile to release page hi de do
-    const asset = (data.assets || []).find((a) => a.name?.toLowerCase().endsWith('.exe'));
-
-    return {
-      success: true,
-      hasUpdate: !!hasUpdate,
-      currentVersion,
-      latestVersion: latestVersion || currentVersion,
-      releaseUrl: data.html_url || `https://github.com/${UPDATE_REPO}/releases/latest`,
-      downloadUrl: asset?.browser_download_url || data.html_url || '',
-      notes: data.body || '',
-    };
+    await autoUpdater.checkForUpdates();
+    return { success: true, currentVersion: app.getVersion() };
   } catch (err) {
     return { success: false, error: err.message };
   }
+});
+
+// IPC: React se download start karna
+ipcMain.handle('app:downloadUpdate', async () => {
+  try {
+    await autoUpdater.downloadUpdate();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// IPC: Download ke baad install + restart
+ipcMain.handle('app:installUpdate', async () => {
+  autoUpdater.quitAndInstall(false, true); // silent=false, forceRunAfter=true
+  return { success: true };
 });
 
 ipcMain.handle('app:openExternal', async (_e, url) => {
@@ -747,6 +759,10 @@ app.whenReady().then(() => {
   logger.cleanOldLogs();
   logger.logInfo('app-lifecycle', `App started — version ${app.getVersion()}`);
   createWindow();
+  // App ready hone ke 8 sec baad silently update check karo
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch(e => logger.logWarn('auto-updater', `Startup check fail: ${e.message}`));
+  }, 8000);
   setTimeout(runAutoSync, 5000);
   setInterval(runAutoSync, 60 * 1000);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
