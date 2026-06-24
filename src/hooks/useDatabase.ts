@@ -356,7 +356,18 @@ export function useAddPatient() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (p: any) => offlineInsert("patients", p),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["patients"] }),
+    onSuccess: (newPatient: any) => {
+      // Cache mein seedha inject karo — invalidate + refetch ka wait nahi karna
+      // Billing page navigate hote hi naya patient list mein dikh jaayega
+      qc.setQueryData(["patients"], (old: any[] | undefined) => {
+        const existing = old || [];
+        // duplicate avoid karo
+        const filtered = existing.filter((p: any) => p.id !== newPatient.id);
+        return [newPatient, ...filtered];
+      });
+      // Background mein invalidate bhi karo taaki fresh data aaye
+      qc.invalidateQueries({ queryKey: ["patients"] });
+    },
   });
 }
 
