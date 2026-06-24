@@ -317,6 +317,7 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
   container.style.opacity = "0.01";
   container.style.width = "5.5in";
   container.style.background = "#ffffff";
+  container.style.pointerEvents = "none"; // ✅ White screen fix: click block nahi karega
   document.body.appendChild(container);
 
   // Wait for images to load
@@ -568,6 +569,9 @@ const filteredPatients = patients
       // Jo bhi items type kiye the, unhe catalog mein yaad kar lo
       learnServiceItems(validServices.map((s) => ({ name: s.name, amount: parseFloat(s.amount) || 0 })));
 
+      // ✅ FIX: PDF auto-generate nahi karo — white screen aati thi
+      // PDF sirf tab generate hogi jab user manually PDF/WhatsApp button dabaye
+
       // Patient naam result mein nahi aaya to patients cache se lo
       let patient = result.patients as any;
       if (!patient?.name && selectedPatient) {
@@ -681,7 +685,8 @@ const filteredPatients = patients
         amount_paid: paidNum,
         payment_mode: paymentMode,
       };
-      await generateAndUploadPDF(updatedBill);
+      // ✅ FIX: Edit save pe bhi PDF auto-generate nahi — white screen aati thi
+      // PDF sirf manual button se generate hogi
 
       const patient = editingBill.patients as any;
       const mobile = patient?.mobile || "";
