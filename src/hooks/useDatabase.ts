@@ -141,7 +141,8 @@ export function useBills() {
 export function usePatients() {
   return useQuery({
     queryKey: ["patients"],
-    staleTime: 30000,
+    staleTime: 0,
+    refetchOnMount: true,
     queryFn: async () => {
       const rows = await offlineFetch("patients", async () => {
         const { data, error } = await supabase.from("patients").select("*").order("name");
