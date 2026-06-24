@@ -51,6 +51,7 @@ import {
 import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { isOnline } from "@/lib/offlineSync";
 import * as XLSX from "xlsx";
 import html2pdf from "html2pdf.js";
 import { openWhatsAppWeb } from "@/pages/WhatsApp";
@@ -360,25 +361,27 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
     const invoiceNo = `INV-${bill.id.slice(0, 8).toUpperCase()}`;
     const fileName = `${invoiceNo}-${Date.now()}.pdf`;
 
+    // PDF upload sirf online ho tab karo — offline ho to silently skip
+    const online = await isOnline();
+    if (!online) return null;
+
     const { error: uploadError } = await supabase.storage
       .from("invoices")
       .upload(fileName, pdfBlob, { contentType: "application/pdf", upsert: true });
 
-    if (uploadError) {
-      console.error("Upload error:", uploadError);
-      return null;
-    }
+    if (uploadError) return null; // upload fail — koi error nahi dikhana
 
     const { data: urlData } = supabase.storage.from("invoices").getPublicUrl(fileName);
-    await supabase
-      .from("billing")
-      .update({ invoice_pdf_url: urlData.publicUrl } as any)
-      .eq("id", bill.id);
+    try {
+      await supabase
+        .from("billing")
+        .update({ invoice_pdf_url: urlData.publicUrl } as any)
+        .eq("id", bill.id);
+    } catch { /* URL save fail hona koi badi baat nahi */ }
 
     return urlData.publicUrl;
   } catch (err) {
-    console.error("PDF generation error:", err);
-    return null;
+    return null; // koi bhi error silently ignore
   } finally {
     document.body.removeChild(container);
   }
@@ -478,12 +481,15 @@ const filteredPatients = patients
   const handleDeleteBill = useCallback(
     async (bill: any) => {
       try {
-        // Delete PDF from storage if exists
+        // Delete PDF from storage only if online (offline me skip karo)
         const pdfUrl = (bill as any).invoice_pdf_url;
         if (pdfUrl) {
-          const urlParts = pdfUrl.split("/invoices/");
-          if (urlParts[1]) {
-            await supabase.storage.from("invoices").remove([urlParts[1]]);
+          const online = await isOnline();
+          if (online) {
+            try {
+              const urlParts = pdfUrl.split("/invoices/");
+              if (urlParts[1]) await supabase.storage.from("invoices").remove([urlParts[1]]);
+            } catch { /* storage delete fail — koi dikkat nahi */ }
           }
         }
 
@@ -534,7 +540,16 @@ const filteredPatients = patients
       // Jo bhi items type kiye the, unhe catalog mein yaad kar lo
       learnServiceItems(validServices.map((s) => ({ name: s.name, amount: parseFloat(s.amount) || 0 })));
 
-      const patient = result.patients as any;
+      // Patient naam result mein nahi aaya to patients cache se lo
+      let patient = result.patients as any;
+      if (!patient?.name && selectedPatient) {
+        try {
+          const { cacheGetAll } = await import("@/lib/offlineDb");
+          const cachedPatients = await cacheGetAll("patients");
+          const found = cachedPatients.find((p: any) => p.id === selectedPatient);
+          if (found) patient = found;
+        } catch { /* cache miss — ignore */ }
+      }
       const patientName = patient?.name || "Patient";
       const mobile = patient?.mobile || "";
 
