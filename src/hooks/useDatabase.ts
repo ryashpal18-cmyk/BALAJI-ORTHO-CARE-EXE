@@ -141,15 +141,29 @@ export function useBills() {
 export function usePatients() {
   return useQuery({
     queryKey: ["patients"],
-    staleTime: 0,
+    staleTime: 30000, // ✅ 30 sec — setQueryData ka data turant dikh jaayega
     refetchOnMount: true,
     queryFn: async () => {
-      const rows = await offlineFetch("patients", async () => {
-        const { data, error } = await supabase.from("patients").select("*").order("name");
-        if (error) throw error;
-        return data || [];
-      });
-      return [...rows].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+      // ✅ Pehle IndexedDB cache se lo (naye offline patients bhi milenge)
+      const cached = await cacheGetAll("patients");
+
+      // Online hai to Supabase se fresh data lo aur cache update karo
+      const online = typeof navigator !== "undefined" ? navigator.onLine : false;
+      if (online) {
+        try {
+          const { data, error } = await supabase.from("patients").select("*").order("name");
+          if (!error && data && data.length > 0) {
+            // Offline mein register hue patients cache mein hain — merge karo
+            const onlineIds = new Set(data.map((p: any) => p.id));
+            const offlineOnly = cached.filter((p: any) => !onlineIds.has(p.id));
+            const merged = [...data, ...offlineOnly];
+            return merged.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+          }
+        } catch { /* network fail — cache use karo */ }
+      }
+
+      // Offline — sirf cache se do (naye patients bhi hain yahan)
+      return [...cached].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
     },
   });
 }
