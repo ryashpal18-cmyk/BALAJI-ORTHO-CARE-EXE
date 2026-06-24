@@ -14,6 +14,9 @@ import { useNavigate } from "react-router-dom";
 import { useAddPatient, useSearchPatients, useAddPrescription, usePatients, useDeletePatient } from "@/hooks/useDatabase";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { cacheGetAll } from "@/lib/offlineDb";
+import { isOnline } from "@/lib/offlineSync";
+import { offlineUpdate } from "@/lib/offlineQuery";
 import { openWhatsAppWeb } from "@/pages/WhatsApp";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 
@@ -113,14 +116,32 @@ export default function OPD() {
     if (cleanMobile.length >= 10) {
       setMobileSearchStatus("searching");
       try {
-        const { data, error } = await supabase
-          .from("patients")
-          .select("*")
-          .or(`mobile.eq.${cleanMobile},mobile.eq.+91${cleanMobile},mobile.ilike.%${cleanMobile.slice(-10)}%`)
-          .limit(1);
+        let patient: any = null;
 
-        if (!error && data && data.length > 0) {
-          const patient = data[0];
+        // Pehle online try karo
+        const online = await isOnline();
+        if (online) {
+          try {
+            const { data, error } = await supabase
+              .from("patients")
+              .select("*")
+              .or(`mobile.eq.${cleanMobile},mobile.eq.+91${cleanMobile},mobile.ilike.%${cleanMobile.slice(-10)}%`)
+              .limit(1);
+            if (!error && data && data.length > 0) patient = data[0];
+          } catch { /* offline fallback neeche */ }
+        }
+
+        // Offline ya online mein nahi mila — cache mein dhundo
+        if (!patient) {
+          const cached = await cacheGetAll("patients");
+          const last10 = cleanMobile.slice(-10);
+          patient = cached.find((p: any) => {
+            const m = (p.mobile || "").replace(/\D/g, "");
+            return m === cleanMobile || m === last10 || m.endsWith(last10);
+          }) || null;
+        }
+
+        if (patient) {
           setExistingPatient(patient);
           setRegForm({
             mobile,
@@ -163,13 +184,15 @@ export default function OPD() {
       let patientId = existingPatient?.id;
 
       if (existingPatient) {
-        // Update existing patient details if changed
-        await supabase.from("patients").update({
-          name: regForm.name,
-          age: regForm.age ? parseInt(regForm.age) : null,
-          gender: regForm.gender || null,
-          address: regForm.address || null,
-        }).eq("id", existingPatient.id);
+        // Update existing patient details if changed (offline-safe)
+        try {
+          await offlineUpdate("patients", existingPatient.id, {
+            name: regForm.name,
+            age: regForm.age ? parseInt(regForm.age) : null,
+            gender: regForm.gender || null,
+            address: regForm.address || null,
+          });
+        } catch { /* update fail hona registration rok nahi sakta */ }
         toast({ title: "✅ Patient Found", description: `${regForm.name} already registered — details updated` });
       } else {
         // Create new patient
