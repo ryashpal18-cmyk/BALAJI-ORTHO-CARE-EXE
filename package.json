@@ -1,6 +1,6 @@
 {
   "name": "balaji-ortho-connect",
-  "version": "1.0.9",
+  "version": "1.0.4",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -11,6 +11,7 @@
     "dist": "npm run build && electron-builder --win portable"
   },
   "dependencies": {
+    "electron-updater": "^6.3.9",
     "@hookform/resolvers": "^3.9.0",
     "@radix-ui/react-accordion": "^1.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.1",
