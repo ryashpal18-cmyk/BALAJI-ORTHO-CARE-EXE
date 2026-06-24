@@ -89,7 +89,15 @@ export async function offlineInsert(
     }
   }
 
-  const localRow = { ...payload, [idField]: payload[idField] || tempId(), _pendingSync: true };
+  const localRow = {
+    ...payload,
+    [idField]: payload[idField] || tempId(),
+    // ✅ FIX: created_at missing hone se billing list date-filter karte waqt
+    // "Invalid Date" crash ho jaata tha (white screen) — ab offline insert pe
+    // bhi timestamp guaranteed milega, jaisa Supabase online insert pe deta hai.
+    created_at: payload.created_at || new Date().toISOString(),
+    _pendingSync: true,
+  };
   await cacheUpsertRow(table, localRow, idField);
   await queueAdd({ table, op: "insert", payload: localRow, tempId: localRow[idField] });
 
