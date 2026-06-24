@@ -8,10 +8,9 @@ directories:
 asar: false
 
 publish:
-  provider: github
-  owner: ryashpal18-cmyk
-  repo: BALAJI-ORTHO-CARE-EXE
-  releaseType: release
+  - provider: github
+    owner: ryashpal18-cmyk
+    repo: BALAJI-ORTHO-CARE-EXE
 
 files:
   - dist/**
