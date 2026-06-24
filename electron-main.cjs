@@ -2,34 +2,30 @@ const { app, BrowserWindow, shell, dialog, ipcMain } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
-// ✅ Logger import — logger.cjs same folder me hai
+// ✅ Logger — C:\Balaji_Health_Backup\logs\ mein files likhta hai
 const { logInfo, logWarn, logError, cleanOldLogs, setupGlobalHandlers, getLogDir } = require("./logger.cjs");
 
 let mainWindow;
 let whatsappWindow = null;
 
-// ✅ Process-level crashes aur unhandled rejections pakadna
+// ✅ Uncaught errors aur promise rejections pakadna
 setupGlobalHandlers();
 
 // ✅ IPC: React se error log karna
 ipcMain.handle("log:rendererError", (_event, { level, source, message }) => {
-  if (level === "warn")       logWarn(source || "renderer", message);
-  else if (level === "info")  logInfo(source || "renderer", message);
-  else                        logError(source || "renderer", message);
+  if (level === "warn")      logWarn(source  || "renderer", message);
+  else if (level === "info") logInfo(source  || "renderer", message);
+  else                       logError(source || "renderer", message);
 });
 
-// ✅ IPC: Logs folder path dena
-ipcMain.handle("log:getDir", () => {
-  return getLogDir();
-});
+// ✅ IPC: Logs folder path React ko dena
+ipcMain.handle("log:getDir", () => getLogDir());
 
-// ✅ IPC: Logs folder File Explorer me kholna
-ipcMain.handle("log:openFolder", () => {
-  shell.openPath(getLogDir());
-});
+// ✅ IPC: Logs folder File Explorer mein kholna
+ipcMain.handle("log:openFolder", () => shell.openPath(getLogDir()));
 
 function createWindow() {
-  logInfo("main", "App start ho raha hai — window bana raha hai");
+  logInfo("main", "App start ho raha hai");
 
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -59,24 +55,21 @@ function createWindow() {
 
   mainWindow.loadFile(indexPath);
 
-  // ✅ Renderer crash log karna
+  // ✅ Renderer crash log karo
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
-    logError("renderer", `Renderer process gone — reason: ${details.reason}, exitCode: ${details.exitCode}`);
+    logError("renderer", `Renderer crash — reason: ${details.reason}`);
   });
 
-  // ✅ Console errors/warnings bhi log hon
+  // ✅ Console errors bhi log hon (sirf warnings aur errors)
   mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-    if (level >= 2) {
-      const lvl = level === 3 ? "error" : "warn";
-      if (lvl === "error") logError("console", `${message} (${sourceId}:${line})`);
-      else                 logWarn("console",  `${message} (${sourceId}:${line})`);
-    }
+    if (level === 3) logError("console", `${message} (${sourceId}:${line})`);
+    else if (level === 2) logWarn("console", `${message} (${sourceId}:${line})`);
   });
 
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
     mainWindow.maximize();
-    logInfo("main", "Window ready — app visible ho gaya");
+    logInfo("main", "App window ready — visible ho gayi");
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -88,20 +81,18 @@ function createWindow() {
   });
 
   mainWindow.on("closed", () => {
-    logInfo("main", "Main window band ho gayi");
+    logInfo("main", "Window band ho gayi");
     mainWindow = null;
   });
 }
 
-// ✅ WhatsApp Window — Ek baar banegi, bar bar reuse hogi
+// ✅ WhatsApp Window — ek baar banegi, reuse hogi
 function openWhatsAppWindow(url) {
   if (whatsappWindow && !whatsappWindow.isDestroyed()) {
     whatsappWindow.loadURL(url);
     whatsappWindow.focus();
     return;
   }
-
-  logInfo("main", "WhatsApp window bana raha hai");
 
   whatsappWindow = new BrowserWindow({
     width: 1000,
@@ -123,19 +114,18 @@ function openWhatsAppWindow(url) {
   });
 }
 
-// ✅ IPC — React se WhatsApp window kholo
 ipcMain.on("open-whatsapp", (_event, { url }) => {
   openWhatsAppWindow(url || "https://web.whatsapp.com");
 });
 
 app.whenReady().then(() => {
   logInfo("main", `Electron ready — version: ${app.getVersion()}`);
-  cleanOldLogs(); // ✅ 14 din purani log files auto-delete
+  cleanOldLogs();
   createWindow();
 });
 
 app.on("window-all-closed", () => {
-  logInfo("main", "Sab windows band — app quit ho raha hai");
+  logInfo("main", "App quit ho raha hai");
   app.quit();
 });
 
@@ -144,7 +134,6 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", () => {
-  logInfo("main", "App band ho raha hai");
   if (whatsappWindow && !whatsappWindow.isDestroyed()) {
     whatsappWindow.removeAllListeners("close");
     whatsappWindow.close();
