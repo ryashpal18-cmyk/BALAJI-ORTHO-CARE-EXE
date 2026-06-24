@@ -57,12 +57,20 @@ contextBridge.exposeInMainWorld('electron', {
   getBackupDir:    ()       => ipcRenderer.invoke('app:getBackupDir'),
   getXraysDir:     ()       => ipcRenderer.invoke('app:getXraysDir'),
 
-  // ── App Data Backup (Settings → Backup tab) ─────────────────────
+  // ── App Data Backup (Settings → Backup tab) ─────────────────
   backupGetDir:       ()      => ipcRenderer.invoke('backup:getDir'),
   backupWriteJson:    (data)  => ipcRenderer.invoke('backup:writeJson', data),
   backupWriteBinary:  (data)  => ipcRenderer.invoke('backup:writeBinary', data),
   backupList:         ()      => ipcRenderer.invoke('backup:list'),
   backupOpenFolder:   ()      => ipcRenderer.invoke('backup:openFolder'),
+
+  // ── App Info / Diagnostics (About tab + crash logging) ──────
+  getAppVersion:            ()     => ipcRenderer.invoke('app:getVersion'),
+  logRendererError:        (data) => ipcRenderer.invoke('log:rendererError', data),
+  getLogsDir:               ()     => ipcRenderer.invoke('log:getDir'),
+  openLogsFolder:           ()     => ipcRenderer.invoke('log:openFolder'),
+  getSafetySnapshotDir:     ()     => ipcRenderer.invoke('safety:getSnapshotDir'),
+  openSafetySnapshotFolder: ()     => ipcRenderer.invoke('safety:openSnapshotFolder'),
 
   // ── Event Listeners ──────────────────────────────────────────
   on: (channel, callback) => {
