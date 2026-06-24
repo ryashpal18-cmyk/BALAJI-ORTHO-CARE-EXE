@@ -10,6 +10,7 @@ import {
   Users, Eye, EyeOff, Trash2, Plus, ShieldCheck, UserPlus,
   Palette, ToggleLeft, ToggleRight, KeyRound, Check,
   HardDriveDownload, FolderOpen, Clock, CalendarCheck, Loader2, FileJson, FileSpreadsheet,
+  Info, FileWarning, History,
 } from "lucide-react";
 import {
   getStaffUsers, saveStaffUsers, getDashModules, saveDashModules,
@@ -24,7 +25,7 @@ import {
 import { toast } from "@/hooks/use-toast";
 
 // ── Tab type ──
-type Tab = "clinic" | "dashboard" | "users" | "backup";
+type Tab = "clinic" | "dashboard" | "users" | "backup" | "about";
 
 // ── Preset colors ──
 const COLORS = [
@@ -77,6 +78,11 @@ export default function SettingsPage() {
   const [weeklyOn,     setWeeklyOn]       = useState(isWeeklyBackupEnabled());
   const [backupFiles,  setBackupFiles]    = useState<{ name: string; size: number; mtime: number }[]>([]);
   const [backupDir,    setBackupDir]      = useState<string | null>(null);
+
+  // ── About ──
+  const [appVersionInfo, setAppVersionInfo] = useState<{ version: string; electron: string; node: string; platform: string } | null>(null);
+  const [logsDir,        setLogsDir]        = useState<string | null>(null);
+  const [snapshotDir,    setSnapshotDir]    = useState<string | null>(null);
   const [isElectron,   setIsElectron]     = useState(false);
 
   // ── Apply theme to CSS vars on change ──
@@ -90,6 +96,28 @@ export default function SettingsPage() {
     setIsElectron(!!(window as any).electron?.backupGetDir);
     refreshBackupInfo();
   }, [tab]);
+
+  // ── About tab: load version + diagnostics info when opened ──
+  useEffect(() => {
+    if (tab !== "about") return;
+    (async () => {
+      const electron = (window as any).electron;
+      if (electron?.getAppVersion) {
+        const info = await electron.getAppVersion();
+        setAppVersionInfo(info);
+      }
+      if (electron?.getLogsDir) setLogsDir(await electron.getLogsDir());
+      if (electron?.getSafetySnapshotDir) setSnapshotDir(await electron.getSafetySnapshotDir());
+    })();
+  }, [tab]);
+
+  const handleOpenLogsFolder = async () => {
+    await (window as any).electron?.openLogsFolder?.();
+  };
+
+  const handleOpenSnapshotFolder = async () => {
+    await (window as any).electron?.openSafetySnapshotFolder?.();
+  };
 
   const refreshBackupInfo = async () => {
     const dir = await getBackupFolderPath();
@@ -289,6 +317,10 @@ export default function SettingsPage() {
           <button style={TAB_STYLE(tab === "backup")} onClick={() => setTab("backup")}>
             <HardDriveDownload style={{ width: "14px", height: "14px", display: "inline", marginRight: "6px" }} />
             Backup
+          </button>
+          <button style={TAB_STYLE(tab === "about")} onClick={() => setTab("about")}>
+            <Info style={{ width: "14px", height: "14px", display: "inline", marginRight: "6px" }} />
+            About
           </button>
         </div>
 
@@ -894,6 +926,110 @@ export default function SettingsPage() {
                 accha rahega — system crash ya laptop change hone par bhi data surakshit rahega.
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ══════════ TAB 5: ABOUT ══════════ */}
+        {tab === "about" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <Card className="dash-card">
+              <CardHeader>
+                <CardTitle style={{ fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <Info style={{ width: "16px", height: "16px", color: "#1e57b0" }} />
+                  App Info
+                </CardTitle>
+              </CardHeader>
+              <CardContent style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <p style={{ fontSize: "16px", fontWeight: 700, color: "#1a2a4a" }}>Balaji Ortho Care Connect</p>
+                  <p style={{ fontSize: "12.5px", color: "#5a6a84" }}>Balaji Digital X-Ray &amp; Ortho Care Center</p>
+                </div>
+
+                <div style={{
+                  display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px",
+                  padding: "12px 16px", borderRadius: "10px",
+                  background: "#f0f6ff", border: "1.5px solid #d6e6fb",
+                }}>
+                  <div>
+                    <p style={{ fontSize: "11px", color: "#8a9ab0" }}>App Version</p>
+                    <p style={{ fontSize: "13px", fontWeight: 600, color: "#1a3a6b" }}>
+                      {appVersionInfo?.version || "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: "11px", color: "#8a9ab0" }}>Platform</p>
+                    <p style={{ fontSize: "13px", fontWeight: 600, color: "#1a3a6b" }}>
+                      {appVersionInfo?.platform || (isElectron ? "—" : "Browser")}
+                    </p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: "11px", color: "#8a9ab0" }}>Electron</p>
+                    <p style={{ fontSize: "13px", fontWeight: 600, color: "#1a3a6b" }}>
+                      {appVersionInfo?.electron || "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: "11px", color: "#8a9ab0" }}>Node</p>
+                    <p style={{ fontSize: "13px", fontWeight: 600, color: "#1a3a6b" }}>
+                      {appVersionInfo?.node || "—"}
+                    </p>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: "11px", color: "#8a9ab0", marginTop: "2px" }}>
+                  © {new Date().getFullYear()} Balaji Ortho Care Center · Developed &amp; maintained by Dr. Yash Rathore
+                </p>
+              </CardContent>
+            </Card>
+
+            {isElectron && (
+              <Card className="dash-card">
+                <CardHeader>
+                  <CardTitle style={{ fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <FileWarning style={{ width: "16px", height: "16px", color: "#1e57b0" }} />
+                    Error Logs
+                  </CardTitle>
+                </CardHeader>
+                <CardContent style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <p style={{ fontSize: "12.5px", color: "#5a6a84" }}>
+                    Agar app mein kabhi koi error ya crash aaye, uska detail yahan ek log file mein save
+                    ho jaata hai — support ke liye yeh folder share kiya ja sakta hai.
+                  </p>
+                  {logsDir && (
+                    <p style={{ fontSize: "11px", color: "#8a9ab0", wordBreak: "break-all" }}>{logsDir}</p>
+                  )}
+                  <Button variant="outline" size="sm" onClick={handleOpenLogsFolder} style={{ width: "fit-content", fontSize: "12px", gap: "6px" }}>
+                    <FolderOpen style={{ width: "13px", height: "13px" }} />
+                    Logs Folder Kholo
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {isElectron && (
+              <Card className="dash-card">
+                <CardHeader>
+                  <CardTitle style={{ fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <History style={{ width: "16px", height: "16px", color: "#1e57b0" }} />
+                    Daily Safety Snapshots
+                  </CardTitle>
+                </CardHeader>
+                <CardContent style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <p style={{ fontSize: "12.5px", color: "#5a6a84" }}>
+                    Har din app khulne par patients/bills/reports/x-rays ki ek extra copy yahan save hoti hai
+                    (30 din tak rakhi jaati hai) — agar kabhi data file corrupt ho jaaye, yahan se manually
+                    restore ho sakta hai.
+                  </p>
+                  {snapshotDir && (
+                    <p style={{ fontSize: "11px", color: "#8a9ab0", wordBreak: "break-all" }}>{snapshotDir}</p>
+                  )}
+                  <Button variant="outline" size="sm" onClick={handleOpenSnapshotFolder} style={{ width: "fit-content", fontSize: "12px", gap: "6px" }}>
+                    <FolderOpen style={{ width: "13px", height: "13px" }} />
+                    Snapshot Folder Kholo
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
       </div>
