@@ -256,7 +256,7 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
       } catch (err: any) {
         const msg = err?.message || String(err);
         if (msg === "PENDING_PARENT_INSERT") continue;
-        console.error(`Mutation fail — op: ${m.op});
+        console.error("Mutation fail — op: " + m.op + ", table: " + m.table + ", msg: " + msg);
         if (m.id !== undefined) {
           const retries = (m.retries || 0) + 1;
           await queueUpdate(m.id, { retries, lastError: msg });
