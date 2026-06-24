@@ -84,6 +84,11 @@ export default function SettingsPage() {
   const [logsDir,        setLogsDir]        = useState<string | null>(null);
   const [snapshotDir,    setSnapshotDir]    = useState<string | null>(null);
   const [isElectron,   setIsElectron]     = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{
+    hasUpdate: boolean; currentVersion: string; latestVersion: string; releaseUrl: string; downloadUrl: string;
+  } | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   // ── Apply theme to CSS vars on change ──
   useEffect(() => {
@@ -109,7 +114,34 @@ export default function SettingsPage() {
       if (electron?.getLogsDir) setLogsDir(await electron.getLogsDir());
       if (electron?.getSafetySnapshotDir) setSnapshotDir(await electron.getSafetySnapshotDir());
     })();
+    handleCheckForUpdate();
   }, [tab]);
+
+  const handleCheckForUpdate = async () => {
+    const electron = (window as any).electron;
+    if (!electron?.checkForUpdate) return;
+    setCheckingUpdate(true);
+    setUpdateError(null);
+    try {
+      const res = await electron.checkForUpdate();
+      if (res?.success) {
+        setUpdateInfo(res);
+      } else {
+        setUpdateError(res?.error || "Update check fail hua");
+      }
+    } catch (e: any) {
+      setUpdateError(e?.message || "Update check fail hua");
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const handleOpenUpdateLink = async () => {
+    const electron = (window as any).electron;
+    const url = updateInfo?.downloadUrl || updateInfo?.releaseUrl;
+    if (!url) return;
+    await electron?.openExternal?.(url);
+  };
 
   const handleOpenLogsFolder = async () => {
     await (window as any).electron?.openLogsFolder?.();
@@ -979,6 +1011,54 @@ export default function SettingsPage() {
                 <p style={{ fontSize: "11px", color: "#8a9ab0", marginTop: "2px" }}>
                   © {new Date().getFullYear()} Balaji Ortho Care Center · Developed &amp; maintained by Dr. Yash Rathore
                 </p>
+              </CardContent>
+            </Card>
+
+            <Card className="dash-card">
+              <CardHeader>
+                <CardTitle style={{ fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <HardDriveDownload style={{ width: "16px", height: "16px", color: "#1e57b0" }} />
+                  Software Update
+                </CardTitle>
+              </CardHeader>
+              <CardContent style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                {checkingUpdate ? (
+                  <p style={{ fontSize: "12.5px", color: "#5a6a84", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Loader2 style={{ width: "14px", height: "14px" }} className="animate-spin" />
+                    Update check ho raha hai...
+                  </p>
+                ) : updateError ? (
+                  <p style={{ fontSize: "12.5px", color: "#9a3412" }}>{updateError}</p>
+                ) : updateInfo?.hasUpdate ? (
+                  <div style={{
+                    padding: "12px 14px", borderRadius: "10px",
+                    background: "#f0fdf4", border: "1.5px solid #bbf7d0",
+                    display: "flex", flexDirection: "column", gap: "8px",
+                  }}>
+                    <p style={{ fontSize: "13px", fontWeight: 600, color: "#15803d" }}>
+                      🎉 Naya version available: v{updateInfo.latestVersion}
+                    </p>
+                    <p style={{ fontSize: "11.5px", color: "#5a6a84" }}>
+                      Aapka current version: v{updateInfo.currentVersion}. Niche button se .exe download karein
+                      aur seedha install kar dein — uninstall karne ki zarurat nahi, purane version ke upar
+                      hi update ho jayega.
+                    </p>
+                    <Button size="sm" onClick={handleOpenUpdateLink} style={{ width: "fit-content", gap: "6px" }}>
+                      <HardDriveDownload style={{ width: "14px", height: "14px" }} />
+                      Update Download Karein
+                    </Button>
+                  </div>
+                ) : updateInfo ? (
+                  <p style={{ fontSize: "12.5px", color: "#16a34a" }}>
+                    ✅ Aap latest version (v{updateInfo.currentVersion}) use kar rahe hain.
+                  </p>
+                ) : null}
+                <Button
+                  variant="outline" size="sm" onClick={handleCheckForUpdate} disabled={checkingUpdate}
+                  style={{ width: "fit-content", fontSize: "12px" }}
+                >
+                  Dobara Check Karein
+                </Button>
               </CardContent>
             </Card>
 
