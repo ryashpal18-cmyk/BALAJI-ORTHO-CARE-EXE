@@ -1,25 +1,16 @@
 // ─────────────────────────────────────────────────────────────────────────
 // Network status + background sync engine
-//
-// - isOnline(): current connectivity (Electron IPC check ko prefer karta hai,
-//   browser navigator.onLine fallback ke roop me)
-// - onNetworkChange(): subscribe to online/offline transitions
-// - runSync(): pending mutation queue ko Supabase par push karta hai
-// - startAutoSync(): online hote hi aur har 30s par automatic background sync
 // ─────────────────────────────────────────────────────────────────────────
 
 import { supabase } from "@/integrations/supabase/client";
-import { queueGetAll, queueRemove, queueUpdate, cacheReplaceRowKey, cacheDeleteRow, QueuedMutation } from "./offlineDb";
+import { queueGetAll, queueRemove, queueUpdate, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, QueuedMutation } from "./offlineDb";
+import { logger } from "./logger";
 
 declare global {
   interface Window {
     electron?: {
       isOnline?: () => Promise<{ online: boolean }>;
-      backupGetDir?: () => Promise<string>;
-      backupWriteJson?: (data: { fileName: string; jsonString: string }) => Promise<{ success: boolean; path?: string; error?: string }>;
-      backupWriteBinary?: (data: { fileName: string; base64Data: string }) => Promise<{ success: boolean; path?: string; error?: string }>;
-      backupList?: () => Promise<{ success: boolean; files: { name: string; size: number; mtime: number }[] }>;
-      backupOpenFolder?: () => Promise<{ success: boolean }>;
+      writeLog?: (data: { fileName: string; line: string }) => Promise<void>;
       [key: string]: any;
     };
     __ELECTRON__?: boolean;
@@ -29,17 +20,13 @@ declare global {
 let lastKnownOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
 
 export async function isOnline(): Promise<boolean> {
-  // Electron main process ke real internet-check ko prefer karo (more reliable
-  // than navigator.onLine, jo sirf network-interface check karta hai).
   try {
     if (window.electron?.isOnline) {
       const res = await window.electron.isOnline();
       lastKnownOnline = !!res?.online;
       return lastKnownOnline;
     }
-  } catch {
-    // ignore, fallback below
-  }
+  } catch {}
   lastKnownOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   return lastKnownOnline;
 }
@@ -65,9 +52,103 @@ if (typeof window !== "undefined") {
   window.addEventListener("online", async () => {
     const really = await isOnline();
     emitNetworkChange(really);
-    if (really) runSync();
+    if (really) {
+      logger.info("SYNC", "Internet aa gayi — sync + data download shuru");
+      runSync();
+      downloadAllDataToCache(); // ✅ Internet aate hi fresh data download karo
+    }
   });
-  window.addEventListener("offline", () => emitNetworkChange(false));
+  window.addEventListener("offline", () => {
+    logger.warn("SYNC", "Internet chali gayi — offline mode");
+    emitNetworkChange(false);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ✅ NAYA: Saara online data PC mein download karo
+// Ye function internet aane pe aur app start pe chalega
+// Patients, billing, appointments — sab kuch IndexedDB mein save ho jayega
+// ─────────────────────────────────────────────────────────────────────────
+
+let downloadInProgress = false;
+
+export async function downloadAllDataToCache(): Promise<void> {
+  if (downloadInProgress) return;
+  const online = typeof navigator !== "undefined" ? navigator.onLine : false;
+  if (!online) return;
+
+  downloadInProgress = true;
+  logger.info("SYNC", "Poora data PC mein download ho raha hai...");
+
+  try {
+    // 1. Patients — sabse pehle (baaki sab iske upar depend karte hain)
+    const { data: patients } = await supabase
+      .from("patients")
+      .select("*")
+      .order("name");
+    if (patients && patients.length > 0) {
+      await cacheReplaceTable("patients", patients);
+      logger.info("SYNC", `${patients.length} patients PC mein save ho gaye`);
+    }
+
+    // 2. Billing — patient naam ke saath (joined)
+    const { data: billing } = await supabase
+      .from("billing")
+      .select("*, patients(name, mobile, address)")
+      .order("created_at", { ascending: false });
+    if (billing && billing.length > 0) {
+      await cacheReplaceTable("billing", billing);
+      logger.info("SYNC", `${billing.length} bills PC mein save ho gaye`);
+    }
+
+    // 3. Appointments
+    const { data: appointments } = await supabase
+      .from("appointments")
+      .select("*, patients(name, mobile)")
+      .order("date", { ascending: false });
+    if (appointments && appointments.length > 0) {
+      await cacheReplaceTable("appointments", appointments);
+      logger.info("SYNC", `${appointments.length} appointments PC mein save ho gaye`);
+    }
+
+    // 4. Prescriptions
+    const { data: prescriptions } = await supabase
+      .from("prescriptions")
+      .select("*, patients(name)")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (prescriptions && prescriptions.length > 0) {
+      await cacheReplaceTable("prescriptions", prescriptions);
+      logger.info("SYNC", `${prescriptions.length} prescriptions PC mein save ho gaye`);
+    }
+
+    // 5. Physiotherapy sessions
+    const { data: physio } = await supabase
+      .from("physiotherapy_sessions")
+      .select("*, patients(name)")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (physio && physio.length > 0) {
+      await cacheReplaceTable("physiotherapy_sessions", physio);
+      logger.info("SYNC", `${physio.length} physio sessions PC mein save ho gaye`);
+    }
+
+    // 6. Beds
+    const { data: beds } = await supabase
+      .from("beds")
+      .select("*, patients(name)")
+      .order("bed_number", { ascending: true });
+    if (beds && beds.length > 0) {
+      await cacheReplaceTable("beds", beds);
+      logger.info("SYNC", `${beds.length} beds PC mein save ho gaye`);
+    }
+
+    logger.info("SYNC", "✅ Saara data PC mein save ho gaya — ab offline bhi kaam karega");
+  } catch (err) {
+    logger.error("SYNC", "Data download mein error aaya", err);
+  } finally {
+    downloadInProgress = false;
+  }
 }
 
 // ─── Sync engine ───
@@ -92,68 +173,43 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
 
   if (m.op === "insert") {
     const payload = { ...m.payload };
-    // Don't send our local temp id to Supabase — let DB generate the real one.
     if (m.tempId) delete payload.id;
     const { data, error } = await supabase.from(table).insert(payload).select().single();
-    if (error) throw error;
-    if (m.tempId && data) {
-      // Real row replaces the temp-id cached row, so the UI stops pointing at a fake id.
-      await cacheReplaceRowKey(table, m.tempId, data, "id");
-    }
+    if (error) { logger.error("SUPABASE", `Insert failed — table: ${table}`, error); throw error; }
+    if (m.tempId && data) await cacheReplaceRowKey(table, m.tempId, data, "id");
+    logger.info("SYNC", `Insert sync OK — table: ${table}`);
     return;
   }
 
   if (m.op === "update") {
     if (!m.rowId) throw new Error("update mutation missing rowId");
-    if (m.rowId.startsWith("local_")) {
-      // The row this update targets hasn't been created on the server yet.
-      // Leave it queued — it will run after the matching insert succeeds.
-      throw new Error("PENDING_PARENT_INSERT");
-    }
+    if (m.rowId.startsWith("local_")) throw new Error("PENDING_PARENT_INSERT");
     const { error } = await supabase.from(table).update(m.payload).eq("id", m.rowId);
-    if (error) throw error;
+    if (error) { logger.error("SUPABASE", `Update failed — table: ${table}`, error); throw error; }
+    logger.info("SYNC", `Update sync OK — table: ${table}`);
     return;
   }
 
   if (m.op === "delete") {
     if (!m.rowId) throw new Error("delete mutation missing rowId");
-    if (m.rowId.startsWith("local_")) {
-      // Row never reached the server — just drop it from cache, nothing to sync.
-      await cacheDeleteRow(table, m.rowId);
-      return;
-    }
+    if (m.rowId.startsWith("local_")) { await cacheDeleteRow(table, m.rowId); return; }
     const { error } = await supabase.from(table).delete().eq("id", m.rowId);
-    if (error) throw error;
+    if (error) { logger.error("SUPABASE", `Delete failed — table: ${table}`, error); throw error; }
     return;
   }
 
   if (m.op === "sms") {
-    // table field unused for sms; payload carries everything needed to send + log.
     const { mobile, message, patientName, smsType } = m.payload;
+    logger.info("SMS", `SMS bhej raha hai — patient: ${patientName}`);
     const res = await fetch(import.meta.env.VITE_TEXTBEE_API_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": import.meta.env.VITE_TEXTBEE_API_KEY,
-      },
-      body: JSON.stringify({
-        deviceId: import.meta.env.VITE_TEXTBEE_DEVICE_ID,
-        recipients: [mobile],
-        message,
-      }),
+      headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_TEXTBEE_API_KEY },
+      body: JSON.stringify({ deviceId: import.meta.env.VITE_TEXTBEE_DEVICE_ID, recipients: [mobile], message }),
     });
-    if (!res.ok) throw new Error(`SMS gateway error (${res.status})`);
+    if (!res.ok) { logger.error("SMS", `SMS fail (${res.status})`); throw new Error(`SMS gateway error (${res.status})`); }
     try {
-      await supabase.from("sms_logs" as any).insert({
-        patient_name: patientName,
-        mobile,
-        message,
-        status: "sent",
-        sms_type: smsType,
-      } as any);
-    } catch {
-      // log insert failing shouldn't re-queue the SMS — it already sent.
-    }
+      await supabase.from("sms_logs" as any).insert({ patient_name: patientName, mobile, message, status: "sent", sms_type: smsType } as any);
+    } catch { logger.warn("SMS", "SMS gaya par log save nahi hua"); }
     return;
   }
 
@@ -163,28 +219,21 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     const byteNumbers = new Array(byteChars.length);
     for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
     const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType || "image/jpeg" });
-
     const ext = (fileName || "").split(".").pop() || "jpg";
     const path = `${patientId}/${caseId}/${Date.now()}.${ext}`;
     const { error: upErr } = await supabase.storage.from("xray-files").upload(path, blob, { upsert: false });
-    if (upErr) throw upErr;
+    if (upErr) { logger.error("DICOM", `X-ray upload fail`, upErr); throw upErr; }
     const { data: signed } = await supabase.storage.from("xray-files").createSignedUrl(path, 60 * 60 * 24 * 365);
     const file_url = signed?.signedUrl || path;
-    const { error } = await supabase.from("fracture_xrays" as any).insert({
-      fracture_case_id: caseId,
-      patient_id: patientId,
-      file_url,
-    } as any);
-    if (error) throw error;
+    const { error } = await supabase.from("fracture_xrays" as any).insert({ fracture_case_id: caseId, patient_id: patientId, file_url } as any);
+    if (error) { logger.error("DICOM", `X-ray DB insert fail`, error); throw error; }
     return;
   }
 }
 
 export async function runSync(): Promise<{ synced: number; pending: number }> {
   if (syncing) return { synced: 0, pending: (await queueGetAll()).length };
-  
-  // navigator.onLine use karo — instant hai, Supabase ping slow hoti thi
-  // jisse sync run hi nahi karta tha even when internet was fine.
+
   const online = typeof navigator !== "undefined" ? navigator.onLine : true;
   if (!online) return { synced: 0, pending: (await queueGetAll()).length };
 
@@ -197,15 +246,7 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
     let queue = await queueGetAll();
     queue = queue.sort((a, b) => (a.id || 0) - (b.id || 0));
 
-    // 5+ retries wale stuck items pehle drop karo — permanently fail hain,
-    // badge ko "X pending" hamesha dikhane se rokna hai
-    for (const m of queue) {
-      if ((m.retries || 0) >= 5 && m.id !== undefined) {
-        await queueRemove(m.id);
-      }
-    }
-    // Fresh list after drop
-    queue = (await queueGetAll()).sort((a, b) => (a.id || 0) - (b.id || 0));
+    if (queue.length > 0) logger.info("SYNC", `Sync shuru — ${queue.length} items pending`);
 
     for (const m of queue) {
       try {
@@ -215,12 +256,20 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
       } catch (err: any) {
         const msg = err?.message || String(err);
         if (msg === "PENDING_PARENT_INSERT") continue;
+        logger.error("SYNC", `Mutation fail — op: ${m.op}, table: ${m.table}`, msg);
         if (m.id !== undefined) {
           const retries = (m.retries || 0) + 1;
           await queueUpdate(m.id, { retries, lastError: msg });
+          if (retries >= MAX_RETRIES) logger.error("SYNC", `MAX RETRIES — permanently failed! op: ${m.op}`, m);
         }
         lastError = msg;
       }
+    }
+
+    if (synced > 0) {
+      logger.info("SYNC", `✅ Sync complete — ${synced} items upload ho gaye`);
+      // ✅ Sync ke baad fresh data download karo
+      await downloadAllDataToCache();
     }
   } finally {
     syncing = false;
@@ -236,12 +285,19 @@ let autoSyncStarted = false;
 export function startAutoSync() {
   if (autoSyncStarted) return;
   autoSyncStarted = true;
+  logger.info("SYNC", "Auto-sync engine start");
 
-  // Run once shortly after app start.
-  setTimeout(() => { runSync(); }, 2000);
+  // App start hone ke 3 second baad pehle data download karo
+  setTimeout(async () => {
+    const online = typeof navigator !== "undefined" ? navigator.onLine : false;
+    if (online) {
+      logger.info("SYNC", "App start — pehle data download ho raha hai");
+      await downloadAllDataToCache();
+      await runSync();
+    }
+  }, 3000);
 
-  // Periodic retry every 30s — covers the case where connectivity returns
-  // without a browser "online" event firing (common on flaky mobile data).
+  // Har 30 second mein sync
   setInterval(async () => {
     const online = await isOnline();
     if (online !== lastKnownOnline) emitNetworkChange(online);
