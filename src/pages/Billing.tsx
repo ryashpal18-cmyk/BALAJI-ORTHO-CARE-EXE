@@ -41,6 +41,7 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLocation } from "react-router-dom";
 import {
   useBills,
   useAddBill,
@@ -388,6 +389,7 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
 }
 
 export default function Billing() {
+  const location = useLocation();
   const { data: bills, isLoading } = useBills();
   const { data: patients } = usePatients();
   const addBill = useAddBill();
@@ -408,6 +410,23 @@ export default function Billing() {
   const [fromDate, setFromDate] = useState(toLocalDateInput(new Date()));
   const [toDate, setToDate] = useState(toLocalDateInput(new Date()));
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const navPatientConsumedRef = useRef(false);
+
+  // OPD se "navigate('/billing', { state: { patientId, patientName } })" karke aate hain —
+  // patient list load hote hi usko select karo aur New Bill dialog khol do.
+  useEffect(() => {
+    const navState = location.state as { patientId?: string; patientName?: string } | null;
+    if (!navState?.patientId || !patients || navPatientConsumedRef.current) return;
+    const match = patients.find((p: any) => p.id === navState.patientId);
+    if (match) {
+      setSelectedPatient(match.id);
+      setPatientSearch(match.name || navState.patientName || "");
+      setOpen(true);
+      navPatientConsumedRef.current = true; // dobara re-trigger na ho
+    }
+  }, [location.state, patients]);
+
 
   const applyRangeMode = (mode: string) => {
     const today = new Date();
