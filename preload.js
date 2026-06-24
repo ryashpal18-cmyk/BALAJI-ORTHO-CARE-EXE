@@ -68,6 +68,10 @@ contextBridge.exposeInMainWorld('electron', {
   // React se log file me likhna: window.electron.writeLog({ fileName, line })
   writeLog:           (data)  => ipcRenderer.invoke('write-log', data),
 
+  // ── App Update Check (GitHub Releases — manual download) ─────────
+  checkForUpdate:  ()       => ipcRenderer.invoke('app:checkForUpdate'),
+  openExternal:    (url)    => ipcRenderer.invoke('app:openExternal', url),
+
   // ── Event Listeners ──────────────────────────────────────────
   on: (channel, callback) => {
     const allowed = ['printer-capture-received', 'sync-complete', 'sync-error'];

@@ -651,6 +651,67 @@ ipcMain.handle('app:getVersion', async () => ({
   platform: process.platform,
 }));
 
+// ─── UPDATE CHECK (GitHub Releases — manual download, no auto-install) ───────
+const UPDATE_REPO = 'ryashpal18-cmyk/BALAJI-ORTHO-CARE-EXE';
+
+function compareVersions(a, b) {
+  const pa = a.replace(/^v/i, '').split('.').map(Number);
+  const pb = b.replace(/^v/i, '').split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] || 0, nb = pb[i] || 0;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
+  }
+  return 0;
+}
+
+ipcMain.handle('app:checkForUpdate', async () => {
+  try {
+    const data = await new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: 'api.github.com',
+        path: `/repos/${UPDATE_REPO}/releases/latest`,
+        method: 'GET',
+        headers: { 'User-Agent': 'BalajiOrthoCare-App' },
+      }, (res) => {
+        let body = '';
+        res.on('data', (c) => (body += c));
+        res.on('end', () => {
+          if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+          try { resolve(JSON.parse(body)); } catch (e) { reject(e); }
+        });
+      });
+      req.on('error', reject);
+      req.setTimeout(10000, () => { req.destroy(); reject(new Error('timeout')); });
+      req.end();
+    });
+
+    const latestVersion = (data.tag_name || '').replace(/^v/i, '');
+    const currentVersion = app.getVersion();
+    const hasUpdate = latestVersion && compareVersions(latestVersion, currentVersion) > 0;
+
+    // .exe asset dhoondo (NSIS installer) — agar nahi mile to release page hi de do
+    const asset = (data.assets || []).find((a) => a.name?.toLowerCase().endsWith('.exe'));
+
+    return {
+      success: true,
+      hasUpdate: !!hasUpdate,
+      currentVersion,
+      latestVersion: latestVersion || currentVersion,
+      releaseUrl: data.html_url || `https://github.com/${UPDATE_REPO}/releases/latest`,
+      downloadUrl: asset?.browser_download_url || data.html_url || '',
+      notes: data.body || '',
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('app:openExternal', async (_e, url) => {
+  if (typeof url === 'string' && /^https:\/\//.test(url)) await shell.openExternal(url);
+  return { success: true };
+});
+
 ipcMain.handle('log:rendererError', async (_e, { message, stack, source } = {}) => {
   logger.logError(source || 'renderer', stack || message || 'Unknown renderer error');
   return { success: true };

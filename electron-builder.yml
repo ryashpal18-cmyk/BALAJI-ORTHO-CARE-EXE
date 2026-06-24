@@ -7,6 +7,13 @@ directories:
 
 asar: false
 
+publish:
+  provider: github
+  owner: ryashpal18-cmyk
+  repo: BALAJI-ORTHO-CARE-EXE
+  releaseType: release
+  draft: false
+
 files:
   - dist/**
   - main.js
