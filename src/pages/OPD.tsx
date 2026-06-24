@@ -210,7 +210,13 @@ export default function OPD() {
       // Navigate to billing page directly after registration
       toast({ title: "✅ Redirecting to Billing", description: "Patient saved — opening billing page..." });
       setTimeout(() => {
-        navigate("/billing", { state: { patientId: patientId, patientName: regForm.name } });
+        navigate("/billing", {
+          state: {
+            patientId: patientId,
+            patientName: regForm.name,
+            patientMobile: regForm.mobile.replace(/\D/g, ""),
+          },
+        });
       }, 500);
 
       setRegForm({ name: "", mobile: "", age: "", gender: "", address: "" });
