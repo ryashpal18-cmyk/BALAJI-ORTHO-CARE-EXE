@@ -75,7 +75,11 @@ const getMonthStart = (date: Date) =>
   toLocalDateInput(new Date(date.getFullYear(), date.getMonth(), 1));
 const getMonthEnd = (date: Date) =>
   toLocalDateInput(new Date(date.getFullYear(), date.getMonth() + 1, 0));
-const billDate = (createdAt: string) => toLocalDateInput(new Date(createdAt));
+const billDate = (createdAt: string) => {
+  const d = new Date(createdAt);
+  if (isNaN(d.getTime())) return toLocalDateInput(new Date()); // ✅ FIX: invalid/missing date pe crash mat karo
+  return toLocalDateInput(d);
+};
 
 interface ServiceItem {
   name: string;
