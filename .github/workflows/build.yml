@@ -5,13 +5,20 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
+    # Bot ka khud ka "bump version" commit dobara workflow trigger na kare — infinite loop se bachne ke liye.
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -22,15 +29,37 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # ── Auto version bump ───────────────────────────────────────────
+      # Har push pe patch version apne aap +1 ho jaata hai (1.0.1 → 1.0.2),
+      # commit + push + tag — manually version badhane ki zarurat nahi.
+      - name: Bump patch version
+        id: bump
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm version patch --no-git-tag-version
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to v$VERSION [skip ci]"
+          git tag "v$VERSION"
+          git push origin main
+          git push origin "v$VERSION"
+
       - name: Build React App
         run: npm run build
 
-      - name: Build Setup EXE
-        run: npx electron-builder --win nsis --publish=never
+      # Release tag (vX.Y.Z) ke naam se GitHub Release banta hai,
+      # NSIS .exe usme attach ho jaata hai — Settings → About page wahi release check karta hai.
+      - name: Build & Publish Setup EXE
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win nsis --publish always
 
-      - name: Upload Setup EXE
+      - name: Upload Setup EXE (build artifact, optional)
         uses: actions/upload-artifact@v4
         with:
-          name: BalajiOrthoConnect-Setup
+          name: BalajiOrthoConnect-Setup-v${{ steps.bump.outputs.version }}
           path: release/*.exe
           retention-days: 30
