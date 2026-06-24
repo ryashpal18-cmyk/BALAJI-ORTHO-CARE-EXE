@@ -11,6 +11,11 @@ const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require('electron')
 const path  = require('path');
 const fs    = require('fs');
 const https = require('https');
+const logger = require('./logger.cjs');
+
+// Process-level crash/error handlers jitni jaldi ho sake set kar do, taaki
+// startup ke dauran bhi koi exception silently na guzar jaaye.
+logger.setupGlobalHandlers();
 
 // ─── PATHS ────────────────────────────────────────────────────────────────────
 const BACKUP_DIR    = 'C:\\Balaji_Health_Backup';
@@ -33,6 +38,12 @@ const APP_BACKUP_DIR = path.join(app.getPath('documents'), 'Balaji_Ortho_Backups
 function ensureAppBackupDir() {
   if (!fs.existsSync(APP_BACKUP_DIR)) fs.mkdirSync(APP_BACKUP_DIR, { recursive: true });
 }
+
+// Daily safety snapshots — local JSON files (patients/bills/etc.) ki ek roz ki
+// copy yahan rakhi jaati hai. Agar kabhi main file corrupt ho jaaye (crash,
+// power-cut beech write mein) to yahan se manually restore ho sakta hai.
+const SAFETY_SNAPSHOT_ROOT = path.join(APP_BACKUP_DIR, 'safety_snapshots');
+const SNAPSHOT_KEEP_DAYS   = 30;
 
 let mainWindow;
 let whatsappWindow = null;
@@ -61,17 +72,40 @@ function readJSON(filePath, fallback = []) {
     const raw = fs.readFileSync(filePath, 'utf-8');
     return JSON.parse(raw);
   } catch (e) {
-    console.error('[readJSON] Error:', filePath, e.message);
+    logger.logError('readJSON', `${filePath} corrupt — ${e.message}. .bak se restore try kar rahe hain.`);
+    try {
+      const bakPath = `${filePath}.bak`;
+      if (fs.existsSync(bakPath)) {
+        const raw = fs.readFileSync(bakPath, 'utf-8');
+        const data = JSON.parse(raw);
+        logger.logWarn('readJSON', `${filePath} .bak se safaltapoorvak restore hui.`);
+        return data;
+      }
+    } catch (e2) {
+      logger.logError('readJSON', `${filePath}.bak bhi corrupt/missing — ${e2.message}`);
+    }
     return fallback;
   }
 }
 
 function writeJSON(filePath, data) {
   try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    const json = JSON.stringify(data, null, 2);
+    const tmpPath = `${filePath}.tmp`;
+    fs.writeFileSync(tmpPath, json, 'utf-8');
+
+    // Purani sahi-salaamat file ko .bak mein rakho — taaki agar kabhi
+    // beech-mein crash/power-cut ho to readJSON() yahan se restore kar sake.
+    if (fs.existsSync(filePath)) {
+      try { fs.copyFileSync(filePath, `${filePath}.bak`); } catch (_) { /* best-effort */ }
+    }
+
+    // Rename atomic hota hai — isliye half-written file kabhi disk par
+    // "live" file ki jagah nahi dikhegi.
+    fs.renameSync(tmpPath, filePath);
     return true;
   } catch (e) {
-    console.error('[writeJSON] Error:', filePath, e.message);
+    logger.logError('writeJSON', `${filePath}: ${e.message}`);
     return false;
   }
 }
@@ -96,6 +130,43 @@ function initFiles() {
     token:       null,
     tokenExpiry: null
   });
+}
+
+// ─── DAILY SAFETY SNAPSHOT ────────────────────────────────────────────────────
+// Har din app khulne par patients/bills/reports/xrays/fractures/settings ki
+// ek copy "Documents/Balaji_Ortho_Backups/safety_snapshots/<date>" mein bhi
+// rakh di jaati hai — .bak file ke upar ek extra safety layer, jo poore din
+// ka snapshot deta hai (na ki sirf last-write se pehle wali state).
+function takeDailySafetySnapshot() {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const dir   = path.join(SAFETY_SNAPSHOT_ROOT, today);
+    if (fs.existsSync(dir)) return; // aaj ka snapshot ho chuka hai
+
+    fs.mkdirSync(dir, { recursive: true });
+    const files = [PATIENTS_FILE, BILLS_FILE, REPORTS_FILE, XRAYS_FILE, FRACTURE_FILE, SETTINGS_FILE, PENDING_FILE];
+    for (const f of files) {
+      if (fs.existsSync(f)) fs.copyFileSync(f, path.join(dir, path.basename(f)));
+    }
+    logger.logInfo('safety-snapshot', `Daily snapshot saved: ${dir}`);
+  } catch (e) {
+    logger.logError('safety-snapshot', e.message);
+  }
+}
+
+/** 30 din se purane safety snapshots hata deta hai, taaki disk na bhare. */
+function cleanupOldSnapshots() {
+  try {
+    if (!fs.existsSync(SAFETY_SNAPSHOT_ROOT)) return;
+    const cutoff = Date.now() - SNAPSHOT_KEEP_DAYS * 24 * 60 * 60 * 1000;
+    for (const d of fs.readdirSync(SAFETY_SNAPSHOT_ROOT)) {
+      const full = path.join(SAFETY_SNAPSHOT_ROOT, d);
+      const stat = fs.statSync(full);
+      if (stat.mtimeMs < cutoff) fs.rmSync(full, { recursive: true, force: true });
+    }
+  } catch (e) {
+    logger.logError('safety-snapshot-cleanup', e.message);
+  }
 }
 
 // ─── PENDING SYNC HELPER ──────────────────────────────────────────────────────
@@ -571,6 +642,37 @@ ipcMain.on('open-whatsapp', (_e, payload) => {
   openWhatsAppWindow(url || 'https://web.whatsapp.com');
 });
 
+// ─── APP INFO / DIAGNOSTICS (About tab + crash logging) ──────────────────
+ipcMain.handle('app:getVersion', async () => ({
+  version:  app.getVersion(),
+  electron: process.versions.electron,
+  chrome:   process.versions.chrome,
+  node:     process.versions.node,
+  platform: process.platform,
+}));
+
+ipcMain.handle('log:rendererError', async (_e, { message, stack, source } = {}) => {
+  logger.logError(source || 'renderer', stack || message || 'Unknown renderer error');
+  return { success: true };
+});
+
+ipcMain.handle('log:getDir', async () => logger.getLogDir());
+ipcMain.handle('log:openFolder', async () => {
+  shell.openPath(logger.getLogDir());
+  return { success: true };
+});
+
+ipcMain.handle('safety:getSnapshotDir', async () => {
+  ensureAppBackupDir();
+  return SAFETY_SNAPSHOT_ROOT;
+});
+ipcMain.handle('safety:openSnapshotFolder', async () => {
+  ensureAppBackupDir();
+  if (!fs.existsSync(SAFETY_SNAPSHOT_ROOT)) fs.mkdirSync(SAFETY_SNAPSHOT_ROOT, { recursive: true });
+  shell.openPath(SAFETY_SNAPSHOT_ROOT);
+  return { success: true };
+});
+
 // ═══════════════════════════════════════════════════════════════
 //  APP LIFECYCLE
 // ═══════════════════════════════════════════════════════════════
@@ -578,6 +680,11 @@ app.whenReady().then(() => {
   ensureDirs();
   initFiles();
   seedPatientsOnFirstRun();
+  ensureAppBackupDir();
+  takeDailySafetySnapshot();
+  cleanupOldSnapshots();
+  logger.cleanOldLogs();
+  logger.logInfo('app-lifecycle', `App started — version ${app.getVersion()}`);
   createWindow();
   setTimeout(runAutoSync, 5000);
   setInterval(runAutoSync, 60 * 1000);
@@ -595,4 +702,14 @@ app.on('before-quit', () => {
 
 app.on('web-contents-created', (_e, contents) => {
   contents.on('new-window', (e) => e.preventDefault());
+});
+
+// Renderer crash ya hang ho jaaye (e.g. out-of-memory, GPU crash) to bhi
+// log ho jaaye — warna sirf "white screen" dikhega aur pata nahi chalega kyun.
+app.on('render-process-gone', (_e, _webContents, details) => {
+  logger.logError('render-process-gone', JSON.stringify(details));
+});
+
+app.on('child-process-gone', (_e, details) => {
+  logger.logError('child-process-gone', JSON.stringify(details));
 });
