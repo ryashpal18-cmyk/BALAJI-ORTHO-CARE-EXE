@@ -64,17 +64,30 @@ contextBridge.exposeInMainWorld('electron', {
   backupList:         ()      => ipcRenderer.invoke('backup:list'),
   backupOpenFolder:   ()      => ipcRenderer.invoke('backup:openFolder'),
 
-  // ✅ ── Logging — React se Electron ko log bhejo ──────────────
-  logRendererError: (data) => ipcRenderer.invoke('log:rendererError', data),
-  getLogsDir:       ()     => ipcRenderer.invoke('log:getDir'),
-  openLogsFolder:   ()     => ipcRenderer.invoke('log:openFolder'),
+  // ── Logging ─────────────────────────────────────────────────
+  logRendererError:     (data) => ipcRenderer.invoke('log:rendererError', data),
+  getLogsDir:           ()     => ipcRenderer.invoke('log:getDir'),
+  getSafetySnapshotDir: ()     => ipcRenderer.invoke('log:getSnapshotDir'),
+  openLogsFolder:       ()     => ipcRenderer.invoke('log:openFolder'),
 
-  // ── SMS — main process se bhejo (CORS fix) ──
+  // ── SMS — main process se bhejo (CORS fix) ──────────────────
   sendSMS: (data) => ipcRenderer.invoke('app:sendSMS', data),
+
+  // ── App Version & Update ─────────────────────────────────────
+  getAppVersion:  () => ipcRenderer.invoke('app:getVersion'),
+  checkForUpdate: () => ipcRenderer.invoke('app:checkForUpdate'),
+  downloadUpdate: () => ipcRenderer.invoke('app:downloadUpdate'),
+  installUpdate:  () => ipcRenderer.invoke('app:installUpdate'),
+  openExternal:   (url) => ipcRenderer.invoke('app:openExternal', url),
 
   // ── Event Listeners ──────────────────────────────────────────
   on: (channel, callback) => {
-    const allowed = ['printer-capture-received', 'sync-complete', 'sync-error'];
+    const allowed = [
+      'printer-capture-received',
+      'sync-complete',
+      'sync-error',
+      'updater:status',
+    ];
     if (allowed.includes(channel)) {
       ipcRenderer.on(channel, (_event, ...args) => callback(...args));
     }
