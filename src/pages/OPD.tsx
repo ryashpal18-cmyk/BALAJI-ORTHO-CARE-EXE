@@ -17,6 +17,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { cacheGetAll } from "@/lib/offlineDb";
 import { isOnline } from "@/lib/offlineSync";
 import { offlineUpdate } from "@/lib/offlineQuery";
+import { cLog } from "@/lib/clientLogger";
 import { openWhatsAppWeb } from "@/pages/WhatsApp";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 
@@ -128,7 +129,7 @@ export default function OPD() {
               .or(`mobile.eq.${cleanMobile},mobile.eq.+91${cleanMobile},mobile.ilike.%${cleanMobile.slice(-10)}%`)
               .limit(1);
             if (!error && data && data.length > 0) patient = data[0];
-          } catch { /* offline fallback neeche */ }
+          } catch (e) { cLog.warn('OPD', 'Supabase mobile search fail — cache try karega', e); }
         }
 
         // Offline ya online mein nahi mila — cache mein dhundo
@@ -192,7 +193,7 @@ export default function OPD() {
             gender: regForm.gender || null,
             address: regForm.address || null,
           });
-        } catch { /* update fail hona registration rok nahi sakta */ }
+        } catch (e) { cLog.warn('OPD', 'Patient update fail', e); }
         toast({ title: "✅ Patient Found", description: `${regForm.name} already registered — details updated` });
       } else {
         // Create new patient
@@ -210,13 +211,7 @@ export default function OPD() {
       // Navigate to billing page directly after registration
       toast({ title: "✅ Redirecting to Billing", description: "Patient saved — opening billing page..." });
       setTimeout(() => {
-        navigate("/billing", {
-          state: {
-            patientId: patientId,
-            patientName: regForm.name,
-            patientMobile: regForm.mobile.replace(/\D/g, ""),
-          },
-        });
+        navigate("/billing", { state: { patientId: patientId, patientName: regForm.name } });
       }, 500);
 
       setRegForm({ name: "", mobile: "", age: "", gender: "", address: "" });

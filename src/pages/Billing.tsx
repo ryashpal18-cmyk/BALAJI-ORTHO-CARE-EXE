@@ -53,6 +53,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { isOnline } from "@/lib/offlineSync";
+import { cLog } from "@/lib/clientLogger";
 import * as XLSX from "xlsx";
 import html2pdf from "html2pdf.js";
 import { openWhatsAppWeb } from "@/pages/WhatsApp";
@@ -75,11 +76,7 @@ const getMonthStart = (date: Date) =>
   toLocalDateInput(new Date(date.getFullYear(), date.getMonth(), 1));
 const getMonthEnd = (date: Date) =>
   toLocalDateInput(new Date(date.getFullYear(), date.getMonth() + 1, 0));
-const billDate = (createdAt: string) => {
-  const d = new Date(createdAt);
-  if (isNaN(d.getTime())) return toLocalDateInput(new Date()); // ✅ FIX: invalid/missing date pe crash mat karo
-  return toLocalDateInput(d);
-};
+const billDate = (createdAt: string) => toLocalDateInput(new Date(createdAt));
 
 interface ServiceItem {
   name: string;
@@ -387,7 +384,7 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
 
     return urlData.publicUrl;
   } catch (err) {
-    return null; // koi bhi error silently ignore
+    cLog.error("billing", "PDF generation fail", err); return null;
   } finally {
     document.body.removeChild(container);
   }
@@ -522,7 +519,7 @@ const filteredPatients = patients
             try {
               const urlParts = pdfUrl.split("/invoices/");
               if (urlParts[1]) await supabase.storage.from("invoices").remove([urlParts[1]]);
-            } catch { /* storage delete fail — koi dikkat nahi */ }
+            } catch (e) { cLog.warn('billing', 'PDF storage delete fail', e); }
           }
         }
 
@@ -584,7 +581,7 @@ const filteredPatients = patients
           const cachedPatients = await cacheGetAll("patients");
           const found = cachedPatients.find((p: any) => p.id === selectedPatient);
           if (found) patient = found;
-        } catch { /* cache miss — ignore */ }
+        } catch (e) { cLog.warn('billing', 'Patient cache lookup fail', e); }
       }
       const patientName = patient?.name || "Patient";
       const mobile = patient?.mobile || "";
