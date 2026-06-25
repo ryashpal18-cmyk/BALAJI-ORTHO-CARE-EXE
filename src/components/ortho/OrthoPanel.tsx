@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useFollowupsAround, useFractureCases, useUpdateFractureCase } from "@/hooks/useOrtho";
 import { useNavigate } from "react-router-dom";
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { sendSMS } from "@/services/smsService";
 import { useToast } from "@/hooks/use-toast";
@@ -214,37 +214,42 @@ function EditCaseDialog({ open, onClose, caseData }: EditCaseDialogProps) {
   const updateCase = useUpdateFractureCase();
   const [form, setForm] = useState<any>({});
 
-  // Reset form when caseData changes
+  // Initialize form when dialog opens
+  useEffect(() => {
+    if (open && caseData) setForm({ ...caseData });
+  }, [open, caseData]);
+
   const handleOpenChange = useCallback((val: boolean) => {
     if (!val) { setForm({}); onClose(); }
-    else { setForm({ ...caseData }); }
-  }, [caseData, onClose]);
-
-  // Initialize when opened
-  useState(() => { if (open && caseData) setForm({ ...caseData }); });
+  }, [onClose]);
 
   const set = (key: string, val: any) => setForm((prev: any) => ({ ...prev, [key]: val }));
 
   const handleSave = async () => {
+    if (!form.id) {
+      toast({ title: "Error", description: "Case ID nahi mila. Dobara try karo.", variant: "destructive" });
+      return;
+    }
     try {
       await updateCase.mutateAsync({
         id: form.id,
-        body_part: form.body_part,
-        side: form.side,
-        fracture_type: form.fracture_type,
-        cause: form.cause,
-        plaster_type: form.plaster_type,
-        plaster_date: form.plaster_date,
-        followup_days: Number(form.followup_days) || 0,
-        next_followup_date: form.next_followup_date,
-        doctor_notes: form.doctor_notes,
-        hospital_name: form.hospital_name,
-        doctor_name: form.doctor_name,
+        body_part: form.body_part || null,
+        side: form.side || null,
+        fracture_type: form.fracture_type || null,
+        cause: form.cause || null,
+        plaster_type: form.plaster_type || null,
+        plaster_date: form.plaster_date || null,
+        followup_days: Number(form.followup_days) || 7,
+        next_followup_date: form.next_followup_date || null,
+        doctor_notes: form.doctor_notes || null,
+        hospital_name: form.hospital_name || null,
+        doctor_name: form.doctor_name || null,
+        plaster_status: form.plaster_status || "Active",
       });
       toast({ title: "✅ Update ho gaya!", description: "Patient ki details save ho gayi." });
       handleOpenChange(false);
     } catch (e: any) {
-      toast({ title: "Error", description: e?.message || "Update nahi hua.", variant: "destructive" });
+      toast({ title: "❌ Save nahi hua", description: e?.message || "Server se connect nahi ho paya. Internet check karo.", variant: "destructive" });
     }
   };
 
