@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ const ACCENT_COLORS = [
 ];
 
 export default function SettingsPage() {
+  const navigate = useNavigate();
   const [tab, setTab]             = useState<Tab>("clinic");
   const role                       = getCurrentRole();
   const isAdmin                    = role === "admin";
@@ -1061,6 +1063,28 @@ export default function SettingsPage() {
                 <p style={{ fontSize: "11px", color: "#8a9ab0", marginTop: "2px" }}>
                   © {new Date().getFullYear()} Balaji Ortho Care Center · Developed &amp; maintained by Dr. Yash Rathore
                 </p>
+              </CardContent>
+            </Card>
+
+            {/* ── Maintenance Tools ── */}
+            <Card className="dash-card">
+              <CardHeader>
+                <CardTitle style={{ fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
+                  🔧 Maintenance Tools
+                </CardTitle>
+              </CardHeader>
+              <CardContent style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <p style={{ fontSize: "12.5px", color: "#5a6a84" }}>
+                  Ek baar chalane wale tools — data fix aur migration ke liye.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate("/plaster-sync")}
+                  style={{ width: "fit-content", gap: "8px", fontSize: "13px" }}
+                >
+                  🦴 Purane Bills → OrthoPanel Sync
+                </Button>
               </CardContent>
             </Card>
 

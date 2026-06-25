@@ -60,6 +60,7 @@ import { openWhatsAppWeb } from "@/pages/WhatsApp";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { sendSMS } from "@/services/smsService";
 import { getServiceCatalog, learnServiceItems } from "@/lib/appConfig";
+import { useAddFractureCase } from "@/hooks/useOrtho";
 
 const statusStyle: Record<string, string> = {
   Paid: "bg-success/10 text-success",
@@ -395,6 +396,7 @@ export default function Billing() {
   const { data: bills, isLoading } = useBills();
   const { data: patients } = usePatients();
   const addBill = useAddBill();
+  const addFractureCase = useAddFractureCase();
   const updateBill = useUpdateBill();
   const deleteBill = useDeleteBill();
   const { isAdmin } = useIsAdmin();
@@ -569,6 +571,46 @@ const filteredPatients = patients
 
       // Jo bhi items type kiye the, unhe catalog mein yaad kar lo
       learnServiceItems(validServices.map((s) => ({ name: s.name, amount: parseFloat(s.amount) || 0 })));
+
+      // ── Auto OrthoPanel: bill mein plaster ho to fracture case auto-add ──
+      const plasterKeywords = ["plaster", "p.o.p", "pop", "cast", "slab", "splint", "पलस्तर"];
+      const plasterService = validServices.find((s) =>
+        plasterKeywords.some((kw) => s.name.toLowerCase().includes(kw))
+      );
+      if (plasterService && selectedPatient) {
+        try {
+          const { cacheGetAll } = await import("@/lib/offlineDb");
+          const existingCases = await cacheGetAll("fracture_cases");
+          const alreadyExists = existingCases.some(
+            (c: any) => c.patient_id === selectedPatient && c.plaster_status === "Active"
+          );
+          if (!alreadyExists) {
+            const today = new Date().toISOString().split("T")[0];
+            const nextFollowup = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+              .toISOString().split("T")[0];
+            await addFractureCase.mutateAsync({
+              patient_id: selectedPatient,
+              patient_type: "fracture",
+              body_part: "Unknown",
+              side: null,
+              fracture_type: "Unknown",
+              plaster_type: plasterService.name,
+              plaster_date: today,
+              followup_days: 7,
+              next_followup_date: nextFollowup,
+              plaster_status: "Active",
+              doctor_notes: `Auto-added from billing: ${plasterService.name}`,
+            } as any);
+            toast({
+              title: "🦴 OrthoPanel mein add ho gaya",
+              description: `${plasterService.name} — patient ka active case ban gaya`,
+              duration: 4000,
+            });
+          }
+        } catch (e: any) {
+          // silently fail — billing save to ho gayi
+        }
+      }
 
       // ✅ FIX: PDF auto-generate nahi karo — white screen aati thi
       // PDF sirf tab generate hogi jab user manually PDF/WhatsApp button dabaye
