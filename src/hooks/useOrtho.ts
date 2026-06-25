@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { offlineFetch, offlineInsert, offlineUpdate } from "@/lib/offlineQuery";
-import { cacheGetAll, queueAdd } from "@/lib/offlineDb";
+import { cacheGetAll, queueAdd, cacheUpsertRow } from "@/lib/offlineDb";
 import { isOnline } from "@/lib/offlineSync";
 
 export type FractureCase = {
@@ -83,7 +83,32 @@ export function useAddFractureCase() {
 export function useUpdateFractureCase() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...updates }: { id: string } & Partial<FractureCase>) => offlineUpdate("fracture_cases", id, updates),
+    mutationFn: async ({ id, ...updates }: { id: string } & Partial<FractureCase>) => {
+      const online = await isOnline();
+
+      if (online && !id.startsWith("local_")) {
+        // Step 1: Update karo (no .select().single() — RLS issue avoid karne ke liye)
+        const { error } = await supabase
+          .from("fracture_cases" as any)
+          .update({ ...updates, updated_at: new Date().toISOString() })
+          .eq("id", id);
+
+        if (error) throw new Error(error.message || "Update fail hua. Please dobara try karo.");
+
+        // Step 2: Updated row fetch karo cache ke liye
+        const { data: updated } = await supabase
+          .from("fracture_cases" as any)
+          .select("*")
+          .eq("id", id)
+          .single();
+
+        if (updated) await cacheUpsertRow("fracture_cases", updated, "id");
+        return updated || { id, ...updates };
+      }
+
+      // Offline path
+      return offlineUpdate("fracture_cases", id, updates);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["fracture_cases"] });
       qc.invalidateQueries({ queryKey: ["followups_today"] });
