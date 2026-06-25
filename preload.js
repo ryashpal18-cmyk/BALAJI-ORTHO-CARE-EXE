@@ -57,26 +57,21 @@ contextBridge.exposeInMainWorld('electron', {
   getBackupDir:    ()       => ipcRenderer.invoke('app:getBackupDir'),
   getXraysDir:     ()       => ipcRenderer.invoke('app:getXraysDir'),
 
-  // ── App Data Backup (Settings → Backup tab) ─────────────────────
+  // ── Backup ─────────────────────────────────────────────────
   backupGetDir:       ()      => ipcRenderer.invoke('backup:getDir'),
   backupWriteJson:    (data)  => ipcRenderer.invoke('backup:writeJson', data),
   backupWriteBinary:  (data)  => ipcRenderer.invoke('backup:writeBinary', data),
   backupList:         ()      => ipcRenderer.invoke('backup:list'),
   backupOpenFolder:   ()      => ipcRenderer.invoke('backup:openFolder'),
 
-  // ✅ ── Error Logging ─────────────────────────────────────────────
-  // React se log file me likhna: window.electron.writeLog({ fileName, line })
-  writeLog:           (data)  => ipcRenderer.invoke('write-log', data),
-
-  // ── App Update (electron-updater — auto download + install) ──────
-  checkForUpdate:  ()      => ipcRenderer.invoke('app:checkForUpdate'),
-  downloadUpdate:  ()      => ipcRenderer.invoke('app:downloadUpdate'),
-  installUpdate:   ()      => ipcRenderer.invoke('app:installUpdate'),
-  openExternal:    (url)   => ipcRenderer.invoke('app:openExternal', url),
+  // ✅ ── Logging — React se Electron ko log bhejo ──────────────
+  logRendererError: (data) => ipcRenderer.invoke('log:rendererError', data),
+  getLogsDir:       ()     => ipcRenderer.invoke('log:getDir'),
+  openLogsFolder:   ()     => ipcRenderer.invoke('log:openFolder'),
 
   // ── Event Listeners ──────────────────────────────────────────
   on: (channel, callback) => {
-    const allowed = ['printer-capture-received', 'sync-complete', 'sync-error', 'updater:status'];
+    const allowed = ['printer-capture-received', 'sync-complete', 'sync-error'];
     if (allowed.includes(channel)) {
       ipcRenderer.on(channel, (_event, ...args) => callback(...args));
     }
