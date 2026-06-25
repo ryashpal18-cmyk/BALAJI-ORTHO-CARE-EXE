@@ -123,7 +123,7 @@ export default function SettingsPage() {
 
     // updater:status events sun lo
     if (electron?.on) {
-      electron.on('updater:status', (payload: any) => {
+      electron.on('update-status', (payload: any) => {
         switch (payload.event) {
           case 'checking':
             setUpdateStage('checking');
@@ -158,7 +158,7 @@ export default function SettingsPage() {
     handleCheckForUpdate();
 
     return () => {
-      electron?.removeAllListeners?.('updater:status');
+      electron?.removeAllListeners?.('update-status');
     };
   }, [tab]);
 
