@@ -4,6 +4,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { isOnline } from "./offlineSync";
+import { cLog } from "@/lib/clientLogger";
 import {
   cacheGetAll,
   cacheReplaceTable,
@@ -22,6 +23,7 @@ export async function offlineFetch<T = any>(
   const online = await isOnline();
 
   if (!online) {
+    cLog.info("offline", `${table} — offline hai, cache se data le raha hai`);
     return (await cacheGetAll(table)) as T[];
   }
 
@@ -30,6 +32,7 @@ export async function offlineFetch<T = any>(
     await cacheReplaceTable(table, rows as any[], idField);
     return rows;
   } catch (err) {
+    cLog.error("supabase", `${table} fetch fail — cache fallback use kar raha hai`, err);
     const cached = await cacheGetAll(table);
     if (cached.length) return cached as T[];
     throw err;
@@ -46,6 +49,7 @@ export async function offlineFetchScoped<T = any>(
   const online = await isOnline();
 
   if (!online) {
+    cLog.info("offline", `${table} scoped — offline cache se data le raha hai`);
     const cached = await cacheGetAll(table);
     return fallbackFilter(cached) as T[];
   }
@@ -57,6 +61,7 @@ export async function offlineFetchScoped<T = any>(
     }
     return rows;
   } catch (err) {
+    cLog.error("supabase", `${table} scoped fetch fail — cache fallback`, err);
     const cached = await cacheGetAll(table);
     const fallback = fallbackFilter(cached);
     if (fallback.length) return fallback as T[];
@@ -76,36 +81,22 @@ export async function offlineInsert(
     try {
       const { data, error } = await supabase.from(table as any).insert(payload).select().single();
       if (error) throw error;
-
-      // ✅ FIX: Agar patient insert hua to billing cache mein bhi patient naam update karo
       await cacheUpsertRow(table, data, idField);
-      if (table === "patients") {
-        await _updatePatientNameInBillingCache(data);
-      }
-
+      if (table === "patients") await _updatePatientNameInBillingCache(data);
+      cLog.info("online", `${table} insert OK — online Supabase mein save hua`);
       return data;
     } catch (err) {
+      cLog.error("supabase", `${table} online insert fail — offline queue mein daal raha hai`, err);
       // fall through to offline path
     }
   }
 
-  const localRow = {
-    ...payload,
-    [idField]: payload[idField] || tempId(),
-    // ✅ FIX: created_at missing hone se billing list date-filter karte waqt
-    // "Invalid Date" crash ho jaata tha (white screen) — ab offline insert pe
-    // bhi timestamp guaranteed milega, jaisa Supabase online insert pe deta hai.
-    created_at: payload.created_at || new Date().toISOString(),
-    _pendingSync: true,
-  };
+  // Offline path
+  const localRow = { ...payload, [idField]: payload[idField] || tempId(), _pendingSync: true };
   await cacheUpsertRow(table, localRow, idField);
   await queueAdd({ table, op: "insert", payload: localRow, tempId: localRow[idField] });
-
-  // ✅ FIX: Offline patient insert pe bhi billing cache update karo
-  if (table === "patients") {
-    await _updatePatientNameInBillingCache(localRow);
-  }
-
+  if (table === "patients") await _updatePatientNameInBillingCache(localRow);
+  cLog.info("offline", `${table} offline save hua — baad mein sync hoga`);
   return localRow;
 }
 
@@ -123,8 +114,10 @@ export async function offlineUpdate(
       const { data, error } = await supabase.from(table as any).update(updates).eq(idField, rowId).select().single();
       if (error) throw error;
       await cacheUpsertRow(table, data, idField);
+      cLog.info("online", `${table} update OK — rowId: ${rowId}`);
       return data;
     } catch (err) {
+      cLog.error("supabase", `${table} online update fail — offline queue mein daal raha hai`, err);
       // fall through to offline path
     }
   }
@@ -134,6 +127,7 @@ export async function offlineUpdate(
   const merged = { ...existing, ...updates, _pendingSync: true };
   await cacheUpsertRow(table, merged, idField);
   await queueAdd({ table, op: "update", payload: updates, rowId });
+  cLog.info("offline", `${table} update offline queue mein daal diya — rowId: ${rowId}`);
   return merged;
 }
 
@@ -145,42 +139,38 @@ export async function offlineDelete(table: string, rowId: string): Promise<void>
       const { error } = await supabase.from(table as any).delete().eq("id", rowId);
       if (error) throw error;
       await cacheDeleteRow(table, rowId);
+      cLog.info("online", `${table} delete OK — rowId: ${rowId}`);
       return;
     } catch (err) {
+      cLog.error("supabase", `${table} online delete fail`, err);
       // fall through to offline path
     }
   }
 
   await cacheDeleteRow(table, rowId);
   await queueAdd({ table, op: "delete", rowId });
+  cLog.info("offline", `${table} offline delete queue mein daal diya — rowId: ${rowId}`);
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// ✅ HELPER: Billing cache mein patient naam inject karo
-// Jab bhi naya patient aaye — cached billing rows mein uska naam daal do
-// taaki offline billing mein naam dikh sake
-// ─────────────────────────────────────────────────────────────────────────
+// ── Billing cache mein patient naam inject karo ──────────────────────────
 async function _updatePatientNameInBillingCache(patient: any) {
   try {
     const patientId = patient?.id;
     if (!patientId) return;
-
     const billingRows = await cacheGetAll("billing");
     for (const bill of billingRows) {
       if (bill.patient_id === patientId) {
-        // billing row mein patients joined object inject karo
-        const updatedBill = {
+        await cacheUpsertRow("billing", {
           ...bill,
           patients: {
             name: patient.name || "",
             mobile: patient.mobile || "",
             address: patient.address || "",
           },
-        };
-        await cacheUpsertRow("billing", updatedBill, "id");
+        }, "id");
       }
     }
-  } catch {
-    // helper failure kabhi UI rok nahi sakta
+  } catch (err) {
+    cLog.warn("cache", "Billing cache mein patient naam update fail", err);
   }
 }

@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { supabase } from "@/integrations/supabase/client";
+import { cLog } from "@/lib/clientLogger";
 import { queueGetAll, queueRemove, queueUpdate, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, QueuedMutation } from "./offlineDb";
 
 
@@ -53,13 +54,13 @@ if (typeof window !== "undefined") {
     const really = await isOnline();
     emitNetworkChange(really);
     if (really) {
-      console.info("Internet aa gayi — sync + data download shuru");
+      cLog.info("sync", "Internet aa gayi — sync + data download shuru");
       runSync();
       downloadAllDataToCache(); // ✅ Internet aate hi fresh data download karo
     }
   });
   window.addEventListener("offline", () => {
-    console.warn("Internet chali gayi — offline mode");
+    cLog.warn("sync", "Internet chali gayi — offline mode");
     emitNetworkChange(false);
   });
 }
@@ -78,7 +79,7 @@ export async function downloadAllDataToCache(): Promise<void> {
   if (!online) return;
 
   downloadInProgress = true;
-  console.info("Poora data PC mein download ho raha hai...");
+  cLog.info("sync", "Poora data PC mein download ho raha hai...");
 
   try {
     // 1. Patients — sabse pehle (baaki sab iske upar depend karte hain)
@@ -143,9 +144,9 @@ export async function downloadAllDataToCache(): Promise<void> {
       console.info(`${beds.length} beds PC mein save ho gaye`);
     }
 
-    console.info("✅ Saara data PC mein save ho gaya — ab offline bhi kaam karega");
+    cLog.info("sync", "✅ Saara data PC mein save ho gaya — ab offline bhi kaam karega");
   } catch (err) {
-    console.error("Data download mein error aaya");
+    cLog.error("sync", "Data download mein error aaya");
   } finally {
     downloadInProgress = false;
   }
@@ -209,7 +210,7 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     if (!res.ok) { console.error(`SMS fail (${res.status})`); throw new Error(`SMS gateway error (${res.status})`); }
     try {
       await supabase.from("sms_logs" as any).insert({ patient_name: patientName, mobile, message, status: "sent", sms_type: smsType } as any);
-    } catch { console.warn("SMS gaya par log save nahi hua"); }
+    } catch { cLog.warn("sync", "SMS gaya par log save nahi hua"); }
     return;
   }
 
@@ -256,7 +257,7 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
       } catch (err: any) {
         const msg = err?.message || String(err);
         if (msg === "PENDING_PARENT_INSERT") continue;
-        console.error("Mutation fail — op: " + m.op + ", table: " + m.table + ", msg: " + msg);
+        cLog.error("sync", "Mutation fail — op: " + m.op + ", table: " + m.table + ", msg: " + msg);
         if (m.id !== undefined) {
           const retries = (m.retries || 0) + 1;
           await queueUpdate(m.id, { retries, lastError: msg });
@@ -285,13 +286,13 @@ let autoSyncStarted = false;
 export function startAutoSync() {
   if (autoSyncStarted) return;
   autoSyncStarted = true;
-  console.info("Auto-sync engine start");
+  cLog.info("sync", "Auto-sync engine start");
 
   // App start hone ke 3 second baad pehle data download karo
   setTimeout(async () => {
     const online = typeof navigator !== "undefined" ? navigator.onLine : false;
     if (online) {
-      console.info("App start — pehle data download ho raha hai");
+      cLog.info("sync", "App start — pehle data download ho raha hai");
       await downloadAllDataToCache();
       await runSync();
     }
