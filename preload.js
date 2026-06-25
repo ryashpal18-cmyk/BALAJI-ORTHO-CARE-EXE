@@ -69,6 +69,9 @@ contextBridge.exposeInMainWorld('electron', {
   getLogsDir:       ()     => ipcRenderer.invoke('log:getDir'),
   openLogsFolder:   ()     => ipcRenderer.invoke('log:openFolder'),
 
+  // ── SMS — main process se bhejo (CORS fix) ──
+  sendSMS: (data) => ipcRenderer.invoke('app:sendSMS', data),
+
   // ── Event Listeners ──────────────────────────────────────────
   on: (channel, callback) => {
     const allowed = ['printer-capture-received', 'sync-complete', 'sync-error'];
