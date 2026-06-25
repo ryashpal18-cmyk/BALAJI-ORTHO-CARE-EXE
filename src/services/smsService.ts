@@ -30,10 +30,14 @@ export async function sendSMS(
     });
 
     if (res.ok) {
-      supabase.from("sms_logs" as any).insert({
-        patient_name: patientName, mobile: num, message,
-        status: "sent", sms_type: smsType,
-      } as any).catch(() => {});
+      try {
+        await supabase.from("sms_logs" as any).insert({
+          patient_name: patientName, mobile: num, message,
+          status: "sent", sms_type: smsType,
+        } as any);
+      } catch {
+        // log save fail ho jaye to bhi SMS to bhej diya gaya — ok hi rahega
+      }
       return { ok: true, queued: false };
     }
     throw new Error(`TextBee ${res.status}`);
@@ -42,10 +46,14 @@ export async function sendSMS(
       table: "sms_logs", op: "sms",
       payload: { mobile: num, message, patientName, smsType },
     });
-    supabase.from("sms_logs" as any).insert({
-      patient_name: patientName, mobile: num, message,
-      status: "pending", sms_type: smsType,
-    } as any).catch(() => {});
+    try {
+      await supabase.from("sms_logs" as any).insert({
+        patient_name: patientName, mobile: num, message,
+        status: "pending", sms_type: smsType,
+      } as any);
+    } catch {
+      // log bhi fail ho sakta hai — queue me to hai hi
+    }
     return { ok: true, queued: true };
   }
 }
