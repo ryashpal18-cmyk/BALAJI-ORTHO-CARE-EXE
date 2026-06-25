@@ -21,6 +21,7 @@ import PatientMedicine from "./pages/PatientMedicine";
 import PatientProfile from "./pages/PatientProfile";
 import Ortho from "./pages/Ortho";
 import SmsLogs from "./pages/SmsLogs";
+import PlasterSync from "./pages/PlasterSync";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
@@ -129,6 +130,7 @@ const App = () => (
           <Route path="/patient-profile/:id" element={<ProtectedRoute><PatientProfile /></ProtectedRoute>} />
           <Route path="/ortho" element={<ProtectedRoute><Ortho /></ProtectedRoute>} />
           <Route path="/sms-logs" element={<ProtectedRoute><SmsLogs /></ProtectedRoute>} />
+          <Route path="/plaster-sync" element={<ProtectedRoute><PlasterSync /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </HashRouter>
