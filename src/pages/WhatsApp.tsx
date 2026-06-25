@@ -23,11 +23,14 @@ export function openWhatsAppWeb(mobile: string, message: string) {
   const num = cleanMobile.startsWith("91") ? cleanMobile : `91${cleanMobile}`;
   const url = `https://web.whatsapp.com/send?phone=${num}&text=${encodeURIComponent(message)}`;
 
-  // Electron mein IPC se bhejo — same persistent window reuse hogi
-  if (window.ipcRenderer) {
-    window.ipcRenderer.send("open-whatsapp", { url });
+  // Electron mein IPC se bhejo
+  if ((window as any).ipcRenderer) {
+    (window as any).ipcRenderer.send("open-whatsapp", { url });
+  } else if ((window as any).electron?.openExternal) {
+    // fallback: electron.openExternal se default browser mein kholo
+    (window as any).electron.openExternal(url);
   } else {
-    // Browser fallback (development mein)
+    // Browser fallback (dev mein)
     window.open(url, "whatsapp_web_window", "width=1000,height=700,scrollbars=yes,resizable=yes");
   }
 }
