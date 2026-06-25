@@ -1,64 +1,36 @@
-name: Build Windows EXE
+appId: com.balaji.ortho.connect
+productName: Balaji Ortho Care Connect
+copyright: "Balaji Ortho Care Center"
 
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+directories:
+  output: release
 
-permissions:
-  contents: write
+asar: false
 
-jobs:
-  build:
-    runs-on: windows-latest
-    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+publish:
+  - provider: github
+    owner: ryashpal18-cmyk
+    repo: BALAJI-ORTHO-CARE-EXE
+    releaseType: release
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
+files:
+  - dist/**
+  - main.js
+  - electron-main.cjs
+  - preload.js
+  - logger.cjs
+  - package.json
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: "npm"
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Bump patch version
-        id: bump
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git reset --hard origin/main
-          npm version patch --no-git-tag-version
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          git add package.json package-lock.json
-          git commit -m "chore: bump version to v$VERSION [skip ci]"
-          git tag -d "v$VERSION" 2>/dev/null || true
-          git push origin ":refs/tags/v$VERSION" 2>/dev/null || true
-          git tag "v$VERSION"
-          git push origin main
-          git push origin "v$VERSION"
-
-      - name: Build React App
-        run: npm run build
-
-      - name: Build & Publish Setup EXE
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win nsis --publish always
-
-      - name: Upload Setup EXE (build artifact, optional)
-        uses: actions/upload-artifact@v4
-        with:
-          name: BalajiOrthoConnect-Setup-v${{ steps.bump.outputs.version }}
-          path: release/*.exe
-          retention-days: 30
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: "Balaji Ortho Care Connect"
+  artifactName: "BalajiOrthoConnect-Setup-${version}.exe"
