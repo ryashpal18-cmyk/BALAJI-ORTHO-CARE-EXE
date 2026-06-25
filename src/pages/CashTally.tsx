@@ -9,9 +9,82 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { useBills } from "@/hooks/useDatabase";
-import { CalendarDays, IndianRupee, Receipt } from "lucide-react";
+import { CalendarDays, IndianRupee, Printer, Receipt } from "lucide-react";
 import { useState } from "react";
+
+function printDailyReport(
+  bills: any[],
+  tally: { total: number; received: number; pending: number },
+  fromDate: string,
+  toDate: string,
+) {
+  const win = window.open("", "_blank");
+  if (!win) return;
+
+  const rangeLabel = fromDate === toDate
+    ? new Date(fromDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    : `${new Date(fromDate).toLocaleDateString("en-IN")} – ${new Date(toDate).toLocaleDateString("en-IN")}`;
+
+  const rows = bills
+    .map((bill) => {
+      const paid = Number(bill.amount_paid || 0);
+      const due = Math.max(Number(bill.amount || 0) - paid, 0);
+      const name = bill.patients?.name || "—";
+      const mobile = bill.patients?.mobile || "";
+      return `<tr>
+        <td>${name}${mobile ? `<br/><span class="muted">${mobile}</span>` : ""}</td>
+        <td class="right">₹${Number(bill.amount || 0).toLocaleString("en-IN")}</td>
+        <td class="right paid">₹${paid.toLocaleString("en-IN")}</td>
+        <td class="right due">₹${due.toLocaleString("en-IN")}</td>
+      </tr>`;
+    })
+    .join("");
+
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Daily Report</title>
+  <style>
+    @page{size:A4;margin:14mm}
+    body{font-family:Arial,sans-serif;color:#0f172a;padding:0}
+    .header{border-bottom:3px solid #0891b2;padding-bottom:10px;margin-bottom:14px}
+    .clinic{font-size:22px;font-weight:800;color:#1e3a5f}
+    .muted{color:#64748b;font-size:12px}
+    h2{margin:14px 0 8px;color:#1e3a5f}
+    .summary{display:flex;gap:12px;margin:14px 0}
+    .box{flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center}
+    .box .label{font-size:11px;color:#64748b}
+    .box .value{font-size:18px;font-weight:800}
+    table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+    th{text-align:left;border-bottom:2px solid #cbd5e1;padding:6px;font-size:12px;color:#475569}
+    td{padding:6px;border-bottom:1px solid #e2e8f0}
+    .right{text-align:right}
+    .paid{color:#15803d}
+    .due{color:#b45309}
+    tfoot td{font-weight:800;border-top:2px solid #cbd5e1;border-bottom:none}
+    @media print{button{display:none}}
+  </style></head><body>
+  <div class="header">
+    <div class="clinic">Balaji Ortho Care Center</div>
+    <div class="muted">Dr. S. S. Rathore (DMRT | BPT) · Opp Govt Hospital, Bay Pass Road, Khinwara, Raj. – 306502</div>
+    <div class="muted">Phone: +91 8005707783</div>
+  </div>
+  <h2>Daily Report — ${rangeLabel}</h2>
+  <div class="summary">
+    <div class="box"><div class="label">Patients</div><div class="value">${bills.length}</div></div>
+    <div class="box"><div class="label">Total</div><div class="value">₹${tally.total.toLocaleString("en-IN")}</div></div>
+    <div class="box"><div class="label">Income</div><div class="value paid">₹${tally.received.toLocaleString("en-IN")}</div></div>
+    <div class="box"><div class="label">Pending Due</div><div class="value due">₹${tally.pending.toLocaleString("en-IN")}</div></div>
+  </div>
+  <table>
+    <thead><tr><th>Patient</th><th class="right">Total</th><th class="right">Paid</th><th class="right">Due</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="4" style="text-align:center;color:#64748b;padding:20px">Koi bill nahi hai</td></tr>`}</tbody>
+    <tfoot><tr><td>Total</td><td class="right">₹${tally.total.toLocaleString("en-IN")}</td><td class="right paid">₹${tally.received.toLocaleString("en-IN")}</td><td class="right due">₹${tally.pending.toLocaleString("en-IN")}</td></tr></tfoot>
+  </table>
+  <button onclick="window.print()" style="margin-top:16px;padding:8px 16px">Print</button>
+  <script>window.onload=function(){window.print()}</script>
+  </body></html>`);
+  win.document.close();
+}
 
 const toLocalDateInput = (date: Date) => {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
@@ -64,11 +137,19 @@ export default function CashTally() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="module-header">Cash Tally</h1>
-          <p className="text-sm text-muted-foreground">
-            Date select karke total aaya aur baki amount check kare
-          </p>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="module-header">Cash Tally</h1>
+            <p className="text-sm text-muted-foreground">
+              Date select karke total aaya aur baki amount check kare
+            </p>
+          </div>
+          <Button
+            onClick={() => printDailyReport(filteredBills, tally, fromDate, toDate)}
+            className="gap-2"
+          >
+            <Printer className="h-4 w-4" /> Print Daily Report
+          </Button>
         </div>
 
         <Card className="border-primary/20">
