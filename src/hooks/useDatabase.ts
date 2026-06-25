@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { offlineFetch, offlineFetchScoped, offlineInsert, offlineUpdate, offlineDelete } from "@/lib/offlineQuery";
+import { cLog } from "@/lib/clientLogger";
 import { cacheGetAll } from "@/lib/offlineDb";
 import { isOnline } from "@/lib/offlineSync";
 
@@ -159,7 +160,7 @@ export function usePatients() {
             const merged = [...data, ...offlineOnly];
             return merged.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
           }
-        } catch { /* network fail — cache use karo */ }
+        } catch (err) { cLog.warn("patients", "Supabase fetch fail — cache use kar rahe hain", err); }
       }
 
       // Offline — sirf cache se do (naye patients bhi hain yahan)
