@@ -357,7 +357,14 @@ export default function PatientProfile() {
           {/* ── X-Ray Tab ── */}
           {activeTab === "xray" && (
             xrays.length === 0 ? (
-              <div className="p-8 text-center text-muted-foreground">Koi X-Ray report nahi hai</div>
+              <div className="p-8 text-center text-muted-foreground">
+                Koi X-Ray report nahi hai
+                <div className="mt-3">
+                  <Button size="sm" variant="outline" className="gap-2" onClick={() => navigate("/reports")}>
+                    <Image className="h-4 w-4" /> X-Ray Upload Karo
+                  </Button>
+                </div>
+              </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4">
                 {xrays.map(r => (
@@ -370,10 +377,26 @@ export default function PatientProfile() {
                       </span>
                     </div>
                     {r.file_url && (
-                      <a href={r.file_url} target="_blank" rel="noreferrer"
-                        className="text-xs text-primary underline">
-                        View Report
-                      </a>
+                      <div className="flex flex-wrap gap-3">
+                        <a href={r.file_url} target="_blank" rel="noreferrer"
+                          className="text-xs text-primary underline">
+                          View Report
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => navigate("/reports", {
+                            state: {
+                              openXrayViewer: true,
+                              xrayImage: r.file_url,
+                              xrayName: r.report_type || "X-Ray",
+                              patientName: patient.name,
+                            },
+                          })}
+                          className="text-xs text-cyan-600 underline"
+                        >
+                          🩻 X-Ray Viewer me kholo
+                        </button>
+                      </div>
                     )}
                     {r.notes && <p className="text-xs text-muted-foreground">{r.notes}</p>}
                   </div>

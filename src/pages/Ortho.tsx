@@ -9,8 +9,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Bone, Save, Send, MessageCircle, CalendarDays, Plane, Search, Pencil, CheckCircle2, PowerOff, BellRing, Shield, Plus, AlertTriangle, Check, Loader2, Clock, FileText, BarChart3, Activity, TrendingUp, Printer, Calendar, Phone, ChevronRight, Stethoscope } from "lucide-react";
+import { Bone, Save, Send, MessageCircle, CalendarDays, Plane, Search, Pencil, CheckCircle2, PowerOff, BellRing, Shield, Plus, AlertTriangle, Check, Loader2, Clock, FileText, BarChart3, Activity, TrendingUp, Printer, Calendar, Phone, ChevronRight, Stethoscope, User } from "lucide-react";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 import { useAddFractureCase, useFractureCases, useFollowupsAround, useUpdateFractureCase } from "@/hooks/useOrtho";
 import { useAddPatient, useSearchPatients } from "@/hooks/useDatabase";
 import { sendSMS } from "@/services/smsService";
@@ -634,6 +635,7 @@ function AnalyticsSection({ cases, followups }: { cases: any[]; followups: any[]
 
 // ─── Active Patient Card ──────────────────────
 function ActiveCard({ c, onDetail, onEdit, onRemove, onFuDone, onReschedule }: any) {
+  const navigate = useNavigate();
   const today = todayIso();
   const pct   = healPct(c.plaster_date, c.followup_days);
   const dLeft = c.next_followup_date ? diffDays(today, c.next_followup_date) : null;
@@ -647,7 +649,10 @@ function ActiveCard({ c, onDetail, onEdit, onRemove, onFuDone, onReschedule }: a
     <div style={{borderRadius:16,border:`2px solid ${border}`,background:bg,padding:14,boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
         <div style={{flex:1,minWidth:0}}>
-          <p style={{fontWeight:800,fontSize:14,margin:"0 0 2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.patients?.name}</p>
+          <p
+            onClick={()=>c.patient_id && navigate(`/patient-profile/${c.patient_id}`)}
+            style={{fontWeight:800,fontSize:14,margin:"0 0 2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:c.patient_id?"pointer":"default"}}
+            title="Profile dekhne ke liye click karo">{c.patients?.name}</p>
           <p style={{fontSize:11,color:"#6b7280",margin:0}}>{c.side} {c.body_part} · {c.plaster_type||"—"} · {c.fracture_type||"—"}</p>
         </div>
         <div style={{display:"flex",gap:4,flexShrink:0,marginLeft:8}}>
@@ -666,10 +671,13 @@ function ActiveCard({ c, onDetail, onEdit, onRemove, onFuDone, onReschedule }: a
         </span>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr auto auto auto auto",gap:5}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr auto auto auto auto auto",gap:5}}>
         <button onClick={()=>(isMissed||isToday)?onFuDone(c):onDetail(c)}
           style={{padding:"7px 4px",borderRadius:10,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,color:"#fff",background:isMissed||isToday?"linear-gradient(135deg,#10b981,#059669)":"linear-gradient(135deg,#6366f1,#8b5cf6)",display:"flex",alignItems:"center",justifyContent:"center",gap:3}}>
           {isMissed||isToday?<><CheckCircle2 style={{width:11,height:11}}/>FU Done</>:<><MessageCircle style={{width:11,height:11}}/>SMS</>}
+        </button>
+        <button onClick={()=>c.patient_id && navigate(`/patient-profile/${c.patient_id}`)} style={{padding:"7px 9px",borderRadius:10,border:"1.5px solid #e2e8f0",background:"#f8fafc",cursor:"pointer"}} title="Profile (X-Ray, Bills, History)">
+          <User style={{width:12,height:12,color:"#0ea5e9"}}/>
         </button>
         {(isMissed||isToday) && (
           <button onClick={()=>onDetail(c)} style={{padding:"7px 9px",borderRadius:10,border:"1.5px solid #e2e8f0",background:"#f8fafc",cursor:"pointer"}} title="SMS / Detail">
@@ -692,6 +700,7 @@ function ActiveCard({ c, onDetail, onEdit, onRemove, onFuDone, onReschedule }: a
 
 // ─── Main Page ────────────────────────────────
 export default function Ortho() {
+  const navigate = useNavigate();
   const today = todayIso();
   const { data: cases=[], refetch: refetchCases }       = useFractureCases();
   const { data: followups=[], refetch: refetchFollowups } = useFollowupsAround();
@@ -735,8 +744,8 @@ export default function Ortho() {
   // ── Search ──
   const [activeSearch, setActiveSearch] = useState("");
   const [compSearch, setCompSearch]     = useState("");
-  const filteredActive    = useMemo(()=>{ const q=activeSearch.toLowerCase(); return q?activeCases.filter((c: any)=>(c.patients?.name||"").toLowerCase().includes(q)||(c.body_part||"").toLowerCase().includes(q)):activeCases; }, [activeCases, activeSearch]);
-  const filteredCompleted = useMemo(()=>{ const q=compSearch.toLowerCase(); return q?completedCases.filter((c: any)=>(c.patients?.name||"").toLowerCase().includes(q)):completedCases; }, [completedCases, compSearch]);
+  const filteredActive    = useMemo(()=>{ const q=activeSearch.toLowerCase(); const list = q?activeCases.filter((c: any)=>(c.patients?.name||"").toLowerCase().includes(q)||(c.body_part||"").toLowerCase().includes(q)):activeCases; return [...list].sort((a: any,b: any)=>(b.plaster_date||"").localeCompare(a.plaster_date||"")); }, [activeCases, activeSearch]);
+  const filteredCompleted = useMemo(()=>{ const q=compSearch.toLowerCase(); const list = q?completedCases.filter((c: any)=>(c.patients?.name||"").toLowerCase().includes(q)):completedCases; return [...list].sort((a: any,b: any)=>(b.plaster_date||"").localeCompare(a.plaster_date||"")); }, [completedCases, compSearch]);
 
   // ── Dialogs ──
   const [editCase, setEditCase]         = useState<any>(null);
@@ -1083,6 +1092,9 @@ export default function Ortho() {
                       </div>
                     </div>
                     <div style={{display:"flex",gap:6,flexShrink:0}}>
+                      <button onClick={()=>c.patient_id && navigate(`/patient-profile/${c.patient_id}`)} style={{padding:"6px 10px",borderRadius:8,border:"1.5px solid #e2e8f0",background:"#fff",cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontSize:11,color:"#0ea5e9",fontWeight:600}}>
+                        <User style={{width:12,height:12}}/>Profile
+                      </button>
                       <button onClick={()=>printRemovalSlip(c)} style={{padding:"6px 10px",borderRadius:8,border:"1.5px solid #e2e8f0",background:"#f0fdf4",cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontSize:11,color:"#16a34a",fontWeight:600}}>
                         <Printer style={{width:12,height:12}}/>Slip
                       </button>

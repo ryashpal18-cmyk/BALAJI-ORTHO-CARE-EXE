@@ -10,7 +10,8 @@ import { Upload, FileText, Image, Download, Maximize2 } from "lucide-react";
 import XRayViewer from "@/components/XRayViewer";
 import { useXrayReports, useAddXrayReport, usePatients } from "@/hooks/useDatabase";
 import { supabase } from "@/integrations/supabase/client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
 import AIXrayReport from "@/components/AIXrayReport";
 
@@ -40,6 +41,21 @@ export default function Reports() {
   const [uploading, setUploading] = useState(false);
   const [selectedSavedReport, setSelectedSavedReport] = useState<any>(null);
   const [xrayViewerOpen, setXrayViewerOpen] = useState(false);
+  const location = useLocation();
+  const incomingState = location.state as { openXrayViewer?: boolean; xrayImage?: string; xrayName?: string; patientName?: string } | null;
+  const [viewerInitialImage, setViewerInitialImage] = useState<{ src: string; name: string; patientName?: string } | null>(null);
+
+  useEffect(() => {
+    if (incomingState?.openXrayViewer && incomingState.xrayImage) {
+      setViewerInitialImage({
+        src: incomingState.xrayImage,
+        name: incomingState.xrayName || "X-Ray",
+        patientName: incomingState.patientName,
+      });
+      setXrayViewerOpen(true);
+      window.history.replaceState({}, document.title); // state ek baar use karke clear karo
+    }
+  }, [incomingState]);
   const savedAiReports = reports?.filter((r: any) => r.report_data) || [];
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -156,9 +172,9 @@ export default function Reports() {
           </div>
         </div>
 
-        <Dialog open={xrayViewerOpen} onOpenChange={setXrayViewerOpen}>
+        <Dialog open={xrayViewerOpen} onOpenChange={(v) => { setXrayViewerOpen(v); if (!v) setViewerInitialImage(null); }}>
           <DialogContent className="max-w-full w-screen h-screen p-0 m-0 rounded-none border-0">
-            <XRayViewer />
+            <XRayViewer initialImage={viewerInitialImage} />
           </DialogContent>
         </Dialog>
 
