@@ -32,8 +32,12 @@ const ORTHANC_URL = "http://localhost:8042";
 // ─── Helper ───────────────────────────────────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 9);
 
+interface XRayViewerProps {
+  initialImage?: { src: string; name: string; patientName?: string } | null;
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function XRayViewer() {
+export default function XRayViewer({ initialImage }: XRayViewerProps = {}) {
   // Images
   const [images, setImages] = useState<XRayImage[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -91,6 +95,23 @@ export default function XRayViewer() {
     setNotification(msg);
     setTimeout(() => setNotification(""), 3000);
   };
+
+  // ── Incoming image from Patient Profile (e.g. "X-Ray Viewer me kholo")
+  useEffect(() => {
+    if (!initialImage?.src) return;
+    const newImg: XRayImage = {
+      id: uid(),
+      name: initialImage.name || "X-Ray",
+      src: initialImage.src,
+      date: new Date().toLocaleDateString("en-IN"),
+      patientName: initialImage.patientName,
+    };
+    setImages((prev) => [newImg, ...prev]);
+    setActiveIndex(0);
+    if (initialImage.patientName) setPatientName(initialImage.patientName);
+    notify(`📁 ${initialImage.name} load ho gaya`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialImage?.src]);
 
   // ── Draw image on canvas
   const drawCanvas = useCallback(
