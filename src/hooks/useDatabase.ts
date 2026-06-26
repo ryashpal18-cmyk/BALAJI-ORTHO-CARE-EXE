@@ -439,11 +439,14 @@ export function useXrayReports() {
         const { data, error } = await supabase
           .from("xray_reports")
           .select("*, patients(name)")
+          .not("notes", "ilike", "%[ortho:%")
           .order("uploaded_at", { ascending: false });
         if (error) throw error;
         return data as any[] || [];
       });
-      return [...rows].sort((a: any, b: any) => (b.uploaded_at || "").localeCompare(a.uploaded_at || ""));
+      // Also filter offline records — ortho fracture X-rays ko exclude karo
+      const filtered = rows.filter((r: any) => !r.notes?.includes("[ortho:"));
+      return [...filtered].sort((a: any, b: any) => (b.uploaded_at || "").localeCompare(a.uploaded_at || ""));
     },
   });
 }
