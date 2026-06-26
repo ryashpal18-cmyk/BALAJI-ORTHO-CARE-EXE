@@ -48,6 +48,7 @@ export default function IPD() {
               <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.75)", margin: 0 }}>Manage admissions and bed allocation</p>
             </div>
           </div>
+          </div>
           <Button className="gap-2"><BedDouble className="h-4 w-4" />New Admission</Button>
         </div>
 
