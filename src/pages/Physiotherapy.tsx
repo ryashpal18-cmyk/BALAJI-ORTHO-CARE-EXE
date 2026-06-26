@@ -64,7 +64,6 @@ export default function Physiotherapy() {
               <h1 style={{ fontSize: "22px", fontWeight: 800, color: "white", margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Physiotherapy</h1>
               <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.75)", margin: 0 }}>Physiotherapy sessions and progress tracking</p>
             </div>
-            <p className="text-sm text-muted-foreground">Track exercise plans and patient progress</p>
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>

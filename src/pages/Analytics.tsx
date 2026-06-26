@@ -161,9 +161,7 @@ export default function Analytics() {
               <h1 style={{ fontSize: "22px", fontWeight: 800, color: "white", margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Analytics</h1>
               <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.75)", margin: 0 }}>Revenue and patient statistics</p>
             </div>
-          <p className="text-sm text-muted-foreground">
-            Real clinic data — {navigator.onLine ? "Live" : "Offline cache"}
-          </p>
+          </div>
         </div>
 
         {/* Summary Stats */}

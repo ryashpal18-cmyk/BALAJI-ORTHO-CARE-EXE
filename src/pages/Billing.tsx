@@ -1023,7 +1023,6 @@ const filteredPatients = patients
               <h1 style={{ fontSize: "22px", fontWeight: 800, color: "white", margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Billing</h1>
               <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.75)", margin: 0 }}>Patient billing, payments and receipts</p>
             </div>
-            <p className="text-sm text-muted-foreground">Manage invoices, receipts, and payments</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" className="gap-2" onClick={exportToExcel}>

@@ -77,7 +77,6 @@ export default function Appointments() {
               <h1 style={{ fontSize: "22px", fontWeight: 800, color: "white", margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Appointments</h1>
               <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.75)", margin: 0 }}>Schedule and manage patient appointments</p>
             </div>
-            <p className="text-sm text-muted-foreground">Schedule and manage patient appointments</p>
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>

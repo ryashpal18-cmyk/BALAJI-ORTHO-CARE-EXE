@@ -140,7 +140,6 @@ export default function Reports() {
               <h1 style={{ fontSize: "22px", fontWeight: 800, color: "white", margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Reports & X-Ray</h1>
               <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.75)", margin: 0 }}>Patient reports and X-ray management</p>
             </div>
-            <p className="text-sm text-muted-foreground">Upload and manage medical reports</p>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="secondary" className="gap-2" onClick={() => setXrayViewerOpen(true)}>

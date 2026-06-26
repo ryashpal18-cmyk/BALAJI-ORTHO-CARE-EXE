@@ -155,9 +155,6 @@ export default function CashTally() {
               <h1 style={{ fontSize: "22px", fontWeight: 800, color: "white", margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cash Tally</h1>
               <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.75)", margin: 0 }}>Daily cash and payment summary</p>
             </div>
-            <p className="text-sm text-muted-foreground">
-              Date select karke total aaya aur baki amount check kare
-            </p>
           </div>
           <Button
             onClick={() => printDailyReport(filteredBills, tally, fromDate, toDate)}
