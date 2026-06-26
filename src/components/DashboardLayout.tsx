@@ -122,22 +122,22 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               height: "56px",
               display: "flex", alignItems: "center", justifyContent: "space-between",
               padding: "0 20px", gap: "16px",
-              background: "rgba(255,255,255,0.88)",
-              backdropFilter: "blur(12px)",
-              borderBottom: "1px solid rgba(228,236,250,0.8)",
-              boxShadow: "0 2px 16px rgba(30,87,176,0.10)",
+              background: "linear-gradient(135deg, rgba(13,35,81,0.94) 0%, rgba(30,87,176,0.90) 55%, rgba(14,124,74,0.86) 100%)",
+              backdropFilter: "blur(16px)",
+              borderBottom: "1px solid rgba(255,255,255,0.12)",
+              boxShadow: "0 4px 24px rgba(13,35,81,0.28)",
               position: "sticky", top: 0, zIndex: 30,
             }}
           >
             {/* Left */}
             <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: 1 }}>
-              <SidebarTrigger style={{ color: "#1e57b0" }} />
+              <SidebarTrigger style={{ color: "rgba(255,255,255,0.90)" }} />
 
               {/* Search */}
               <div style={{ position: "relative", width: "280px" }} ref={wrapRef} className="hidden sm:block">
                 <Search style={{
                   position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)",
-                  width: "15px", height: "15px", color: "#8a9ab0", zIndex: 1,
+                  width: "15px", height: "15px", color: "rgba(255,255,255,0.60)", zIndex: 1,
                 }} />
                 <Input
                   placeholder="Patient name search..."
@@ -145,7 +145,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     paddingLeft: "34px", paddingRight: query ? "32px" : "12px",
                     height: "36px", borderRadius: "10px",
                     border: "1.5px solid #d5dde8",
-                    background: "rgba(244,247,253,0.9)",
+                    background: "rgba(255,255,255,0.14)",
                     fontSize: "13px",
                   }}
                   value={query}
@@ -157,7 +157,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     onClick={() => { setQuery(""); setShowDrop(false); }}
                     style={{
                       position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)",
-                      background: "none", border: "none", cursor: "pointer", color: "#8a9ab0",
+                      background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.70)",
                     }}
                   >
                     <X style={{ width: "14px", height: "14px" }} />
@@ -236,10 +236,10 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                   <button style={{
                     position: "relative", width: "36px", height: "36px",
                     borderRadius: "10px", border: "1.5px solid #e4ecfa",
-                    background: "rgba(244,247,253,0.9)", display: "flex", alignItems: "center", justifyContent: "center",
+                    background: "rgba(255,255,255,0.14)", display: "flex", alignItems: "center", justifyContent: "center",
                     cursor: "pointer",
                   }}>
-                    <Bell style={{ width: "16px", height: "16px", color: "#1e57b0" }} />
+                    <Bell style={{ width: "16px", height: "16px", color: "rgba(255,255,255,0.85)" }} />
                     {notifCount > 0 && (
                       <span style={{
                         position: "absolute", top: "-4px", right: "-4px",
@@ -326,8 +326,28 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             flex: 1, padding: "20px 24px",
             overflowY: "auto",
             background: "transparent",
+            position: "relative",
           }}>
-            {children}
+            {/* Colorful ambient mesh glow */}
+            <div style={{
+              position: "fixed",
+              top: "15%", left: "20%",
+              width: "500px", height: "500px",
+              borderRadius: "50%",
+              background: "radial-gradient(circle, rgba(30,87,176,0.06) 0%, transparent 70%)",
+              pointerEvents: "none", zIndex: 0,
+            }} />
+            <div style={{
+              position: "fixed",
+              bottom: "20%", right: "15%",
+              width: "400px", height: "400px",
+              borderRadius: "50%",
+              background: "radial-gradient(circle, rgba(14,124,74,0.05) 0%, transparent 70%)",
+              pointerEvents: "none", zIndex: 0,
+            }} />
+            <div style={{ position: "relative", zIndex: 1 }}>
+              {children}
+            </div>
           </main>
         </div>
       </div>
