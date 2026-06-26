@@ -30,12 +30,12 @@ export default function IPD() {
     <DashboardLayout>
       <div className="space-y-6 page-enter">
         <div className="flex items-center justify-between">
-          <div>
-            <div style={{
+          <div style={{
             background: "linear-gradient(135deg, #0d2351 0%, #1e57b0 55%, #0e7c4a 100%)",
             borderRadius: "18px", padding: "22px 24px",
             display: "flex", alignItems: "center", gap: "16px",
             boxShadow: "0 8px 32px rgba(13,35,81,0.28)",
+            flex: 1, marginRight: "16px",
           }}>
             <div style={{
               width: "54px", height: "54px", borderRadius: "14px",
@@ -47,7 +47,6 @@ export default function IPD() {
               <h1 style={{ fontSize: "22px", fontWeight: 800, color: "white", margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>IPD / Bed Management</h1>
               <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.75)", margin: 0 }}>Manage admissions and bed allocation</p>
             </div>
-          </div>
           </div>
           <Button className="gap-2"><BedDouble className="h-4 w-4" />New Admission</Button>
         </div>

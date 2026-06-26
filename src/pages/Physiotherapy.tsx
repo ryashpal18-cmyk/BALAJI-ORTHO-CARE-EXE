@@ -47,12 +47,12 @@ export default function Physiotherapy() {
     <DashboardLayout>
       <div className="space-y-6 page-enter">
         <div className="flex items-center justify-between">
-          <div>
-            <div style={{
+          <div style={{
             background: "linear-gradient(135deg, #0d2351 0%, #1e57b0 55%, #0e7c4a 100%)",
             borderRadius: "18px", padding: "22px 24px",
             display: "flex", alignItems: "center", gap: "16px",
             boxShadow: "0 8px 32px rgba(13,35,81,0.28)",
+            flex: 1, marginRight: "16px",
           }}>
             <div style={{
               width: "54px", height: "54px", borderRadius: "14px",
