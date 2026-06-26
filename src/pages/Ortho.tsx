@@ -1008,6 +1008,62 @@ export default function Ortho() {
 
   const resetForm = () => { setMobile(""); setName(""); setAge(""); setSelPt(null); setBodySelection(null); setFractureType(""); setCause(""); setPlasterType("POP Cast"); setPlasterDate(today); setFollowupDays("21"); setNotes(""); };
 
+  // ── Auto-delete ortho X-Rays older than 6 months ──
+  useEffect(() => {
+    const AUTO_DELETE_KEY = "ortho_xray_last_cleanup";
+    const lastRun = localStorage.getItem(AUTO_DELETE_KEY);
+    const now = Date.now();
+    // Har 24 ghante mein ek baar chalao — bar bar nahi
+    if (lastRun && now - Number(lastRun) < 86400000) return;
+
+    const cleanup = async () => {
+      try {
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        const cutoff = sixMonthsAgo.toISOString();
+
+        // 6 mahine se purane ortho X-Ray records fetch karo
+        const { data: oldRecords } = await supabase
+          .from("xray_reports")
+          .select("id, file_url, notes")
+          .ilike("notes", "%[ortho:%")
+          .lt("created_at", cutoff);
+
+        if (!oldRecords || oldRecords.length === 0) {
+          localStorage.setItem(AUTO_DELETE_KEY, String(now));
+          return;
+        }
+
+        // Storage se files delete karo
+        const filePaths = oldRecords
+          .map((r: any) => {
+            try {
+              // file_url se path nikalo: "xrays/patientId/filename.jpg"
+              const url = new URL(r.file_url);
+              const parts = url.pathname.split("/patient-files/");
+              return parts[1] || null;
+            } catch { return null; }
+          })
+          .filter(Boolean) as string[];
+
+        if (filePaths.length > 0) {
+          await supabase.storage.from("patient-files").remove(filePaths);
+        }
+
+        // Database records delete karo
+        const ids = oldRecords.map((r: any) => r.id);
+        await supabase.from("xray_reports").delete().in("id", ids);
+
+        localStorage.setItem(AUTO_DELETE_KEY, String(now));
+        console.log(`[Ortho Cleanup] ${ids.length} purane X-Ray delete kiye (6 mahine se zyada purane)`);
+      } catch (e) {
+        console.warn("[Ortho Cleanup] Error:", e);
+      }
+    };
+
+    cleanup();
+  }, []);
+
   const handleSave = async () => {
     if(!name||!mobile) return toast.error("Naam aur Mobile zaroori hai");
     if(!bodySelection?.body_part||!fractureType) return toast.error("Body Map pe click karo aur Fracture Type select karo");
