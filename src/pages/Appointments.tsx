@@ -58,10 +58,25 @@ export default function Appointments() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-6 page-enter">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="module-header">Appointments</h1>
+            <div style={{
+            background: "linear-gradient(135deg, #0d2351 0%, #1e57b0 55%, #0e7c4a 100%)",
+            borderRadius: "18px", padding: "22px 24px",
+            display: "flex", alignItems: "center", gap: "16px",
+            boxShadow: "0 8px 32px rgba(13,35,81,0.28)",
+          }}>
+            <div style={{
+              width: "54px", height: "54px", borderRadius: "14px",
+              background: "rgba(255,255,255,0.18)", backdropFilter: "blur(8px)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: "28px", flexShrink: 0,
+            }}>📅</div>
+            <div>
+              <h1 style={{ fontSize: "22px", fontWeight: 800, color: "white", margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Appointments</h1>
+              <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.75)", margin: 0 }}>Schedule and manage patient appointments</p>
+            </div>
             <p className="text-sm text-muted-foreground">Schedule and manage patient appointments</p>
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
@@ -117,7 +132,7 @@ export default function Appointments() {
             ) : (
               <div className="space-y-3">
                 {appointments.map(apt => (
-                  <div key={apt.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
+                  <div key={apt.id} className="flex items-center justify-between p-4 rounded-xl border-2 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 bg-gradient-to-r from-blue-50/40 to-green-50/30">
                     <div className="flex items-center gap-3">
                       <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
                         <Clock className="h-5 w-5 text-primary" />

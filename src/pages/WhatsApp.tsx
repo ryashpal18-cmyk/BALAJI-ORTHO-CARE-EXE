@@ -75,7 +75,7 @@ export default function WhatsApp() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-6 page-enter">
         <div>
           <h1 className="module-header flex items-center gap-2">
             <MessageCircle className="h-6 w-6 text-green-500" />

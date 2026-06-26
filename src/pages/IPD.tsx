@@ -28,11 +28,25 @@ export default function IPD() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-6 page-enter">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="module-header">IPD / Bed Management</h1>
-            <p className="text-sm text-muted-foreground">Manage admissions and bed allocation</p>
+            <div style={{
+            background: "linear-gradient(135deg, #0d2351 0%, #1e57b0 55%, #0e7c4a 100%)",
+            borderRadius: "18px", padding: "22px 24px",
+            display: "flex", alignItems: "center", gap: "16px",
+            boxShadow: "0 8px 32px rgba(13,35,81,0.28)",
+          }}>
+            <div style={{
+              width: "54px", height: "54px", borderRadius: "14px",
+              background: "rgba(255,255,255,0.18)", backdropFilter: "blur(8px)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: "28px", flexShrink: 0,
+            }}>🛏️</div>
+            <div>
+              <h1 style={{ fontSize: "22px", fontWeight: 800, color: "white", margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>IPD / Bed Management</h1>
+              <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.75)", margin: 0 }}>Manage admissions and bed allocation</p>
+            </div>
           </div>
           <Button className="gap-2"><BedDouble className="h-4 w-4" />New Admission</Button>
         </div>
@@ -57,7 +71,7 @@ export default function IPD() {
               <CardContent>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
                   {typeBeds.map(bed => (
-                    <div key={bed.id} className={cn("border rounded-lg p-3 text-center cursor-pointer transition-all hover:shadow-md", statusColor[bed.status as keyof typeof statusColor] || "")}>
+                    <div key={bed.id} className={cn("border-2 rounded-xl p-3 text-center cursor-pointer transition-all hover:shadow-xl hover:-translate-y-1 hover:scale-105 duration-200", statusColor[bed.status as keyof typeof statusColor] || "")}>
                       <BedDouble className="h-6 w-6 mx-auto mb-1" />
                       <p className="font-bold text-sm">{bed.bed_number}</p>
                       {(bed.patients as any)?.name && <p className="text-[10px] mt-1 truncate">{(bed.patients as any).name}</p>}

@@ -130,10 +130,18 @@ export default function Dashboard() {
     <DashboardLayout>
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <img src={logo} alt="Balaji Ortho Care Center" className="h-12 w-12 object-contain" />
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            <div style={{
+              width: "58px", height: "58px", borderRadius: "16px",
+              background: "linear-gradient(135deg, rgba(13,35,81,0.12), rgba(30,87,176,0.10))",
+              border: "2px solid rgba(30,87,176,0.20)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              overflow: "hidden",
+            }}>
+              <img src={logo} alt="Balaji Ortho Care Center" style={{ height: "48px", width: "48px", objectFit: "contain" }} />
+            </div>
             <div>
-              <h1 className="module-header">Dashboard</h1>
+              <h1 className="module-header">🏥 Dashboard</h1>
               <p className="text-muted-foreground text-sm mt-1">
                 Welcome back, Dr. Rathore · {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
               </p>
