@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,8 @@ import { useAddFractureCase, useFractureCases, useFollowupsAround, useUpdateFrac
 import { useAddPatient, useSearchPatients } from "@/hooks/useDatabase";
 import { sendSMS } from "@/services/smsService";
 import { BodyDiagram, type BodySelection } from "@/components/ortho/BodyDiagram";
+import { supabase } from "@/integrations/supabase/client";
+import { Upload, ZoomIn, X as XIcon } from "lucide-react";
 
 // ─── Constants ────────────────────────────────
 const FRACTURE_TYPES = ["Simple","Compound","Hairline","Dislocation","Comminuted","Greenstick","Stress","Spiral"];
@@ -293,6 +295,287 @@ function EditDialog({ open, onClose, caseData }: { open: boolean; onClose: () =>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Fracture Profile Dialog (X-Ray + Details) ───────────────────────────────
+type FractureXray = {
+  id: string;
+  file_url: string;
+  notes?: string;
+  created_at: string;
+  visit_label?: string;   // e.g. "Week 1", "Week 2"
+};
+
+function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onClose: () => void; caseData: any }) {
+  const [xrays, setXrays] = useState<FractureXray[]>([]);
+  const [loadingXrays, setLoadingXrays] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [noteText, setNoteText] = useState("");
+  const [visitLabel, setVisitLabel] = useState("");
+  const [compareMode, setCompareMode] = useState(false);
+  const [zoomImg, setZoomImg] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const patientId = caseData?.patient_id;
+  const caseId    = caseData?.id;
+
+  // Fetch x-rays for this fracture case (using case_id tag in notes field or separate storage prefix)
+  const fetchXrays = async () => {
+    if (!patientId || !caseId) return;
+    setLoadingXrays(true);
+    try {
+      const { data } = await supabase
+        .from("xray_reports")
+        .select("*")
+        .eq("patient_id", patientId)
+        .ilike("notes", `%[ortho:${caseId}]%`)
+        .order("created_at", { ascending: true });
+      setXrays(data || []);
+    } catch (e) {
+      // fallback — show all xrays for patient
+      try {
+        const { data } = await supabase
+          .from("xray_reports")
+          .select("*")
+          .eq("patient_id", patientId)
+          .order("created_at", { ascending: true });
+        setXrays(data || []);
+      } catch {}
+    } finally {
+      setLoadingXrays(false);
+    }
+  };
+
+  useEffect(() => { if (open && caseData) { fetchXrays(); setNoteText(""); setVisitLabel(""); setCompareMode(false); } }, [open, caseData]);
+
+  const handleUpload = async (file: File) => {
+    if (!file || !patientId || !caseId) return;
+    setUploadBusy(true);
+    try {
+      const ext  = file.name.split(".").pop() || "jpg";
+      const path = `xrays/${patientId}/ortho_${caseId}_${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from("patient-files").upload(path, file, { upsert: false });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from("patient-files").getPublicUrl(path);
+      const weekNum = xrays.length + 1;
+      const label   = visitLabel.trim() || `Visit ${weekNum}`;
+      const { error: dbErr } = await supabase.from("xray_reports").insert({
+        patient_id:  patientId,
+        report_type: `Ortho X-Ray — ${label}`,
+        file_url:    urlData.publicUrl,
+        notes:       `[ortho:${caseId}] ${noteText}`.trim(),
+      });
+      if (dbErr) throw dbErr;
+      toast.success(`✅ X-Ray upload ho gaya — ${label}`);
+      setNoteText(""); setVisitLabel("");
+      fetchXrays();
+    } catch (e: any) {
+      toast.error(e?.message || "Upload fail hua");
+    } finally {
+      setUploadBusy(false);
+    }
+  };
+
+  if (!caseData) return null;
+  const name  = caseData.patients?.name || "Patient";
+  const mob   = caseData.patients?.mobile || "—";
+  const bp    = `${caseData.side || ""} ${caseData.body_part || ""}`.trim();
+  const pct   = healPct(caseData.plaster_date, caseData.followup_days);
+
+  const latest  = xrays[xrays.length - 1];
+  const previous = xrays[xrays.length - 2];
+
+  return (
+    <>
+      {/* Zoom overlay */}
+      {zoomImg && (
+        <div onClick={() => setZoomImg(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",cursor:"zoom-out"}}>
+          <img src={zoomImg} alt="X-Ray Zoom" style={{maxWidth:"92vw",maxHeight:"90vh",borderRadius:12,boxShadow:"0 0 60px #000"}}/>
+          <button onClick={() => setZoomImg(null)} style={{position:"absolute",top:18,right:18,background:"#fff",border:"none",borderRadius:"50%",width:36,height:36,cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+        </div>
+      )}
+
+      <Dialog open={open} onOpenChange={v => !v && onClose()}>
+        <DialogContent className="sm:max-w-2xl" style={{padding:0,overflow:"hidden",borderRadius:20}}>
+
+          {/* ── Colorful Header ── */}
+          <div style={{background:"linear-gradient(135deg,#1e3a5f,#6366f1,#8b5cf6)",padding:"20px 24px 16px",position:"relative"}}>
+            <div style={{display:"flex",alignItems:"center",gap:14}}>
+              <div style={{width:56,height:56,borderRadius:16,background:"rgba(255,255,255,0.18)",display:"flex",alignItems:"center",justifyContent:"center",border:"2px solid rgba(255,255,255,0.3)"}}>
+                <Bone style={{width:28,height:28,color:"#fff"}}/>
+              </div>
+              <div style={{flex:1}}>
+                <p style={{fontWeight:900,fontSize:18,margin:0,color:"#fff"}}>{name}</p>
+                <p style={{fontSize:12,color:"rgba(255,255,255,0.75)",margin:"2px 0 0"}}>{bp} · {caseData.fracture_type || "—"} · {caseData.plaster_type || "—"}</p>
+                <p style={{fontSize:11,color:"rgba(255,255,255,0.6)",margin:"1px 0 0"}}>📞 {mob}</p>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"8px 14px"}}>
+                  <p style={{fontSize:10,color:"rgba(255,255,255,0.7)",margin:0}}>Healing</p>
+                  <p style={{fontSize:22,fontWeight:900,color:"#fff",margin:0}}>{pct}%</p>
+                </div>
+              </div>
+            </div>
+            {/* heal bar */}
+            <div style={{marginTop:12,height:6,borderRadius:99,background:"rgba(255,255,255,0.2)"}}>
+              <div style={{height:"100%",width:`${pct}%`,background:"linear-gradient(90deg,#34d399,#86efac)",borderRadius:99,transition:"width 0.8s"}}/>
+            </div>
+          </div>
+
+          <ScrollArea style={{maxHeight:"70vh"}}>
+            <div style={{padding:"16px 20px",display:"flex",flexDirection:"column",gap:16}}>
+
+              {/* ── Key Info Grid ── */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+                {[
+                  ["🦴 Fracture","#6366f1","#eef2ff", caseData.fracture_type||"—"],
+                  ["📅 Plaster Date","#0ea5e9","#e0f2fe", fmtDate(caseData.plaster_date)],
+                  ["🗓 Next Follow-up","#f59e0b","#fffbeb", fmtDate(caseData.next_followup_date)],
+                  ["⚡ Cause","#8b5cf6","#f5f3ff", caseData.cause||"—"],
+                  ["🏥 Plaster Type","#10b981","#f0fdf4", caseData.plaster_type||"—"],
+                  ["⏱ Follow-up Days","#ec4899","#fdf2f8", `${caseData.followup_days||"—"} din`],
+                ].map(([label,clr,bg,val]:any) => (
+                  <div key={label} style={{background:bg,borderRadius:12,padding:"10px 12px",border:`1.5px solid ${clr}25`}}>
+                    <p style={{fontSize:9,fontWeight:700,color:clr,margin:"0 0 3px",textTransform:"uppercase",letterSpacing:0.5}}>{label}</p>
+                    <p style={{fontSize:12,fontWeight:700,margin:0,color:"#1e293b"}}>{val}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Doctor Notes */}
+              {caseData.doctor_notes && (
+                <div style={{background:"#fffbeb",borderRadius:12,padding:"10px 14px",border:"1.5px solid #fde68a"}}>
+                  <p style={{fontSize:10,fontWeight:700,color:"#92400e",margin:"0 0 4px"}}>📝 Doctor Notes</p>
+                  <p style={{fontSize:12,color:"#374151",margin:0}}>{caseData.doctor_notes}</p>
+                </div>
+              )}
+
+              {/* ── X-Ray Section ── */}
+              <div style={{borderRadius:16,border:"2px solid #e0e7ff",overflow:"hidden"}}>
+                {/* X-Ray header */}
+                <div style={{background:"linear-gradient(135deg,#eef2ff,#f5f3ff)",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:20}}>🩻</span>
+                    <div>
+                      <p style={{fontWeight:800,fontSize:13,margin:0,color:"#4338ca"}}>Fracture X-Ray History</p>
+                      <p style={{fontSize:10,color:"#6366f1",margin:0}}>{xrays.length} X-Ray{xrays.length!==1?"s":""} uploaded</p>
+                    </div>
+                  </div>
+                  {xrays.length >= 2 && (
+                    <button onClick={() => setCompareMode(p=>!p)} style={{padding:"6px 14px",borderRadius:99,border:"1.5px solid #6366f1",background:compareMode?"#6366f1":"#fff",color:compareMode?"#fff":"#6366f1",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                      {compareMode?"✕ Close Compare":"⚖ Compare X-Rays"}
+                    </button>
+                  )}
+                </div>
+
+                {/* Compare Mode — side by side */}
+                {compareMode && previous && latest && (
+                  <div style={{padding:14,background:"#f8fafc"}}>
+                    <p style={{fontSize:11,fontWeight:700,color:"#6366f1",margin:"0 0 10px",textAlign:"center"}}>📊 Previous vs Latest X-Ray</p>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                      {[{label:"⬅ Previous",x:previous},{label:"Latest ➡",x:latest}].map(({label,x}) => (
+                        <div key={x.id} style={{textAlign:"center"}}>
+                          <div style={{fontSize:10,fontWeight:700,color:"#374151",marginBottom:6,padding:"4px 8px",borderRadius:99,background:label.includes("Latest")?"#dcfce7":"#e0e7ff",display:"inline-block"}}>
+                            {label} — {x.report_type?.replace("Ortho X-Ray — ","") || "X-Ray"}
+                          </div>
+                          <div style={{position:"relative",cursor:"zoom-in"}} onClick={() => setZoomImg(x.file_url)}>
+                            <img src={x.file_url} alt="X-Ray" style={{width:"100%",borderRadius:10,border:"2px solid #e2e8f0",background:"#000",minHeight:120,objectFit:"contain"}} onError={e=>(e.currentTarget.style.display="none")}/>
+                            <div style={{position:"absolute",inset:0,background:"transparent",display:"flex",alignItems:"center",justifyContent:"center",opacity:0}} className="hover-zoom">
+                              <ZoomIn style={{width:32,height:32,color:"#fff"}}/>
+                            </div>
+                          </div>
+                          <p style={{fontSize:10,color:"#6b7280",marginTop:4}}>{fmtDate(x.created_at)}</p>
+                          {x.notes && <p style={{fontSize:10,color:"#374151",marginTop:2}}>{x.notes.replace(/\[ortho:[^\]]+\]\s*/,"")}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* All X-Rays list */}
+                {!compareMode && (
+                  <div style={{padding:14,display:"flex",flexDirection:"column",gap:10}}>
+                    {loadingXrays && <p style={{fontSize:12,color:"#9ca3af",textAlign:"center",padding:16}}>Loading X-Rays...</p>}
+                    {!loadingXrays && xrays.length === 0 && (
+                      <div style={{textAlign:"center",padding:"20px 10px",color:"#9ca3af"}}>
+                        <p style={{fontSize:32,marginBottom:6}}>🩻</p>
+                        <p style={{fontSize:12}}>Abhi koi X-Ray upload nahi hua</p>
+                        <p style={{fontSize:11}}>Neeche se pehla X-Ray upload karo</p>
+                      </div>
+                    )}
+                    {!loadingXrays && xrays.map((x, i) => (
+                      <div key={x.id} style={{borderRadius:12,border:"1.5px solid #e2e8f0",overflow:"hidden",background:"#fff"}}>
+                        {/* X-Ray header */}
+                        <div style={{padding:"8px 12px",background:"linear-gradient(90deg,#f8fafc,#f0f9ff)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:14,background:i===xrays.length-1?"#dcfce7":"#e0e7ff",borderRadius:99,padding:"2px 8px",fontWeight:700,fontSize:10,color:i===xrays.length-1?"#16a34a":"#4338ca"}}>
+                              {i===xrays.length-1?"🆕 Latest":x.report_type?.replace("Ortho X-Ray — ","") || `Visit ${i+1}`}
+                            </span>
+                            <span style={{fontSize:10,color:"#6b7280"}}>{fmtDate(x.created_at)}</span>
+                          </div>
+                          <button onClick={() => setZoomImg(x.file_url)} style={{background:"none",border:"none",cursor:"pointer",color:"#6366f1",fontSize:11,display:"flex",alignItems:"center",gap:3}}>
+                            <ZoomIn style={{width:13,height:13}}/> Zoom
+                          </button>
+                        </div>
+                        {/* Image */}
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:0}}>
+                          <div style={{cursor:"zoom-in"}} onClick={() => setZoomImg(x.file_url)}>
+                            <img src={x.file_url} alt="X-Ray" style={{width:"100%",maxHeight:160,objectFit:"contain",background:"#111",borderRadius:0}} onError={e=>(e.currentTarget.parentElement!.innerHTML='<div style="height:80px;display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:11px">Image load nahi hua</div>')}/>
+                          </div>
+                          <div style={{padding:"12px 14px",display:"flex",flexDirection:"column",justifyContent:"center",gap:6}}>
+                            <p style={{fontSize:10,fontWeight:700,color:"#374151",margin:0}}>Notes:</p>
+                            <p style={{fontSize:11,color:"#6b7280",margin:0}}>{x.notes?.replace(/\[ortho:[^\]]+\]\s*/,"") || "—"}</p>
+                            {i > 0 && (
+                              <div style={{background:"#f0fdf4",borderRadius:8,padding:"5px 8px",marginTop:4}}>
+                                <p style={{fontSize:9,color:"#16a34a",fontWeight:700,margin:0}}>📈 Day {Math.round(diffDays(xrays[0].created_at, x.created_at))} of treatment</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* ── Upload New X-Ray ── */}
+                <div style={{padding:"14px 16px",background:"linear-gradient(135deg,#f0fdf4,#f8fafc)",borderTop:"2px dashed #bbf7d0"}}>
+                  <p style={{fontSize:12,fontWeight:700,color:"#16a34a",margin:"0 0 10px",display:"flex",alignItems:"center",gap:6}}>
+                    <Upload style={{width:14,height:14}}/>
+                    Naya X-Ray Upload Karo
+                  </p>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                    <div>
+                      <Label className="text-xs">Visit Label</Label>
+                      <Input value={visitLabel} onChange={e=>setVisitLabel(e.target.value)} placeholder="e.g. Week 1, Day 7..." className="h-8 mt-1 text-xs"/>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Notes (optional)</Label>
+                      <Input value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="Observation..." className="h-8 mt-1 text-xs"/>
+                    </div>
+                  </div>
+                  <input ref={fileRef} type="file" accept="image/*,.pdf" style={{display:"none"}} onChange={e=>{ const f=e.target.files?.[0]; if(f) handleUpload(f); e.target.value=""; }}/>
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    disabled={uploadBusy}
+                    style={{width:"100%",padding:"10px",borderRadius:12,border:"2px dashed #10b981",background:"#fff",cursor:"pointer",fontSize:12,fontWeight:700,color:"#16a34a",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                    {uploadBusy ? <><Loader2 style={{width:14,height:14,animation:"spin 1s linear infinite"}}/>Uploading...</> : <><Upload style={{width:14,height:14}}/>📁 File Choose Karo (Image / PDF)</>}
+                  </button>
+                </div>
+              </div>
+
+              {/* Recovery Timeline */}
+              <RecoveryTimeline c={caseData}/>
+
+            </div>
+          </ScrollArea>
+
+          <div style={{padding:"12px 20px",borderTop:"1.5px solid #e2e8f0",display:"flex",justifyContent:"flex-end"}}>
+            <Button variant="outline" onClick={onClose}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -634,7 +917,7 @@ function AnalyticsSection({ cases, followups }: { cases: any[]; followups: any[]
 }
 
 // ─── Active Patient Card ──────────────────────
-function ActiveCard({ c, onDetail, onEdit, onRemove, onFuDone, onReschedule }: any) {
+function ActiveCard({ c, onDetail, onEdit, onRemove, onFuDone, onReschedule, onFractureProfile }: any) {
   const navigate = useNavigate();
   const today = todayIso();
   const pct   = healPct(c.plaster_date, c.followup_days);
@@ -671,12 +954,19 @@ function ActiveCard({ c, onDetail, onEdit, onRemove, onFuDone, onReschedule }: a
         </span>
       </div>
 
+      {/* Fracture Profile — main prominent button */}
+      <button
+        onClick={()=>onFractureProfile(c)}
+        style={{width:"100%",marginBottom:6,padding:"9px 8px",borderRadius:12,border:"none",cursor:"pointer",fontSize:12,fontWeight:800,color:"#fff",background:"linear-gradient(135deg,#1e3a5f,#6366f1)",display:"flex",alignItems:"center",justifyContent:"center",gap:6,boxShadow:"0 2px 8px #6366f130"}}>
+        🩻 Fracture Profile &amp; X-Ray
+      </button>
+
       <div style={{display:"grid",gridTemplateColumns:"1fr auto auto auto auto auto",gap:5}}>
         <button onClick={()=>(isMissed||isToday)?onFuDone(c):onDetail(c)}
           style={{padding:"7px 4px",borderRadius:10,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,color:"#fff",background:isMissed||isToday?"linear-gradient(135deg,#10b981,#059669)":"linear-gradient(135deg,#6366f1,#8b5cf6)",display:"flex",alignItems:"center",justifyContent:"center",gap:3}}>
           {isMissed||isToday?<><CheckCircle2 style={{width:11,height:11}}/>FU Done</>:<><MessageCircle style={{width:11,height:11}}/>SMS</>}
         </button>
-        <button onClick={()=>c.patient_id && navigate(`/patient-profile/${c.patient_id}`)} style={{padding:"7px 9px",borderRadius:10,border:"1.5px solid #e2e8f0",background:"#f8fafc",cursor:"pointer"}} title="Profile (X-Ray, Bills, History)">
+        <button onClick={()=>c.patient_id && navigate(`/patient-profile/${c.patient_id}`)} style={{padding:"7px 9px",borderRadius:10,border:"1.5px solid #e2e8f0",background:"#f8fafc",cursor:"pointer"}} title="General Profile">
           <User style={{width:12,height:12,color:"#0ea5e9"}}/>
         </button>
         {(isMissed||isToday) && (
@@ -754,6 +1044,7 @@ export default function Ortho() {
   const [removeBusy, setRemoveBusy]     = useState(false);
   const [fuDoneCase, setFuDoneCase]     = useState<any>(null);
   const [rescheduleCase, setRescheduleCase] = useState<any>(null);
+  const [fractureProfileCase, setFractureProfileCase] = useState<any>(null);
 
   const handleRemove = async () => {
     if(!removeTarget) return; setRemoveBusy(true);
@@ -873,7 +1164,7 @@ export default function Ortho() {
             ) : (
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14}}>
                 {filteredActive.map((c: any)=>(
-                  <ActiveCard key={c.id} c={c} onDetail={setDetailCase} onEdit={setEditCase} onRemove={setRemoveTarget} onFuDone={setFuDoneCase} onReschedule={setRescheduleCase}/>
+                  <ActiveCard key={c.id} c={c} onDetail={setDetailCase} onEdit={setEditCase} onRemove={setRemoveTarget} onFuDone={setFuDoneCase} onReschedule={setRescheduleCase} onFractureProfile={setFractureProfileCase}/>
                 ))}
               </div>
             )}
@@ -1117,6 +1408,7 @@ export default function Ortho() {
       <EditDialog open={!!editCase} onClose={()=>setEditCase(null)} caseData={editCase}/>
       <DetailDialog open={!!detailCase} onClose={()=>setDetailCase(null)} caseData={detailCase}/>
       <FuDoneDialog open={!!fuDoneCase} onClose={()=>setFuDoneCase(null)} caseData={fuDoneCase} onDone={handleFuDone}/>
+      <FractureProfileDialog open={!!fractureProfileCase} onClose={()=>setFractureProfileCase(null)} caseData={fractureProfileCase}/>
       <RescheduleDialog open={!!rescheduleCase} onClose={()=>setRescheduleCase(null)} caseData={rescheduleCase}/>
 
       <AlertDialog open={!!removeTarget} onOpenChange={v=>!v&&setRemoveTarget(null)}>
