@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Bone, Save, Send, MessageCircle, CalendarDays, Plane, Search, Pencil, CheckCircle2, PowerOff, BellRing, Shield, Plus, AlertTriangle, Check, Loader2, Clock, FileText, BarChart3, Activity, TrendingUp, Printer, Calendar, Phone, ChevronRight, Stethoscope, User } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
-import { useAddFractureCase, useFractureCases, useFollowupsAround, useUpdateFractureCase } from "@/hooks/useOrtho";
+import { useAddFractureCase, useFractureCases, useFollowupsAround, useUpdateFractureCase, uploadFractureXray, useFractureXrays } from "@/hooks/useOrtho";
 import { useAddPatient, useSearchPatients } from "@/hooks/useDatabase";
 import { sendSMS } from "@/services/smsService";
 import { BodyDiagram, type BodySelection } from "@/components/ortho/BodyDiagram";
@@ -308,8 +308,6 @@ type FractureXray = {
 };
 
 function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onClose: () => void; caseData: any }) {
-  const [xrays, setXrays] = useState<FractureXray[]>([]);
-  const [loadingXrays, setLoadingXrays] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [visitLabel, setVisitLabel] = useState("");
@@ -320,51 +318,15 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
   const patientId = caseData?.patient_id;
   const caseId    = caseData?.id;
 
-  // Fetch x-rays for this fracture case
-  const fetchXrays = async () => {
-    if (!patientId || !caseId) return;
-    setLoadingXrays(true);
-    try {
-      // Pehle sirf report_type se filter karo (report_data column missing ho sakta hai)
-      const { data: byType, error: typeErr } = await supabase
-        .from("xray_reports")
-        .select("*")
-        .eq("patient_id", patientId)
-        .ilike("report_type", `%Ortho X-Ray%`)
-        .order("created_at", { ascending: true });
-
-      if (!typeErr && byType && byType.length > 0) {
-        // Agar report_data column exist karta hai, caseId se aur filter karo
-        const caseTagged = byType.filter((x: any) => {
-          try {
-            const rd = typeof x.report_data === "string" ? JSON.parse(x.report_data) : (x.report_data || {});
-            return rd.caseId === caseId || (x.report_type || "").includes(caseId);
-          } catch { return false; }
-        });
-        setXrays(caseTagged.length > 0 ? caseTagged : byType);
-      } else {
-        // Fallback: patient ke saare xrays dikhao
-        const { data: allData } = await supabase
-          .from("xray_reports")
-          .select("*")
-          .eq("patient_id", patientId)
-          .order("created_at", { ascending: true });
-        setXrays(allData || []);
-      }
-    } catch (e) {
-      // Final fallback
-      try {
-        const { data } = await supabase
-          .from("xray_reports")
-          .select("*")
-          .eq("patient_id", patientId)
-          .order("created_at", { ascending: true });
-        setXrays(data || []);
-      } catch {}
-    } finally {
-      setLoadingXrays(false);
-    }
-  };
+  // ✅ Sahi table: fracture_xrays (xray_reports nahi)
+  const { data: xraysData, isLoading: loadingXrays, refetch: fetchXrays } = useFractureXrays(open ? caseId : undefined);
+  const xrays: FractureXray[] = (xraysData || []).map((x: any) => ({
+    id:         x.id,
+    file_url:   x.file_url,
+    notes:      x.notes || "",
+    created_at: x.image_date || x.created_at || new Date().toISOString(),
+    visit_label: x.label || x.report_type || "",
+  })).reverse(); // ascending order mein dikhao
 
   useEffect(() => { if (open && caseData) { fetchXrays(); setNoteText(""); setVisitLabel(""); setCompareMode(false); } }, [open, caseData]);
 
@@ -372,47 +334,13 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
     if (!file || !patientId || !caseId) return;
     setUploadBusy(true);
     try {
-      const ext  = file.name.split(".").pop() || "jpg";
-      const path = `xrays/${patientId}/ortho_${caseId}_${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("patient-files").upload(path, file, { upsert: false });
-      if (upErr) throw upErr;
-      const { data: urlData } = supabase.storage.from("patient-files").getPublicUrl(path);
-      const weekNum = xrays.length + 1;
-      const label   = visitLabel.trim() || `Visit ${weekNum}`;
-      const noteContent = noteText.trim();
-
-      // Pehle report_data column ke saath try karo
-      const insertPayload: any = {
-        patient_id:  patientId,
-        report_type: `Ortho X-Ray — ${label} [case:${caseId}]`,
-        file_url:    urlData.publicUrl,
-      };
-
-      // report_data column exist karta hai to use karo, nahi to silently skip
-      const reportDataVal = JSON.stringify({
-        orthoTag: `[ortho:${caseId}]`,
-        caseId:   caseId,
-        note:     noteContent,
-        label:    label,
-      });
-
-      // Pehle report_data ke saath try
-      const { error: dbErr } = await supabase.from("xray_reports").insert({
-        ...insertPayload,
-        report_data: reportDataVal,
-      });
-
-      if (dbErr) {
-        // report_data column nahi hai — bina us column ke retry karo
-        if (dbErr.message?.includes("report_data") || dbErr.message?.includes("column")) {
-          const { error: dbErr2 } = await supabase.from("xray_reports").insert(insertPayload);
-          if (dbErr2) throw dbErr2;
-        } else {
-          throw dbErr;
-        }
+      // ✅ uploadFractureXray: fracture_xrays table + xray-files bucket (sahi jagah)
+      const result = await uploadFractureXray(caseId, patientId, file);
+      if (result.queued) {
+        toast.success("📶 Offline saved — internet aane par upload ho jayega");
+      } else {
+        toast.success("✅ X-Ray upload ho gaya!");
       }
-
-      toast.success(`✅ X-Ray upload ho gaya — ${label}`);
       setNoteText(""); setVisitLabel("");
       fetchXrays();
     } catch (e: any) {
