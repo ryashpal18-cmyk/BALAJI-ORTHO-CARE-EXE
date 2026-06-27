@@ -397,10 +397,10 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
       )}
 
       <Dialog open={open} onOpenChange={v => !v && onClose()}>
-        <DialogContent className="sm:max-w-2xl" style={{padding:0,overflow:"hidden",borderRadius:20}}>
+        <DialogContent className="sm:max-w-2xl" style={{padding:0,overflow:"hidden",borderRadius:20,maxHeight:"88vh",display:"flex",flexDirection:"column"}}>
 
           {/* ── Colorful Header ── */}
-          <div style={{background:"linear-gradient(135deg,#1e3a5f,#6366f1,#8b5cf6)",padding:"20px 24px 16px",position:"relative"}}>
+          <div style={{background:"linear-gradient(135deg,#1e3a5f,#6366f1,#8b5cf6)",padding:"20px 24px 16px",position:"relative",flexShrink:0}}>
             <div style={{display:"flex",alignItems:"center",gap:14}}>
               <div style={{width:56,height:56,borderRadius:16,background:"rgba(255,255,255,0.18)",display:"flex",alignItems:"center",justifyContent:"center",border:"2px solid rgba(255,255,255,0.3)"}}>
                 <Bone style={{width:28,height:28,color:"#fff"}}/>
@@ -423,7 +423,7 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
             </div>
           </div>
 
-          <ScrollArea style={{maxHeight:"70vh"}}>
+          <ScrollArea style={{flex:1,minHeight:0}}>
             <div style={{padding:"16px 20px",display:"flex",flexDirection:"column",gap:16}}>
 
               {/* ── Key Info Grid ── */}
