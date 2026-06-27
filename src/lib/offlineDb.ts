@@ -5,7 +5,7 @@
 import { cLog } from "@/lib/clientLogger";
 
 const DB_NAME    = "balaji_ortho_offline_db";
-const DB_VERSION = 1;
+const DB_VERSION = 2; // ✅ Version bump — purani corrupt DB delete hokar fresh banegi
 
 const CACHE_STORE = "table_cache";
 const QUEUE_STORE = "mutation_queue";
@@ -26,38 +26,67 @@ export type QueuedMutation = {
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
+// ✅ Corrupt DB ko delete karke fresh banata hai
+function deleteDb(): Promise<void> {
+  return new Promise((resolve) => {
+    const req = indexedDB.deleteDatabase(DB_NAME);
+    req.onsuccess = () => resolve();
+    req.onerror   = () => resolve();
+    req.onblocked = () => resolve();
+  });
+}
+
+function createStores(db: IDBDatabase) {
+  if (!db.objectStoreNames.contains(CACHE_STORE))
+    db.createObjectStore(CACHE_STORE, { keyPath: "_key" });
+  if (!db.objectStoreNames.contains(QUEUE_STORE))
+    db.createObjectStore(QUEUE_STORE, { keyPath: "id", autoIncrement: true });
+  if (!db.objectStoreNames.contains(META_STORE))
+    db.createObjectStore(META_STORE, { keyPath: "key" });
+}
+
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(CACHE_STORE))
-        db.createObjectStore(CACHE_STORE, { keyPath: "_key" });
-      if (!db.objectStoreNames.contains(QUEUE_STORE))
-        db.createObjectStore(QUEUE_STORE, { keyPath: "id", autoIncrement: true });
-      if (!db.objectStoreNames.contains(META_STORE))
-        db.createObjectStore(META_STORE, { keyPath: "key" });
-    };
-    req.onsuccess = () => {
-      const db = req.result;
-      // Version conflict se bachao — agar doosra tab/window DB upgrade kare
-      db.onversionchange = () => {
-        db.close();
-        dbPromise = null;
-        cLog.warn("indexeddb", "DB version changed — connection closed, will reopen");
-      };
-      cLog.info("indexeddb", "Database successfully khul gayi");
+  dbPromise = new Promise(async (resolve, reject) => {
+    const tryOpen = (afterDelete = false): Promise<IDBDatabase> =>
+      new Promise((res, rej) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = req.result;
+          // Purane version ke stores clean karo
+          if ((e as any).oldVersion > 0) {
+            for (const s of [CACHE_STORE, QUEUE_STORE, META_STORE]) {
+              try { if (db.objectStoreNames.contains(s)) db.deleteObjectStore(s); } catch (_) {}
+            }
+          }
+          createStores(db);
+        };
+        req.onsuccess = () => {
+          const db = req.result;
+          db.onversionchange = () => { db.close(); dbPromise = null; };
+          cLog.info("indexeddb", afterDelete ? "Fresh DB banayi — corrupt thi" : "Database successfully khul gayi");
+          res(db);
+        };
+        req.onerror = () => rej(req.error);
+        req.onblocked = () => cLog.warn("indexeddb", "DB blocked");
+      });
+
+    try {
+      const db = await tryOpen();
       resolve(db);
-    };
-    req.onerror = () => {
-      cLog.error("indexeddb", "Database kholne mein fail", req.error);
-      dbPromise = null; // retry allow karo
-      reject(req.error);
-    };
-    req.onblocked = () => {
-      cLog.warn("indexeddb", "DB blocked — koi purani connection band nahi hui");
-    };
+    } catch (err) {
+      cLog.error("indexeddb", "Database kholne mein fail — corrupt DB delete karke retry", err);
+      dbPromise = null;
+      try {
+        await deleteDb();
+        const db2 = await tryOpen(true);
+        dbPromise = Promise.resolve(db2);
+        resolve(db2);
+      } catch (err2) {
+        cLog.error("indexeddb", "Fresh DB bhi nahi khuli", err2);
+        reject(err2);
+      }
+    }
   });
   return dbPromise;
 }
