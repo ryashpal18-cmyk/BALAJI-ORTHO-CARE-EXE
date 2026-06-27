@@ -258,7 +258,32 @@ export function useAddBill() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (bill: any) => offlineInsert("billing", bill),
-    onSuccess: () => {
+    onSuccess: async (newBill: any) => {
+      // ✅ FIX: Naya bill turant cache mein inject karo — refetch ka wait nahi
+      // Patient info cache se lo agar missing ho
+      if (!newBill.patients && newBill.patient_id) {
+        try {
+          const cachedPatients = await cacheGetAll("patients");
+          const p = cachedPatients.find((p: any) => p.id === newBill.patient_id);
+          if (p) {
+            newBill = {
+              ...newBill,
+              patients: { name: p.name || "", mobile: p.mobile || "", address: p.address || "" },
+            };
+          }
+        } catch { /* silently ignore */ }
+      }
+
+      // ["billing", "all"] cache mein seedha inject karo
+      qc.setQueryData(["billing", "all"], (old: any[] | undefined) => {
+        if (!old) return [newBill];
+        // Duplicate check — agar pehle se hai to mat add karo
+        const exists = old.some((b) => b.id === newBill.id);
+        if (exists) return old;
+        return [newBill, ...old];
+      });
+
+      // Baad mein background mein fresh data bhi le lo
       qc.invalidateQueries({ queryKey: ["billing"] });
       qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
     },
