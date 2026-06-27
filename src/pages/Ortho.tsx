@@ -325,15 +325,28 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
     if (!patientId || !caseId) return;
     setLoadingXrays(true);
     try {
+      // report_data mein [ortho:caseId] tag store hota hai
       const { data } = await supabase
         .from("xray_reports")
         .select("*")
         .eq("patient_id", patientId)
-        .ilike("notes", `%[ortho:${caseId}]%`)
+        .ilike("report_data", `%[ortho:${caseId}]%`)
         .order("created_at", { ascending: true });
-      setXrays(data || []);
+
+      if (data && data.length > 0) {
+        setXrays(data);
+      } else {
+        // Fallback: patient ke saare ortho xrays dikhao (report_type se filter)
+        const { data: fallbackData } = await supabase
+          .from("xray_reports")
+          .select("*")
+          .eq("patient_id", patientId)
+          .ilike("report_type", "%Ortho X-Ray%")
+          .order("created_at", { ascending: true });
+        setXrays(fallbackData || []);
+      }
     } catch (e) {
-      // fallback — show all xrays for patient
+      // Final fallback — patient ke saare xrays
       try {
         const { data } = await supabase
           .from("xray_reports")
@@ -360,11 +373,18 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
       const { data: urlData } = supabase.storage.from("patient-files").getPublicUrl(path);
       const weekNum = xrays.length + 1;
       const label   = visitLabel.trim() || `Visit ${weekNum}`;
+      const noteContent = noteText.trim();
       const { error: dbErr } = await supabase.from("xray_reports").insert({
         patient_id:  patientId,
         report_type: `Ortho X-Ray — ${label}`,
         file_url:    urlData.publicUrl,
-        notes:       `[ortho:${caseId}] ${noteText}`.trim(),
+        // report_data mein ortho case tag store karo (notes column table mein nahi hai)
+        report_data: JSON.stringify({
+          orthoTag: `[ortho:${caseId}]`,
+          caseId:   caseId,
+          note:     noteContent,
+          label:    label,
+        }),
       });
       if (dbErr) throw dbErr;
       toast.success(`✅ X-Ray upload ho gaya — ${label}`);
@@ -486,7 +506,7 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
                             </div>
                           </div>
                           <p style={{fontSize:10,color:"#6b7280",marginTop:4}}>{fmtDate(x.created_at)}</p>
-                          {x.notes && <p style={{fontSize:10,color:"#374151",marginTop:2}}>{x.notes.replace(/\[ortho:[^\]]+\]\s*/,"")}</p>}
+                          {x.notes && <p style={{fontSize:10,color:"#374151",marginTop:2}}>{(() => { try { return JSON.parse(x.report_data || "{}").note || ""; } catch { return ""; } })()}</p>}
                         </div>
                       ))}
                     </div>
@@ -525,7 +545,7 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
                           </div>
                           <div style={{padding:"12px 14px",display:"flex",flexDirection:"column",justifyContent:"center",gap:6}}>
                             <p style={{fontSize:10,fontWeight:700,color:"#374151",margin:0}}>Notes:</p>
-                            <p style={{fontSize:11,color:"#6b7280",margin:0}}>{x.notes?.replace(/\[ortho:[^\]]+\]\s*/,"") || "—"}</p>
+                            <p style={{fontSize:11,color:"#6b7280",margin:0}}>{(() => { try { return JSON.parse(x.report_data || "{}").note || "—"; } catch { return "—"; } })()}</p>
                             {i > 0 && (
                               <div style={{background:"#f0fdf4",borderRadius:8,padding:"5px 8px",marginTop:4}}>
                                 <p style={{fontSize:9,color:"#16a34a",fontWeight:700,margin:0}}>📈 Day {Math.round(diffDays(xrays[0].created_at, x.created_at))} of treatment</p>
@@ -1025,8 +1045,8 @@ export default function Ortho() {
         // 6 mahine se purane ortho X-Ray records fetch karo
         const { data: oldRecords } = await supabase
           .from("xray_reports")
-          .select("id, file_url, notes")
-          .ilike("notes", "%[ortho:%")
+          .select("id, file_url, report_data")
+          .ilike("report_data", "%[ortho:%")
           .lt("created_at", cutoff);
 
         if (!oldRecords || oldRecords.length === 0) {
