@@ -40,12 +40,23 @@ function openDb(): Promise<IDBDatabase> {
         db.createObjectStore(META_STORE, { keyPath: "key" });
     };
     req.onsuccess = () => {
+      const db = req.result;
+      // Version conflict se bachao — agar doosra tab/window DB upgrade kare
+      db.onversionchange = () => {
+        db.close();
+        dbPromise = null;
+        cLog.warn("indexeddb", "DB version changed — connection closed, will reopen");
+      };
       cLog.info("indexeddb", "Database successfully khul gayi");
-      resolve(req.result);
+      resolve(db);
     };
     req.onerror = () => {
       cLog.error("indexeddb", "Database kholne mein fail", req.error);
+      dbPromise = null; // retry allow karo
       reject(req.error);
+    };
+    req.onblocked = () => {
+      cLog.warn("indexeddb", "DB blocked — koi purani connection band nahi hui");
     };
   });
   return dbPromise;
@@ -177,7 +188,16 @@ export async function queueGetAll(): Promise<QueuedMutation[]> {
     return reqToPromise(t.objectStore(QUEUE_STORE).getAll());
   } catch (err) {
     cLog.error("queue", "queueGetAll fail", err);
-    return [];
+    // DB connection stale ho sakta hai — reset karke ek baar retry
+    dbPromise = null;
+    try {
+      const db2 = await openDb();
+      const t2  = tx(db2, [QUEUE_STORE], "readonly");
+      return reqToPromise(t2.objectStore(QUEUE_STORE).getAll());
+    } catch (err2) {
+      cLog.error("queue", "queueGetAll retry bhi fail", err2);
+      return [];
+    }
   }
 }
 
