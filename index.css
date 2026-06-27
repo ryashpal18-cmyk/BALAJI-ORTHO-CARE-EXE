@@ -455,17 +455,11 @@ textarea:focus {
    🔔 DIALOG / MODAL — colorful header
    ══════════════════════════════════════════════ */
 
-@keyframes dialogScaleIn {
-  from { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
-  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-}
-
 [data-slot="dialog-content"],
 [role="dialog"] {
   border-radius: 20px !important;
   border: 1.5px solid rgba(30,87,176,0.15) !important;
   box-shadow: 0 24px 80px rgba(13,35,81,0.30) !important;
-  animation: dialogScaleIn 0.22s cubic-bezier(0.22,0.61,0.36,1) both !important;
 }
 
 [data-slot="dialog-header"],
