@@ -157,105 +157,122 @@ function buildInvoiceHTML(bill: any, logoUrl: string = "/images/logo.png") {
   });
   const totalAmount = services.reduce((sum: number, s: any) => sum + (s.amount || 0), 0);
   const amountPaid = Number((bill as any).amount_paid || 0);
-  const dueAmount = totalAmount - amountPaid;
+  const discountAmt = Number((bill as any).discount || 0);
+  const dueAmount = Math.max(totalAmount - discountAmt - amountPaid, 0);
+  const finalTotal = totalAmount - discountAmt;
   const paymentMode = (bill as any).payment_mode || "—";
 
   const serviceRows = services
     .map(
       (s: any, i: number) => `
     <tr>
-      <td style="padding:5px 10px;color:#334155;font-size:10px;">${i + 1}</td>
-      <td style="padding:5px 10px;color:#334155;font-size:10px;">${s.name}</td>
-      <td style="padding:5px 10px;text-align:right;color:#334155;font-size:10px;">₹${Number(s.amount).toLocaleString()}</td>
+      <td style="padding:4px 8px;color:#1e293b;font-size:10.5px;font-weight:500;">${i + 1}</td>
+      <td style="padding:4px 8px;color:#1e293b;font-size:10.5px;font-weight:500;">${s.name}</td>
+      <td style="padding:4px 8px;text-align:right;color:#1e293b;font-size:10.5px;font-weight:600;">₹${Number(s.amount).toLocaleString()}</td>
     </tr>
   `,
     )
     .join("");
 
+  const discountRow = discountAmt > 0 ? `
+    <tr style="background:#fef9c3;">
+      <td colspan="2" style="padding:4px 8px;font-size:10px;color:#854d0e;font-weight:700;">
+        🎁 Special Discount
+      </td>
+      <td style="padding:4px 8px;text-align:right;font-size:10px;color:#854d0e;font-weight:700;">
+        − ₹${discountAmt.toLocaleString()}
+      </td>
+    </tr>
+  ` : "";
+
+  const statusColor = bill.status === "Paid" ? "#16a34a" : bill.status === "Pending" ? "#dc2626" : "#0891b2";
+  const statusBg = bill.status === "Paid" ? "#f0fdf4" : bill.status === "Pending" ? "#fef2f2" : "#f0f9ff";
+
   return `
     <div style="
-      width: 5.5in;
-      min-height: 4.1in;
+      width: 210mm;
+      min-height: 140mm;
       box-sizing: border-box;
       position: relative;
       overflow: hidden;
-      border: 1.5px solid #e0e0e0;
-      border-radius: 8px;
+      border: 2px solid #cbd5e1;
+      border-radius: 10px;
       background: #ffffff;
       font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
       page-break-inside: avoid;
     ">
-      <svg style="position:absolute;top:0;left:0;width:180px;height:90px;z-index:0;" viewBox="0 0 220 120" fill="none">
-        <path d="M0 0 H220 C180 30 140 80 0 120 Z" fill="#0891b2" opacity="0.13"/>
-        <path d="M0 0 H180 C140 25 100 60 0 90 Z" fill="#06b6d4" opacity="0.18"/>
+      <!-- Top gradient background strip -->
+      <div style="position:absolute;top:0;left:0;right:0;height:48px;background:linear-gradient(135deg,#1e3a5f 0%,#0891b2 60%,#06b6d4 100%);z-index:0;"></div>
+      <!-- Decorative corner arc bottom-right -->
+      <svg style="position:absolute;bottom:0;right:0;width:120px;height:70px;z-index:0;" viewBox="0 0 150 90" fill="none">
+        <path d="M150 90 H0 C50 65 100 30 150 0 Z" fill="#0891b2" opacity="0.08"/>
+        <path d="M150 90 H40 C75 68 115 38 150 12 Z" fill="#1e3a5f" opacity="0.07"/>
       </svg>
-      <svg style="position:absolute;bottom:0;right:0;width:160px;height:80px;z-index:0;" viewBox="0 0 200 100" fill="none">
-        <path d="M200 100 H0 C40 70 80 30 200 0 Z" fill="#0891b2" opacity="0.10"/>
-        <path d="M200 100 H30 C60 75 100 40 200 15 Z" fill="#06b6d4" opacity="0.14"/>
-      </svg>
 
-      <div style="position:relative;z-index:1;padding:12px 16px 10px;">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <img src="${logoUrl}" style="width:40px;height:40px;object-fit:contain;" alt="Logo" crossorigin="anonymous" />
-            <div>
-              <div style="font-size:13px;font-weight:800;color:#1e3a5f;">Balaji Ortho Care Center</div>
-              <div style="font-size:8px;color:#475569;margin-top:1px;">Dr. S. S. Rathore (DMRT | BPT)</div>
-              <div style="font-size:7px;color:#64748b;">Opp Govt Hospital, Bay Pass Road, Khinwara, Raj. – 306502</div>
-              <div style="font-size:7px;color:#64748b;">Phone: +91 8005707783</div>
-            </div>
-          </div>
-          <div style="text-align:right;">
-            <div style="font-size:16px;font-weight:800;color:#0891b2;letter-spacing:1px;">INVOICE</div>
-            <div style="font-size:8px;color:#64748b;margin-top:2px;">${invoiceNo}</div>
-            <div style="font-size:8px;color:#64748b;">Date: ${date}</div>
-          </div>
-        </div>
-
-        <div style="height:1.5px;background:linear-gradient(90deg,#0891b2,#1e3a5f);border-radius:2px;margin-bottom:8px;"></div>
-
-        <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+      <!-- HEADER -->
+      <div style="position:relative;z-index:1;padding:8px 14px 6px;display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <img src="${logoUrl}" style="width:36px;height:36px;object-fit:contain;border-radius:6px;background:#fff;padding:2px;" alt="Logo" crossorigin="anonymous" />
           <div>
-            <div style="font-size:7px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Bill To</div>
-            <div style="font-size:11px;font-weight:700;color:#1e3a5f;margin-top:1px;">${patientName}</div>
-            <div style="font-size:8px;color:#64748b;">Age: ${patientAge} | Gender: ${patientGender}</div>
+            <div style="font-size:14px;font-weight:800;color:#ffffff;letter-spacing:0.3px;">Balaji Ortho Care Center</div>
+            <div style="font-size:8px;color:#bae6fd;margin-top:1px;">Dr. S. S. Rathore (DMRT | BPT) &nbsp;|&nbsp; Khinwara, Raj. – 306502</div>
           </div>
-          <div style="text-align:right;">
-            <div style="font-size:7px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Status</div>
-            <div style="font-size:10px;font-weight:700;color:${bill.status === "Paid" ? "#16a34a" : bill.status === "Pending" ? "#ea580c" : "#0284c7"};margin-top:1px;">${bill.status}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:18px;font-weight:900;color:#ffffff;letter-spacing:2px;line-height:1;">INVOICE</div>
+          <div style="font-size:8px;color:#bae6fd;margin-top:2px;">${invoiceNo} &nbsp;|&nbsp; ${date}</div>
+        </div>
+      </div>
+
+      <!-- BODY -->
+      <div style="padding:8px 14px 8px;">
+
+        <!-- Patient + Status row -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;">
+          <div>
+            <div style="font-size:8px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;font-weight:600;">Patient</div>
+            <div style="font-size:13px;font-weight:800;color:#1e3a5f;margin-top:1px;">${patientName}</div>
+            <div style="font-size:9px;color:#475569;font-weight:500;">Age: ${patientAge} &nbsp;|&nbsp; ${patientGender}</div>
+          </div>
+          <div style="background:${statusBg};border:1.5px solid ${statusColor};border-radius:6px;padding:4px 10px;text-align:center;">
+            <div style="font-size:8px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;">Status</div>
+            <div style="font-size:12px;font-weight:800;color:${statusColor};">${bill.status}</div>
           </div>
         </div>
 
-        <table style="width:100%;border-collapse:collapse;margin-bottom:6px;font-size:10px;">
+        <!-- Services Table -->
+        <table style="width:100%;border-collapse:collapse;margin-bottom:5px;">
           <thead>
-            <tr style="background:#f0f9ff;">
-              <th style="text-align:left;padding:4px 10px;color:#1e3a5f;font-weight:600;border-bottom:1px solid #e2e8f0;font-size:9px;">#</th>
-              <th style="text-align:left;padding:4px 10px;color:#1e3a5f;font-weight:600;border-bottom:1px solid #e2e8f0;font-size:9px;">Service</th>
-              <th style="text-align:right;padding:4px 10px;color:#1e3a5f;font-weight:600;border-bottom:1px solid #e2e8f0;font-size:9px;">Amount</th>
+            <tr style="background:#f8fafc;border-top:2px solid #0891b2;border-bottom:1.5px solid #e2e8f0;">
+              <th style="text-align:left;padding:4px 8px;color:#1e3a5f;font-weight:700;font-size:9px;width:24px;">#</th>
+              <th style="text-align:left;padding:4px 8px;color:#1e3a5f;font-weight:700;font-size:9px;">Service / Description</th>
+              <th style="text-align:right;padding:4px 8px;color:#1e3a5f;font-weight:700;font-size:9px;">Amount</th>
             </tr>
           </thead>
           <tbody>
             ${serviceRows}
           </tbody>
           <tfoot>
-            <tr style="border-top:2px solid #0891b2;">
-              <td colspan="2" style="padding:4px 10px;font-weight:800;color:#1e3a5f;font-size:10px;">Grand Total</td>
-              <td style="padding:4px 10px;text-align:right;font-weight:800;color:#0891b2;font-size:11px;">₹${totalAmount.toLocaleString()}</td>
+            ${discountRow}
+            <tr style="border-top:2px solid #0891b2;background:#f0f9ff;">
+              <td colspan="2" style="padding:5px 8px;font-weight:800;color:#1e3a5f;font-size:11px;">Grand Total</td>
+              <td style="padding:5px 8px;text-align:right;font-weight:900;color:#0891b2;font-size:13px;">₹${finalTotal.toLocaleString()}</td>
+            </tr>
+            <tr style="border-bottom:1px solid #e2e8f0;">
+              <td colspan="2" style="padding:3px 8px;font-size:9.5px;color:#475569;">Paid &nbsp;<span style="color:#94a3b8;">(${paymentMode})</span></td>
+              <td style="padding:3px 8px;text-align:right;font-size:9.5px;color:#16a34a;font-weight:700;">₹${amountPaid.toLocaleString()}</td>
             </tr>
             <tr>
-              <td colspan="2" style="padding:2px 10px;font-size:9px;color:#475569;">Paid (${paymentMode})</td>
-              <td style="padding:2px 10px;text-align:right;font-size:9px;color:#16a34a;font-weight:600;">₹${amountPaid.toLocaleString()}</td>
-            </tr>
-            <tr>
-              <td colspan="2" style="padding:2px 10px;font-size:9px;color:#475569;font-weight:700;">Due</td>
-              <td style="padding:2px 10px;text-align:right;font-size:9px;color:#ea580c;font-weight:700;">₹${dueAmount.toLocaleString()}</td>
+              <td colspan="2" style="padding:3px 8px;font-size:9.5px;color:#dc2626;font-weight:700;">Due Amount</td>
+              <td style="padding:3px 8px;text-align:right;font-size:10px;color:#dc2626;font-weight:800;">₹${dueAmount.toLocaleString()}</td>
             </tr>
           </tfoot>
         </table>
 
-        <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #e2e8f0;padding-top:5px;">
-          <span style="font-size:7px;color:#94a3b8;">Medix Medical Invoice</span>
-          <div style="font-size:7px;color:#94a3b8;">Thank you for choosing Balaji Ortho Care Center</div>
+        <!-- Footer -->
+        <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #e2e8f0;padding-top:4px;margin-top:2px;">
+          <span style="font-size:7.5px;color:#94a3b8;">📞 +91 8005707783 &nbsp;|&nbsp; Opp Govt Hospital, Bay Pass Road, Khinwara</span>
+          <span style="font-size:7.5px;color:#0891b2;font-weight:600;">Thank you for your trust 🙏</span>
         </div>
       </div>
     </div>
@@ -264,18 +281,54 @@ function buildInvoiceHTML(bill: any, logoUrl: string = "/images/logo.png") {
 
 function printInvoice(bill: any) {
   const logoUrl = window.location.origin + "/images/logo.png";
-  const win = window.open("", "_blank", "width=700,height=1000");
+  const win = window.open("", "_blank", "width=900,height=700");
   if (!win) return;
   const invoiceHTML = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Invoice – ${(bill.patients as any)?.name || "Patient"}</title>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: 'Inter', sans-serif; background: #fff; }
-      @page { size: 5.5in 8.5in; margin: 5mm; }
-      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-      .page { width: 5.5in; height: 8.5in; display: flex; flex-direction: column; justify-content: space-between; gap: 4mm; padding: 2mm; margin: 0 auto; }
+      body { font-family: 'Inter', sans-serif; background: #f8fafc; }
+      @page { size: A4 landscape; margin: 8mm; }
+      @media print {
+        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #fff; }
+        .no-print { display: none; }
+      }
+      .page {
+        width: 277mm;
+        display: flex;
+        flex-direction: row;
+        gap: 6mm;
+        padding: 0;
+        margin: 0 auto;
+      }
+      .invoice-wrap { flex: 1; }
+      .divider {
+        width: 1px;
+        background: repeating-linear-gradient(to bottom, #cbd5e1 0, #cbd5e1 5px, transparent 5px, transparent 10px);
+        flex-shrink: 0;
+      }
+      .print-btn {
+        display: block;
+        margin: 8px auto 0;
+        padding: 6px 18px;
+        background: #0891b2;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
     </style></head><body>
-    <div class="page">${buildInvoiceHTML(bill, logoUrl)}${buildInvoiceHTML(bill, logoUrl)}</div>
+    <div class="no-print" style="text-align:center;padding:6px;">
+      <button class="print-btn" onclick="window.print()">🖨️ Print A4 (2 Copies)</button>
+      <span style="font-size:11px;color:#64748b;margin-left:10px;">A4 Landscape → 2 Patient Copies</span>
+    </div>
+    <div class="page">
+      <div class="invoice-wrap">${buildInvoiceHTML(bill, logoUrl)}</div>
+      <div class="divider"></div>
+      <div class="invoice-wrap">${buildInvoiceHTML(bill, logoUrl)}</div>
+    </div>
     <script>window.onload = function() { window.print(); };</script></body></html>`;
   win.document.write(invoiceHTML);
   win.document.close();
@@ -317,7 +370,7 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
   container.style.left = "0";
   container.style.zIndex = "-9999";
   container.style.opacity = "0.01";
-  container.style.width = "5.5in";
+  container.style.width = "210mm";
   container.style.background = "#ffffff";
   container.style.pointerEvents = "none"; // ✅ White screen fix: click block nahi karega
   document.body.appendChild(container);
@@ -357,7 +410,7 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
           width: container.scrollWidth,
           height: container.scrollHeight,
         },
-        jsPDF: { unit: "in", format: [5.5, 8.5], orientation: "portrait" },
+        jsPDF: { unit: "mm", format: [210, 148], orientation: "landscape" },
       })
       .from(container)
       .outputPdf("blob");
@@ -408,6 +461,7 @@ export default function Billing() {
   const [patientSearch, setPatientSearch] = useState("");
   const [services, setServices] = useState<ServiceItem[]>([{ name: "", amount: "" }]);
   const [amountPaid, setAmountPaid] = useState("");
+  const [discountAmount, setDiscountAmount] = useState("");
   const [paymentMode, setPaymentMode] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [rangeMode, setRangeMode] = useState("today");
@@ -502,11 +556,12 @@ const filteredPatients = patients
 
   const totalAmount = services.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
   const paidNum = parseFloat(amountPaid) || 0;
-  const dueAmount = totalAmount - paidNum;
+  const discountNum = parseFloat(discountAmount) || 0;
+  const dueAmount = Math.max(totalAmount - discountNum - paidNum, 0);
 
   const computeStatus = () => {
     if (paidNum <= 0) return "Pending";
-    if (paidNum >= totalAmount) return "Paid";
+    if (paidNum >= (totalAmount - discountNum)) return "Paid";
     return "Partial";
   };
 
@@ -565,6 +620,7 @@ const filteredPatients = patients
         status,
         amount_paid: paidNum,
         payment_mode: paymentMode || null,
+        discount: discountNum || null,
       } as any);
 
       toast({ title: "✅ Bill Saved", description: "Bill successfully save ho gaya" });
@@ -645,6 +701,7 @@ const filteredPatients = patients
       setSelectedPatient("");
       setServices([{ name: "", amount: "" }]);
       setAmountPaid("");
+      setDiscountAmount("");
       setPaymentMode("");
       setOpen(false);
     } catch (err: any) {
@@ -690,6 +747,7 @@ const filteredPatients = patients
     });
     setServices(parsedServices);
     setAmountPaid(String((bill as any).amount_paid || 0));
+    setDiscountAmount(String((bill as any).discount || ""));
     setPaymentMode((bill as any).payment_mode || "");
     setEditOpen(true);
   };
@@ -718,6 +776,7 @@ const filteredPatients = patients
         status,
         amount_paid: paidNum,
         payment_mode: paymentMode || null,
+        discount: discountNum || null,
       } as any);
 
       const updatedBill = {
@@ -727,6 +786,7 @@ const filteredPatients = patients
         status,
         amount_paid: paidNum,
         payment_mode: paymentMode,
+        discount: discountNum || null,
       };
       // ✅ FIX: Edit save pe bhi PDF auto-generate nahi — white screen aati thi
       // PDF sirf manual button se generate hogi
@@ -752,6 +812,7 @@ const filteredPatients = patients
       setEditingBill(null);
       setServices([{ name: "", amount: "" }]);
       setAmountPaid("");
+      setDiscountAmount("");
       setPaymentMode("");
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -988,6 +1049,16 @@ const filteredPatients = patients
             className="h-9"
             value={amountPaid}
             onChange={(e) => setAmountPaid(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">🎁 Discount (₹)</Label>
+          <Input
+            type="number"
+            placeholder="0"
+            className="h-9 border-yellow-400 focus:ring-yellow-400"
+            value={discountAmount}
+            onChange={(e) => setDiscountAmount(e.target.value)}
           />
         </div>
       </div>
