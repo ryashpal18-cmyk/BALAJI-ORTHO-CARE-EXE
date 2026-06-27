@@ -320,33 +320,39 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
   const patientId = caseData?.patient_id;
   const caseId    = caseData?.id;
 
-  // Fetch x-rays for this fracture case (using case_id tag in notes field or separate storage prefix)
+  // Fetch x-rays for this fracture case
   const fetchXrays = async () => {
     if (!patientId || !caseId) return;
     setLoadingXrays(true);
     try {
-      // report_data mein [ortho:caseId] tag store hota hai
-      const { data } = await supabase
+      // Pehle sirf report_type se filter karo (report_data column missing ho sakta hai)
+      const { data: byType, error: typeErr } = await supabase
         .from("xray_reports")
         .select("*")
         .eq("patient_id", patientId)
-        .ilike("report_data", `%[ortho:${caseId}]%`)
+        .ilike("report_type", `%Ortho X-Ray%`)
         .order("created_at", { ascending: true });
 
-      if (data && data.length > 0) {
-        setXrays(data);
+      if (!typeErr && byType && byType.length > 0) {
+        // Agar report_data column exist karta hai, caseId se aur filter karo
+        const caseTagged = byType.filter((x: any) => {
+          try {
+            const rd = typeof x.report_data === "string" ? JSON.parse(x.report_data) : (x.report_data || {});
+            return rd.caseId === caseId || (x.report_type || "").includes(caseId);
+          } catch { return false; }
+        });
+        setXrays(caseTagged.length > 0 ? caseTagged : byType);
       } else {
-        // Fallback: patient ke saare ortho xrays dikhao (report_type se filter)
-        const { data: fallbackData } = await supabase
+        // Fallback: patient ke saare xrays dikhao
+        const { data: allData } = await supabase
           .from("xray_reports")
           .select("*")
           .eq("patient_id", patientId)
-          .ilike("report_type", "%Ortho X-Ray%")
           .order("created_at", { ascending: true });
-        setXrays(fallbackData || []);
+        setXrays(allData || []);
       }
     } catch (e) {
-      // Final fallback — patient ke saare xrays
+      // Final fallback
       try {
         const { data } = await supabase
           .from("xray_reports")
@@ -374,19 +380,38 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
       const weekNum = xrays.length + 1;
       const label   = visitLabel.trim() || `Visit ${weekNum}`;
       const noteContent = noteText.trim();
-      const { error: dbErr } = await supabase.from("xray_reports").insert({
+
+      // Pehle report_data column ke saath try karo
+      const insertPayload: any = {
         patient_id:  patientId,
-        report_type: `Ortho X-Ray — ${label}`,
+        report_type: `Ortho X-Ray — ${label} [case:${caseId}]`,
         file_url:    urlData.publicUrl,
-        // report_data mein ortho case tag store karo (notes column table mein nahi hai)
-        report_data: JSON.stringify({
-          orthoTag: `[ortho:${caseId}]`,
-          caseId:   caseId,
-          note:     noteContent,
-          label:    label,
-        }),
+      };
+
+      // report_data column exist karta hai to use karo, nahi to silently skip
+      const reportDataVal = JSON.stringify({
+        orthoTag: `[ortho:${caseId}]`,
+        caseId:   caseId,
+        note:     noteContent,
+        label:    label,
       });
-      if (dbErr) throw dbErr;
+
+      // Pehle report_data ke saath try
+      const { error: dbErr } = await supabase.from("xray_reports").insert({
+        ...insertPayload,
+        report_data: reportDataVal,
+      });
+
+      if (dbErr) {
+        // report_data column nahi hai — bina us column ke retry karo
+        if (dbErr.message?.includes("report_data") || dbErr.message?.includes("column")) {
+          const { error: dbErr2 } = await supabase.from("xray_reports").insert(insertPayload);
+          if (dbErr2) throw dbErr2;
+        } else {
+          throw dbErr;
+        }
+      }
+
       toast.success(`✅ X-Ray upload ho gaya — ${label}`);
       setNoteText(""); setVisitLabel("");
       fetchXrays();
@@ -1045,8 +1070,8 @@ export default function Ortho() {
         // 6 mahine se purane ortho X-Ray records fetch karo
         const { data: oldRecords } = await supabase
           .from("xray_reports")
-          .select("id, file_url, report_data")
-          .ilike("report_data", "%[ortho:%")
+          .select("id, file_url, report_type")
+          .ilike("report_type", "%Ortho X-Ray%")
           .lt("created_at", cutoff);
 
         if (!oldRecords || oldRecords.length === 0) {
