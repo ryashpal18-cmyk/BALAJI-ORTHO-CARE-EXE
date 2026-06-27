@@ -1,0 +1,604 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 215 25% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 15%;
+
+    --primary: 210 80% 35%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 185 65% 45%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 210 15% 93%;
+    --muted-foreground: 215 15% 50%;
+
+    --accent: 185 55% 92%;
+    --accent-foreground: 210 80% 30%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 20% 88%;
+    --input: 214 20% 88%;
+    --ring: 210 80% 35%;
+
+    --radius: 0.625rem;
+
+    --sidebar-background: 215 35% 15%;
+    --sidebar-foreground: 210 20% 85%;
+    --sidebar-primary: 185 65% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 30% 22%;
+    --sidebar-accent-foreground: 210 20% 90%;
+    --sidebar-border: 215 25% 25%;
+    --sidebar-ring: 185 65% 50%;
+
+    --success: 142 70% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --info: 200 80% 50%;
+    --info-foreground: 0 0% 100%;
+
+    --chart-1: 210 80% 35%;
+    --chart-2: 185 65% 45%;
+    --chart-3: 142 70% 40%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 0 72% 51%;
+
+    --font-heading: 'Plus Jakarta Sans', sans-serif;
+    --font-body: 'Inter', sans-serif;
+  }
+
+  .dark {
+    --background: 215 35% 10%;
+    --foreground: 210 20% 90%;
+    --card: 215 30% 14%;
+    --card-foreground: 210 20% 90%;
+    --popover: 215 30% 14%;
+    --popover-foreground: 210 20% 90%;
+    --primary: 210 70% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 185 55% 50%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 215 25% 20%;
+    --muted-foreground: 210 15% 60%;
+    --accent: 215 30% 22%;
+    --accent-foreground: 185 55% 70%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 215 25% 22%;
+    --input: 215 25% 22%;
+    --ring: 210 70% 55%;
+    --sidebar-background: 215 40% 8%;
+    --sidebar-foreground: 210 20% 85%;
+    --sidebar-primary: 185 60% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 35% 15%;
+    --sidebar-accent-foreground: 210 20% 90%;
+    --sidebar-border: 215 30% 18%;
+    --sidebar-ring: 185 60% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+}
+
+@layer components {
+  .stat-card {
+    @apply bg-card rounded-lg border p-5 shadow-sm transition-all hover:shadow-md;
+  }
+  .module-header {
+    @apply text-2xl font-bold tracking-tight;
+    font-family: var(--font-heading);
+  }
+  .emergency-btn {
+    @apply bg-destructive text-destructive-foreground font-bold rounded-lg px-6 py-3 shadow-lg hover:opacity-90 transition-all animate-pulse;
+  }
+}
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 8mm;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   🎨 BALAJI ORTHO CARE — GLOBAL COLORFUL THEME
+   All pages, all cards — vibrant, professional, animated
+   ════════════════════════════════════════════════════════════ */
+
+/* ── Keyframe Animations ── */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer {
+  0%   { background-position: -800px 0; }
+  100% { background-position: 800px 0; }
+}
+@keyframes floatUp {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-6px); }
+}
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(30,87,176,0); }
+  50%       { box-shadow: 0 0 20px 4px rgba(30,87,176,0.25); }
+}
+@keyframes borderFlow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes ripple {
+  0%   { transform: scale(0); opacity: 0.5; }
+  100% { transform: scale(4); opacity: 0; }
+}
+@keyframes gradientShift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* ── Entry animations ── */
+.dash-animate   { animation: slideUp 0.42s cubic-bezier(0.22,0.61,0.36,1) both; }
+.dash-animate-1 { animation-delay: 0.04s; }
+.dash-animate-2 { animation-delay: 0.10s; }
+.dash-animate-3 { animation-delay: 0.16s; }
+.dash-animate-4 { animation-delay: 0.22s; }
+.dash-animate-5 { animation-delay: 0.28s; }
+.dash-animate-6 { animation-delay: 0.34s; }
+
+/* ── Page-level fade in ── */
+.page-enter {
+  animation: fadeIn 0.35s ease both;
+}
+
+/* ═══════════════════════════════════════════
+   🃏 COLORFUL CARDS  — the heart of the theme
+   ═══════════════════════════════════════════ */
+
+/* Every shadcn <Card> gets a colorful glassmorphism upgrade */
+.card,
+[class*="rounded-"] > .card,
+[data-slot="card"] {
+  background: linear-gradient(135deg,
+    rgba(255,255,255,0.95) 0%,
+    rgba(235,245,255,0.90) 100%) !important;
+  backdrop-filter: blur(14px) !important;
+  border: 1.5px solid rgba(30,87,176,0.14) !important;
+  box-shadow:
+    0 4px 24px rgba(30,87,176,0.10),
+    0 1px 4px rgba(0,0,0,0.06) !important;
+  transition: transform 0.22s cubic-bezier(0.22,0.61,0.36,1),
+              box-shadow 0.22s ease !important;
+  border-radius: 16px !important;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Coloured top-border accent on every card */
+.card::before,
+[data-slot="card"]::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg,
+    #1e57b0 0%, #0e7c4a 35%, #38b6ff 65%, #f5a623 100%);
+  background-size: 300% 100%;
+  animation: borderFlow 4s ease infinite;
+  border-radius: 16px 16px 0 0;
+}
+
+.card:hover,
+[data-slot="card"]:hover {
+  transform: translateY(-3px) !important;
+  box-shadow:
+    0 12px 40px rgba(30,87,176,0.18),
+    0 2px 8px rgba(0,0,0,0.08) !important;
+}
+
+/* Card headers — subtle gradient tint */
+.card > [data-slot="card-header"],
+.card > div > [data-slot="card-header"] {
+  background: linear-gradient(135deg,
+    rgba(30,87,176,0.05) 0%,
+    rgba(14,124,74,0.03) 100%);
+  border-bottom: 1px solid rgba(30,87,176,0.08);
+  padding-bottom: 12px;
+}
+
+/* ── dash-card (existing class) enhanced ── */
+.dash-card {
+  background: linear-gradient(135deg,
+    rgba(255,255,255,0.95) 0%,
+    rgba(235,245,255,0.90) 100%) !important;
+  backdrop-filter: blur(14px) !important;
+  border: 1.5px solid rgba(30,87,176,0.14) !important;
+  box-shadow:
+    0 4px 24px rgba(30,87,176,0.10),
+    0 1px 4px rgba(0,0,0,0.06) !important;
+  transition: transform 0.22s ease, box-shadow 0.22s ease !important;
+  border-radius: 16px !important;
+}
+.dash-card:hover {
+  transform: translateY(-3px) !important;
+  box-shadow:
+    0 14px 40px rgba(30,87,176,0.20),
+    0 2px 8px rgba(0,0,0,0.08) !important;
+}
+
+/* ═════════════════════════════════════════
+   🎯 MODULE PAGE HEADERS — colorful banner
+   ═════════════════════════════════════════ */
+
+.module-header {
+  background: linear-gradient(135deg, #0d2351 0%, #1e57b0 55%, #0e7c4a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-family: var(--font-heading) !important;
+  font-size: 1.8rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.5px !important;
+  filter: drop-shadow(0 2px 4px rgba(30,87,176,0.15));
+}
+
+/* ══════════════════════════════════
+   🔵 BUTTONS — vibrant & animated
+   ══════════════════════════════════ */
+
+/* Primary buttons */
+button[class*="bg-primary"],
+.btn-primary,
+[data-slot="button"]:not([class*="variant-ghost"]):not([class*="variant-outline"]):not([class*="variant-secondary"]):not([class*="destructive"]) {
+  background: linear-gradient(135deg, #0d2351 0%, #1e57b0 55%, #0e7c4a 100%) !important;
+  background-size: 200% 200% !important;
+  animation: gradientShift 5s ease infinite !important;
+  border: none !important;
+  box-shadow: 0 4px 16px rgba(30,87,176,0.35) !important;
+  color: white !important;
+  font-weight: 600 !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+}
+button[class*="bg-primary"]:hover,
+.btn-primary:hover {
+  transform: translateY(-1px) scale(1.01) !important;
+  box-shadow: 0 8px 24px rgba(30,87,176,0.45) !important;
+}
+button[class*="bg-primary"]:active {
+  transform: scale(0.98) !important;
+}
+
+/* ═══════════════════════════════
+   🏷️ BADGES — colourful variants
+   ═══════════════════════════════ */
+
+[data-slot="badge"],
+.badge {
+  font-weight: 700 !important;
+  letter-spacing: 0.4px !important;
+  border-radius: 8px !important;
+  padding: 2px 10px !important;
+}
+
+/* ═══════════════════════════════════
+   📋 TABLE ROWS — striped & animated
+   ═══════════════════════════════════ */
+
+table tbody tr {
+  transition: background 0.15s ease, transform 0.15s ease !important;
+  border-radius: 8px;
+}
+table tbody tr:hover {
+  background: linear-gradient(135deg,
+    rgba(30,87,176,0.06) 0%,
+    rgba(14,124,74,0.04) 100%) !important;
+  transform: scale(1.002) !important;
+}
+table thead tr {
+  background: linear-gradient(135deg,
+    rgba(13,35,81,0.06) 0%,
+    rgba(14,124,74,0.04) 100%) !important;
+}
+table thead th {
+  color: #0d2351 !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.3px !important;
+}
+
+/* ══════════════════════════════════
+   🔲 TABS — colourful active state
+   ══════════════════════════════════ */
+
+[role="tablist"] {
+  background: linear-gradient(135deg,
+    rgba(13,35,81,0.07) 0%,
+    rgba(14,124,74,0.05) 100%) !important;
+  border-radius: 12px !important;
+  padding: 4px !important;
+  border: 1.5px solid rgba(30,87,176,0.12) !important;
+}
+
+[role="tab"][data-state="active"],
+[data-state="active"][role="tab"] {
+  background: linear-gradient(135deg, #0d2351 0%, #1e57b0 55%, #0e7c4a 100%) !important;
+  color: white !important;
+  box-shadow: 0 4px 12px rgba(30,87,176,0.30) !important;
+  border-radius: 9px !important;
+  font-weight: 700 !important;
+}
+
+[role="tab"]:not([data-state="active"]) {
+  color: #4a5a7a !important;
+  font-weight: 500 !important;
+  transition: all 0.2s ease !important;
+}
+[role="tab"]:not([data-state="active"]):hover {
+  background: rgba(30,87,176,0.08) !important;
+  border-radius: 9px !important;
+}
+
+/* ═══════════════════════════════
+   📝 FORM INPUTS — vibrant focus
+   ═══════════════════════════════ */
+
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  border: 1.5px solid rgba(30,87,176,0.20) !important;
+  border-radius: 10px !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+  background: rgba(248,251,255,0.9) !important;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #1e57b0 !important;
+  box-shadow: 0 0 0 3px rgba(30,87,176,0.15) !important;
+  outline: none !important;
+  background: white !important;
+}
+
+/* ═══════════════════════════════════════
+   📊 STAT CARDS — enhanced + float anim
+   ═══════════════════════════════════════ */
+
+.stat-card {
+  border-radius: 16px !important;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.12) !important;
+  transition: transform 0.22s ease, box-shadow 0.22s ease !important;
+  animation: slideUp 0.5s cubic-bezier(0.22,0.61,0.36,1) both;
+  overflow: hidden;
+  border: none !important;
+}
+.stat-card:hover {
+  transform: translateY(-4px) scale(1.02) !important;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.18) !important;
+}
+
+/* ═════════════════════════════════════
+   🏥 PAGE SECTION HEADERS (CardTitle)
+   ═════════════════════════════════════ */
+
+[data-slot="card-title"],
+.card-title {
+  font-family: var(--font-heading) !important;
+  font-weight: 700 !important;
+  color: #0d2351 !important;
+  font-size: 1.05rem !important;
+}
+
+/* ══════════════════════════════════════
+   🌈 COLOURFUL PAGE WRAPPER BACKGROUND
+   ══════════════════════════════════════ */
+
+/* Subtle mesh background for all content areas */
+.space-y-6 > *:first-child {
+  animation: slideDown 0.4s ease both;
+}
+
+/* ══════════════════════════════════
+   💊 SPECIFIC PAGE ACCENTS
+   ══════════════════════════════════ */
+
+/* IPD Bed cards */
+.border-success\/40 { border-color: rgba(14,184,92,0.50) !important; }
+.border-destructive\/40 { border-color: rgba(224,62,62,0.50) !important; }
+.border-warning\/40 { border-color: rgba(245,166,35,0.50) !important; }
+
+/* ══════════════════════════════════════════════
+   🔔 DIALOG / MODAL — colorful header
+   ══════════════════════════════════════════════ */
+
+@keyframes dialogScaleIn {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+[data-slot="dialog-content"],
+[role="dialog"] {
+  border-radius: 20px !important;
+  border: 1.5px solid rgba(30,87,176,0.15) !important;
+  box-shadow: 0 24px 80px rgba(13,35,81,0.30) !important;
+  animation: dialogScaleIn 0.22s cubic-bezier(0.22,0.61,0.36,1) both !important;
+}
+
+[data-slot="dialog-header"],
+[role="dialog"] > div:first-child {
+  background: linear-gradient(135deg, #0d2351 0%, #1e57b0 50%, #0e7c4a 100%) !important;
+  color: white !important;
+  border-radius: 18px 18px 0 0 !important;
+  padding: 20px 24px !important;
+  margin: -1px -1px 0 -1px;
+}
+
+[data-slot="dialog-title"],
+[role="dialog"] h2 {
+  color: white !important;
+  font-weight: 800 !important;
+  font-size: 1.1rem !important;
+}
+
+/* ═══════════════════════════════════════
+   🔢 SELECT DROPDOWN — colorful
+   ═══════════════════════════════════════ */
+
+[data-slot="select-trigger"] {
+  border: 1.5px solid rgba(30,87,176,0.22) !important;
+  border-radius: 10px !important;
+  background: rgba(248,251,255,0.9) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+[data-slot="select-trigger"]:focus,
+[data-slot="select-trigger"][data-state="open"] {
+  border-color: #1e57b0 !important;
+  box-shadow: 0 0 0 3px rgba(30,87,176,0.15) !important;
+}
+
+[data-slot="select-content"] {
+  border-radius: 14px !important;
+  border: 1.5px solid rgba(30,87,176,0.15) !important;
+  box-shadow: 0 8px 40px rgba(30,87,176,0.18) !important;
+  animation: scaleIn 0.18s ease both !important;
+}
+
+[data-slot="select-item"]:hover,
+[data-slot="select-item"][data-highlighted] {
+  background: linear-gradient(135deg,
+    rgba(30,87,176,0.10) 0%,
+    rgba(14,124,74,0.06) 100%) !important;
+  color: #0d2351 !important;
+  font-weight: 600 !important;
+}
+
+/* ═══════════════════════════════════════
+   🎨 SCROLLBAR — branded
+   ═══════════════════════════════════════ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: rgba(30,87,176,0.05); border-radius: 10px; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #1e57b0, #0e7c4a);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #0d2351, #1e57b0);
+}
+
+/* ═════════════════════════════════════════
+   🌟 SPECIAL: Appointment / Status badges
+   ═════════════════════════════════════════ */
+.bg-info\/10 {
+  background: linear-gradient(135deg, rgba(56,182,255,0.15), rgba(30,87,176,0.10)) !important;
+}
+.bg-success\/10 {
+  background: linear-gradient(135deg, rgba(14,184,92,0.15), rgba(14,124,74,0.10)) !important;
+}
+.bg-warning\/10 {
+  background: linear-gradient(135deg, rgba(245,166,35,0.18), rgba(184,124,26,0.12)) !important;
+}
+.bg-destructive\/10 {
+  background: linear-gradient(135deg, rgba(224,62,62,0.15), rgba(123,26,26,0.10)) !important;
+}
+.bg-primary\/10 {
+  background: linear-gradient(135deg, rgba(30,87,176,0.12), rgba(13,35,81,0.08)) !important;
+}
+
+/* ═══════════════════════════════════════════
+   💫 LOADING SPINNER
+   ═══════════════════════════════════════════ */
+.animate-spin {
+  animation: spin 0.7s linear infinite !important;
+}
+
+/* ═══════════════════════════════════════════
+   📱 ALERT / TOAST — colorful
+   ═══════════════════════════════════════════ */
+[data-slot="alert"] {
+  border-radius: 14px !important;
+  border-left: 4px solid #1e57b0 !important;
+  background: linear-gradient(135deg,
+    rgba(30,87,176,0.08) 0%,
+    rgba(14,124,74,0.05) 100%) !important;
+}
+
+/* ═══════════════════════════════════════════
+   🟢 POPOVER — glass card look
+   ═══════════════════════════════════════════ */
+[data-slot="popover-content"] {
+  border-radius: 16px !important;
+  border: 1.5px solid rgba(30,87,176,0.15) !important;
+  box-shadow: 0 8px 40px rgba(30,87,176,0.18) !important;
+  backdrop-filter: blur(12px) !important;
+  animation: scaleIn 0.18s ease both !important;
+}
+
+/* ══════════════════════════════════════════
+   🌈 GRADIENT UTILITY CLASSES (reusable)
+   ══════════════════════════════════════════ */
+.gradient-primary {
+  background: linear-gradient(135deg, #0d2351 0%, #1e57b0 55%, #0e7c4a 100%) !important;
+  color: white !important;
+}
+.gradient-success {
+  background: linear-gradient(135deg, #1a6b3a 0%, #1eb85c 100%) !important;
+  color: white !important;
+}
+.gradient-warning {
+  background: linear-gradient(135deg, #b87c1a 0%, #f5a623 100%) !important;
+  color: white !important;
+}
+.gradient-info {
+  background: linear-gradient(135deg, #1877c4 0%, #38b6ff 100%) !important;
+  color: white !important;
+}
+.glass-card {
+  background: rgba(255,255,255,0.92) !important;
+  backdrop-filter: blur(16px) !important;
+  border: 1.5px solid rgba(30,87,176,0.14) !important;
+  border-radius: 16px !important;
+}
