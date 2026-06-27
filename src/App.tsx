@@ -1,7 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 
-// ✅ ErrorBoundary - white screen ki jagah error message dikhega
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean; error: string }
@@ -15,7 +14,6 @@ class ErrorBoundary extends React.Component<
   }
   componentDidCatch(error: any, info: any) {
     console.error("App crash:", error, info);
-    // Stack trace bhi state mein save karo
     const stack = info?.componentStack || "";
     this.setState(s => ({ error: s.error + "\n\nComponent Stack:" + stack.slice(0, 500) }));
   }
@@ -40,7 +38,8 @@ class ErrorBoundary extends React.Component<
     return this.props.children;
   }
 }
-import { HashRouter, Routes, Route } from "react-router-dom"
+
+import { HashRouter, Routes, Route } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -69,112 +68,36 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <ErrorBoundary>
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <HashRouter>
-        <Routes>
-          <Route path="/" element={<Login />} />
-          <Route path="/login" element={<Login />} />
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/opd"
-            element={
-              <ProtectedRoute>
-                <OPD />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/ipd"
-            element={
-              <ProtectedRoute>
-                <IPD />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/appointments"
-            element={
-              <ProtectedRoute>
-                <Appointments />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/billing"
-            element={
-              <ProtectedRoute>
-                <Billing />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/cash-tally"
-            element={
-              <ProtectedRoute>
-                <CashTally />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/medicine-commission"
-            element={
-              <ProtectedRoute>
-                <MedicineCommission />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/physiotherapy"
-            element={
-              <ProtectedRoute>
-                <Physiotherapy />
-              </ProtectedRoute>
-            }
-          />
-            path="/analytics"
-            element={
-              <ProtectedRoute>
-                <Analytics />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
-                <SettingsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/whatsapp"
-            element={
-              <ProtectedRoute>
-                <WhatsApp />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="/medicine-master" element={<ProtectedRoute><MedicineMaster /></ProtectedRoute>} />
-          <Route path="/patient-medicine" element={<ProtectedRoute><PatientMedicine /></ProtectedRoute>} />
-          <Route path="/patient-profile/:id" element={<ProtectedRoute><PatientProfile /></ProtectedRoute>} />
-          <Route path="/ortho" element={<ProtectedRoute><Ortho /></ProtectedRoute>} />
-          <Route path="/sms-logs" element={<ProtectedRoute><SmsLogs /></ProtectedRoute>} />
-          <Route path="/plaster-sync" element={<ProtectedRoute><PlasterSync /></ProtectedRoute>} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </HashRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <HashRouter>
+          <Routes>
+            <Route path="/" element={<Login />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/opd" element={<ProtectedRoute><OPD /></ProtectedRoute>} />
+            <Route path="/ipd" element={<ProtectedRoute><IPD /></ProtectedRoute>} />
+            <Route path="/appointments" element={<ProtectedRoute><Appointments /></ProtectedRoute>} />
+            <Route path="/billing" element={<ProtectedRoute><Billing /></ProtectedRoute>} />
+            <Route path="/cash-tally" element={<ProtectedRoute><CashTally /></ProtectedRoute>} />
+            <Route path="/medicine-commission" element={<ProtectedRoute><MedicineCommission /></ProtectedRoute>} />
+            <Route path="/physiotherapy" element={<ProtectedRoute><Physiotherapy /></ProtectedRoute>} />
+            <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+            <Route path="/whatsapp" element={<ProtectedRoute><WhatsApp /></ProtectedRoute>} />
+            <Route path="/medicine-master" element={<ProtectedRoute><MedicineMaster /></ProtectedRoute>} />
+            <Route path="/patient-medicine" element={<ProtectedRoute><PatientMedicine /></ProtectedRoute>} />
+            <Route path="/patient-profile/:id" element={<ProtectedRoute><PatientProfile /></ProtectedRoute>} />
+            <Route path="/ortho" element={<ProtectedRoute><Ortho /></ProtectedRoute>} />
+            <Route path="/sms-logs" element={<ProtectedRoute><SmsLogs /></ProtectedRoute>} />
+            <Route path="/plaster-sync" element={<ProtectedRoute><PlasterSync /></ProtectedRoute>} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </HashRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
   </ErrorBoundary>
 );
 
