@@ -85,7 +85,12 @@ const getMonthStart = (date: Date) =>
   toLocalDateInput(new Date(date.getFullYear(), date.getMonth(), 1));
 const getMonthEnd = (date: Date) =>
   toLocalDateInput(new Date(date.getFullYear(), date.getMonth() + 1, 0));
-const billDate = (createdAt: string) => toLocalDateInput(new Date(createdAt));
+const billDate = (createdAt: string) => {
+  if (!createdAt) return toLocalDateInput(new Date());
+  const d = new Date(createdAt);
+  if (isNaN(d.getTime())) return toLocalDateInput(new Date());
+  return toLocalDateInput(d);
+};
 
 interface ServiceItem {
   name: string;
@@ -150,7 +155,8 @@ function buildInvoiceHTML(bill: any, logoUrl: string = "/images/logo.png") {
   const patientAge = (bill.patients as any)?.age || "—";
   const patientGender = (bill.patients as any)?.gender || "—";
   const invoiceNo = `INV-${bill.id.slice(0, 8).toUpperCase()}`;
-  const date = new Date(bill.created_at).toLocaleDateString("en-IN", {
+  const _dateObj = bill.created_at ? new Date(bill.created_at) : new Date();
+  const date = (!bill.created_at || isNaN(_dateObj.getTime()) ? new Date() : _dateObj).toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -515,7 +521,11 @@ export default function Billing() {
   const filteredBills = (bills || []).filter((bill) => {
     const date = billDate(bill.created_at);
     return date >= fromDate && date <= toDate;
-  }).slice().sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }).slice().sort((a, b) => {
+    const ta = a.created_at && !isNaN(new Date(a.created_at).getTime()) ? new Date(a.created_at).getTime() : 0;
+    const tb = b.created_at && !isNaN(new Date(b.created_at).getTime()) ? new Date(b.created_at).getTime() : 0;
+    return tb - ta;
+  });
 
   const cashTally = filteredBills.reduce(
     (acc, bill) => {
@@ -548,8 +558,8 @@ const filteredPatients = patients
    if (a._pendingSync && !b._pendingSync) return -1;
    if (!a._pendingSync && b._pendingSync) return 1;
    // created_at missing ho to naye maano (upar rakho)
-   const ta = a.created_at ? new Date(a.created_at).getTime() : Date.now();
-   const tb = b.created_at ? new Date(b.created_at).getTime() : Date.now();
+   const ta = a.created_at && !isNaN(new Date(a.created_at).getTime()) ? new Date(a.created_at).getTime() : Date.now();
+   const tb = b.created_at && !isNaN(new Date(b.created_at).getTime()) ? new Date(b.created_at).getTime() : Date.now();
    return tb - ta;
  }
 );
