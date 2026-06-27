@@ -175,6 +175,9 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
   if (m.op === "insert") {
     const payload = { ...m.payload };
     if (m.tempId) delete payload.id;
+    // ✅ FIX: Local-only fields Supabase ko mat bhejo — schema mein nahi hain
+    delete payload._pendingSync;
+    delete payload._localOnly;
     const { data, error } = await supabase.from(table).insert(payload).select().single();
     if (error) { console.error(`Insert failed — table: ${table}`); throw error; }
     if (m.tempId && data) await cacheReplaceRowKey(table, m.tempId, data, "id");
@@ -185,7 +188,10 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
   if (m.op === "update") {
     if (!m.rowId) throw new Error("update mutation missing rowId");
     if (m.rowId.startsWith("local_")) throw new Error("PENDING_PARENT_INSERT");
-    const { error } = await supabase.from(table).update(m.payload).eq("id", m.rowId);
+    const updatePayload = { ...m.payload };
+    delete updatePayload._pendingSync;
+    delete updatePayload._localOnly;
+    const { error } = await supabase.from(table).update(updatePayload).eq("id", m.rowId);
     if (error) { console.error(`Update failed — table: ${table}`); throw error; }
     console.info(`Update sync OK — table: ${table}`);
     return;
