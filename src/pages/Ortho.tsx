@@ -361,16 +361,15 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
 
   return (
     <>
-      {/* Zoom overlay */}
-      {zoomImg && (
-        <div onClick={() => setZoomImg(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",cursor:"zoom-out"}}>
-          <img src={zoomImg} alt="X-Ray Zoom" style={{maxWidth:"92vw",maxHeight:"calc(100vh - 4rem)",borderRadius:12,boxShadow:"0 0 60px #000"}}/>
-          <button onClick={() => setZoomImg(null)} style={{position:"absolute",top:18,right:18,background:"#fff",border:"none",borderRadius:"50%",width:36,height:36,cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-        </div>
-      )}
-
       <Dialog open={open} onOpenChange={v => !v && onClose()}>
         <DialogContent className="sm:max-w-2xl" style={{padding:0,overflow:"hidden",borderRadius:20,maxHeight:"calc(100vh - 2rem)",display:"flex",flexDirection:"column"}}>
+          {/* ✅ Zoom overlay — Dialog ke ANDAR hai, isliye Dialog ke upar dikhega */}
+          {zoomImg && (
+            <div onClick={() => setZoomImg(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",zIndex:99999,display:"flex",alignItems:"center",justifyContent:"center",cursor:"zoom-out"}}>
+              <img src={zoomImg} alt="X-Ray Zoom" style={{maxWidth:"92vw",maxHeight:"calc(100vh - 4rem)",borderRadius:12,boxShadow:"0 0 60px #000"}} onClick={e=>e.stopPropagation()}/>
+              <button onClick={() => setZoomImg(null)} style={{position:"fixed",top:18,right:18,background:"#fff",border:"none",borderRadius:"50%",width:40,height:40,cursor:"pointer",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center",zIndex:100000,boxShadow:"0 2px 12px rgba(0,0,0,0.4)"}}>✕</button>
+            </div>
+          )}
 
           {/* ── Colorful Header ── */}
           <div style={{background:"linear-gradient(135deg,#1e3a5f,#6366f1,#8b5cf6)",padding:"20px 24px 16px",position:"relative",flexShrink:0}}>
