@@ -62,6 +62,14 @@ import { sendSMS } from "@/services/smsService";
 import { getServiceCatalog, learnServiceItems } from "@/lib/appConfig";
 import { useAddFractureCase } from "@/hooks/useOrtho";
 
+// ✅ Safe date helper - "Invalid time value" crash se bachao
+const safeDate = (val: any): string => {
+  if (!val) return "—";
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN");
+};
+
 const statusStyle: Record<string, string> = {
   Paid: "bg-success/10 text-success",
   Pending: "bg-warning/10 text-warning",
@@ -734,7 +742,7 @@ const filteredPatients = patients
       Number(bill.amount),
       Number((bill as any).amount_paid || 0),
       `INV-${bill.id.slice(0, 8).toUpperCase()}`,
-      new Date(bill.created_at).toLocaleDateString("en-IN"),
+      safeDate(bill.created_at),
       (bill as any).invoice_pdf_url || null,
     );
     openWhatsAppWeb(mobile, msg);
@@ -802,7 +810,7 @@ const filteredPatients = patients
           newTotal,
           paidNum,
           `INV-${editingBill.id.slice(0, 8).toUpperCase()}`,
-          new Date(editingBill.created_at).toLocaleDateString("en-IN"),
+          safeDate(editingBill.created_at),
           (updatedBill as any).invoice_pdf_url || null,
         );
         openWhatsAppWeb(mobile, msg);
@@ -849,7 +857,7 @@ const filteredPatients = patients
         "Due (₹)": Number(bill.amount) - Number((bill as any).amount_paid || 0),
         "Payment Mode": (bill as any).payment_mode || "",
         Status: bill.status,
-        Date: new Date(bill.created_at).toLocaleDateString("en-IN"),
+        Date: safeDate(bill.created_at),
       };
     });
     const ws = XLSX.utils.json_to_sheet(data);
