@@ -264,7 +264,7 @@ function EditDialog({ open, onClose, caseData }: { open: boolean; onClose: () =>
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader><DialogTitle style={{display:"flex",alignItems:"center",gap:8}}><Pencil style={{width:16,height:16,color:"#6366f1"}}/> Edit — {caseData?.patients?.name}</DialogTitle></DialogHeader>
-        <ScrollArea className="max-h-[65vh] pr-2">
+        <ScrollArea className="max-h-[calc(100vh-16rem)] pr-2">
           <div style={{display:"grid",gridTemplateColumns:"1fr 200px",gap:16,padding:"4px 2px"}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               {([["Fracture Type","fracture_type",FRACTURE_TYPES],["Cause","cause",CAUSES],["Plaster Type","plaster_type",PLASTER_TYPES]] as any[]).map(([l,k,opts]) => (
@@ -391,13 +391,13 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
       {/* Zoom overlay */}
       {zoomImg && (
         <div onClick={() => setZoomImg(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",cursor:"zoom-out"}}>
-          <img src={zoomImg} alt="X-Ray Zoom" style={{maxWidth:"92vw",maxHeight:"90vh",borderRadius:12,boxShadow:"0 0 60px #000"}}/>
+          <img src={zoomImg} alt="X-Ray Zoom" style={{maxWidth:"92vw",maxHeight:"calc(100vh - 4rem)",borderRadius:12,boxShadow:"0 0 60px #000"}}/>
           <button onClick={() => setZoomImg(null)} style={{position:"absolute",top:18,right:18,background:"#fff",border:"none",borderRadius:"50%",width:36,height:36,cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
         </div>
       )}
 
       <Dialog open={open} onOpenChange={v => !v && onClose()}>
-        <DialogContent className="sm:max-w-2xl" style={{padding:0,overflow:"hidden",borderRadius:20,maxHeight:"88vh",display:"flex",flexDirection:"column"}}>
+        <DialogContent className="sm:max-w-2xl" style={{padding:0,overflow:"hidden",borderRadius:20,maxHeight:"calc(100vh - 2rem)",display:"flex",flexDirection:"column"}}>
 
           {/* ── Colorful Header ── */}
           <div style={{background:"linear-gradient(135deg,#1e3a5f,#6366f1,#8b5cf6)",padding:"20px 24px 16px",position:"relative",flexShrink:0}}>
@@ -628,7 +628,7 @@ function DetailDialog({ open, onClose, caseData }: { open: boolean; onClose: () 
           ))}
         </div>
 
-        <ScrollArea className="max-h-[55vh]">
+        <ScrollArea className="max-h-[calc(100vh-18rem)]">
           {tab === "sms" && (
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {/* Info */}

@@ -1117,7 +1117,7 @@ const filteredPatients = patients
                   New Bill
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+              <DialogContent className="max-w-lg">
                 <DialogHeader>
                   <DialogTitle className="font-heading">New Bill</DialogTitle>
                 </DialogHeader>
@@ -1256,7 +1256,7 @@ const filteredPatients = patients
             }
           }}
         >
-          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle className="font-heading">Edit Bill</DialogTitle>
             </DialogHeader>
