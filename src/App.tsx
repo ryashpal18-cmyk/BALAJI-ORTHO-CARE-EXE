@@ -15,14 +15,17 @@ class ErrorBoundary extends React.Component<
   }
   componentDidCatch(error: any, info: any) {
     console.error("App crash:", error, info);
+    // Stack trace bhi state mein save karo
+    const stack = info?.componentStack || "";
+    this.setState(s => ({ error: s.error + "\n\nComponent Stack:" + stack.slice(0, 500) }));
   }
   render() {
     if (this.state.hasError) {
       return (
         <div style={{ padding: 32, fontFamily: "sans-serif", color: "#1e293b" }}>
           <h2 style={{ color: "#dc2626", marginBottom: 8 }}>⚠️ Kuch galat hua</h2>
-          <p style={{ color: "#64748b", marginBottom: 16 }}>App mein error aa gaya. Neeche detail dekho:</p>
-          <pre style={{ background: "#f1f5f9", padding: 12, borderRadius: 8, fontSize: 12, overflowX: "auto" }}>
+          <p style={{ color: "#64748b", marginBottom: 16 }}>Error detail (screenshot lo aur developer ko bhejo):</p>
+          <pre style={{ background: "#f1f5f9", padding: 12, borderRadius: 8, fontSize: 11, overflowX: "auto", whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>
             {this.state.error}
           </pre>
           <button
