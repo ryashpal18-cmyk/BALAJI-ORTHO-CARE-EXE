@@ -1,4 +1,42 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import React from "react";
+
+// ✅ ErrorBoundary - white screen ki jagah error message dikhega
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: string }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: "" };
+  }
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error: error?.message || String(error) };
+  }
+  componentDidCatch(error: any, info: any) {
+    console.error("App crash:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 32, fontFamily: "sans-serif", color: "#1e293b" }}>
+          <h2 style={{ color: "#dc2626", marginBottom: 8 }}>⚠️ Kuch galat hua</h2>
+          <p style={{ color: "#64748b", marginBottom: 16 }}>App mein error aa gaya. Neeche detail dekho:</p>
+          <pre style={{ background: "#f1f5f9", padding: 12, borderRadius: 8, fontSize: 12, overflowX: "auto" }}>
+            {this.state.error}
+          </pre>
+          <button
+            onClick={() => { this.setState({ hasError: false, error: "" }); window.location.reload(); }}
+            style={{ marginTop: 16, padding: "8px 20px", background: "#0f172a", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 14 }}
+          >
+            🔄 Reload karo
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import { HashRouter, Routes, Route } from "react-router-dom"
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -28,6 +66,7 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 const App = () => (
+  <ErrorBoundary>
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
@@ -136,6 +175,7 @@ const App = () => (
       </HashRouter>
     </TooltipProvider>
   </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;
