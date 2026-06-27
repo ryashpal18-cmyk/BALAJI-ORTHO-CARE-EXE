@@ -26,7 +26,6 @@ const ALL_MENU_ITEMS = [
   { title: "Medicine Commission", url: "/medicine-commission", icon: Pill },
   { title: "Physiotherapy",       url: "/physiotherapy",       icon: Activity },
   { title: "Ortho / Fracture",    url: "/ortho",               icon: Bone },
-  { title: "Reports / X-Ray",    url: "/reports",             icon: FileText },
   { title: "Analytics",           url: "/analytics",           icon: BarChart3 },
   { title: "WhatsApp",            url: "/whatsapp",            icon: MessageCircle },
   { title: "SMS Logs",            url: "/sms-logs",            icon: MessageSquare },
