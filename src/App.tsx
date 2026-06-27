@@ -53,7 +53,6 @@ import Billing from "./pages/Billing";
 import CashTally from "./pages/CashTally";
 import MedicineCommission from "./pages/MedicineCommission";
 import Physiotherapy from "./pages/Physiotherapy";
-import Reports from "./pages/Reports";
 import Analytics from "./pages/Analytics";
 import SettingsPage from "./pages/SettingsPage";
 import WhatsApp from "./pages/WhatsApp";
@@ -142,8 +141,6 @@ const App = () => (
               </ProtectedRoute>
             }
           />
-          <Route path="/reports" element={<Reports />} />
-          <Route
             path="/analytics"
             element={
               <ProtectedRoute>
