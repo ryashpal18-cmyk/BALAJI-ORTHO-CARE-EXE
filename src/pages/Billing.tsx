@@ -55,7 +55,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { isOnline } from "@/lib/offlineSync";
 import { cLog } from "@/lib/clientLogger";
 import * as XLSX from "xlsx";
-import html2pdf from "html2pdf.js";
+// html2pdf: dynamic import only when needed (top-level import causes Electron crash)
 import { openWhatsAppWeb } from "@/pages/WhatsApp";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { sendSMS } from "@/services/smsService";
@@ -362,17 +362,16 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
   const logoUrl = await getBase64Image(window.location.origin + "/images/logo.png");
   const html = buildInvoiceHTML(bill, logoUrl);
 
-  // Create a visible container temporarily to ensure proper rendering
+  // ✅ Container bilkul screen se bahar rakho — white screen nahi aayegi
   const container = document.createElement("div");
   container.innerHTML = html;
-  container.style.position = "fixed";
-  container.style.top = "0";
-  container.style.left = "0";
-  container.style.zIndex = "-9999";
-  container.style.opacity = "0.01";
+  container.style.position = "absolute";
+  container.style.top = "-9999px";
+  container.style.left = "-9999px";
   container.style.width = "210mm";
   container.style.background = "#ffffff";
-  container.style.pointerEvents = "none"; // ✅ White screen fix: click block nahi karega
+  container.style.pointerEvents = "none";
+  container.style.visibility = "hidden";
   document.body.appendChild(container);
 
   // Wait for images to load
@@ -396,6 +395,8 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
   await new Promise((r) => setTimeout(r, 500));
 
   try {
+    // Dynamic import — Electron mein top-level import crash karta tha
+    const { default: html2pdf } = await import("html2pdf.js");
     const pdfBlob = await html2pdf()
       .set({
         margin: [2, 2, 2, 2],
@@ -684,8 +685,8 @@ const filteredPatients = patients
       const patientName = patient?.name || "Patient";
       const mobile = patient?.mobile || "";
 
-      // Bill save hone ke baad patient ko SMS bhejo
-      if (mobile) {
+      // Bill save hone ke baad patient ko SMS bhejo (try-catch se wrap - crash nahi hoga)
+      if (mobile && result?.id) {
         const invoiceNo = `INV-${result.id.slice(0, 8).toUpperCase()}`;
         const date = new Date().toLocaleDateString("en-IN");
         const due = Math.max(totalAmount - paidNum, 0);
