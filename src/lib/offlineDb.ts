@@ -5,7 +5,7 @@
 import { cLog } from "@/lib/clientLogger";
 
 const DB_NAME    = "balaji_ortho_offline_db";
-const DB_VERSION = 2; // ✅ Version bump — purani corrupt DB delete hokar fresh banegi
+const DB_VERSION = 3; // ✅ v3 bump — v2 corrupt DB wale PCs pe auto-delete + fresh start
 
 const CACHE_STORE = "table_cache";
 const QUEUE_STORE = "mutation_queue";
@@ -112,8 +112,13 @@ export async function cacheGetAll(table: string): Promise<any[]> {
     const prefix = `${table}::`;
     return all.filter((r) => typeof r._key === "string" && r._key.startsWith(prefix)).map((r) => r.data);
   } catch (err) {
-    cLog.error("indexeddb", `${table} cache read fail`, err);
-    return [];
+    cLog.error("indexeddb", `${table} cache read fail — DB corrupt, delete + reset`, err);
+    dbPromise = null;
+    try {
+      await deleteDb();
+      await openDb(); // fresh DB banaao
+    } catch (_) {}
+    return []; // fresh start — data Supabase se reload hoga
   }
 }
 
@@ -216,16 +221,21 @@ export async function queueGetAll(): Promise<QueuedMutation[]> {
     const t  = tx(db, [QUEUE_STORE], "readonly");
     return reqToPromise(t.objectStore(QUEUE_STORE).getAll());
   } catch (err) {
-    cLog.error("queue", "queueGetAll fail", err);
-    // DB connection stale ho sakta hai — reset karke ek baar retry
+    cLog.error("queue", "queueGetAll fail — DB corrupt lag rahi hai, delete karke fresh start", err);
+
+    // ── Nuclear fix: corrupt DB delete karo, fresh banaao ──
     dbPromise = null;
     try {
+      await deleteDb();
+      cLog.info("queue", "Corrupt IndexedDB delete ho gayi — fresh DB ban rahi hai");
       const db2 = await openDb();
       const t2  = tx(db2, [QUEUE_STORE], "readonly");
-      return reqToPromise(t2.objectStore(QUEUE_STORE).getAll());
+      const result = await reqToPromise<QueuedMutation[]>(t2.objectStore(QUEUE_STORE).getAll());
+      cLog.info("queue", "Fresh DB se queueGetAll success — queue empty se start");
+      return result;
     } catch (err2) {
-      cLog.error("queue", "queueGetAll retry bhi fail", err2);
-      return [];
+      cLog.error("queue", "Fresh DB bhi fail — indexedDB environment problem", err2);
+      return []; // app crash mat karo — empty return karo
     }
   }
 }

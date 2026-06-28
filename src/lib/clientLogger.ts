@@ -110,7 +110,7 @@ export function clientLog(level: LogLevel, source: string, message: string, deta
     const el = (window as any).electron;
     if (el?.logRendererError) {
       el.logRendererError({
-        level:   level.toLowerCase(),
+        level:   level.toLowerCase(), // ✅ 'info' | 'warn' | 'error' — main.js sahi level pe likhega
         source,
         message: logLine + "\n" + "─".repeat(80),
       });
