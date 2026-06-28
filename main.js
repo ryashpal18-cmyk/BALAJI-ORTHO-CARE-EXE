@@ -1034,8 +1034,13 @@ ipcMain.handle('app:openExternal', async (_e, url) => {
   return { success: true };
 });
 
-ipcMain.handle('log:rendererError', async (_e, { message, stack, source } = {}) => {
-  logger.logError(source || 'renderer', stack || message || 'Unknown renderer error');
+ipcMain.handle('log:rendererError', async (_e, { level, message, stack, source } = {}) => {
+  // ── BUG FIX: pehle hamesha logError() call hoti thi — INFO/WARN bhi ERROR ban jaate the ──
+  const text = stack || message || 'Unknown renderer error';
+  const src  = source || 'renderer';
+  if (level === 'info')       logger.logInfo(src, text);
+  else if (level === 'warn')  logger.logWarn(src, text);
+  else                        logger.logError(src, text); // 'error' ya kuch bhi
   return { success: true };
 });
 
@@ -1049,11 +1054,75 @@ ipcMain.handle('safety:getSnapshotDir', async () => {
   ensureAppBackupDir();
   return SAFETY_SNAPSHOT_ROOT;
 });
+// ── Alias: preload.js 'log:getSnapshotDir' channel ka handler (missing tha — 8 errors/session) ──
+ipcMain.handle('log:getSnapshotDir', async () => {
+  ensureAppBackupDir();
+  return SAFETY_SNAPSHOT_ROOT;
+});
 ipcMain.handle('safety:openSnapshotFolder', async () => {
   ensureAppBackupDir();
   if (!fs.existsSync(SAFETY_SNAPSHOT_ROOT)) fs.mkdirSync(SAFETY_SNAPSHOT_ROOT, { recursive: true });
   shell.openPath(SAFETY_SNAPSHOT_ROOT);
   return { success: true };
+});
+
+// ─── NUCLEAR INDEXEDDB RESET ─────────────────────────────────────────────────
+// Jab IndexedDB itni corrupt ho ki code se bhi fix na ho —
+// ye handler Windows pe physical IndexedDB files delete karta hai,
+// phir app restart karta hai — sab automatic, user kuch nahi karta.
+ipcMain.handle('app:nuclearIndexedDBReset', async () => {
+  try {
+    logger.logInfo('nuclear-reset', 'Nuclear IndexedDB reset shuru...');
+
+    // ── Step 1: IndexedDB folder path nikalo ──
+    const userDataPath  = app.getPath('userData');
+    const idbPaths = [
+      path.join(userDataPath, 'IndexedDB'),
+      path.join(userDataPath, 'Default', 'IndexedDB'),
+      path.join(userDataPath, 'Local Storage'),
+      path.join(userDataPath, 'Session Storage'),
+      path.join(userDataPath, 'blob_storage'),
+      path.join(userDataPath, 'Cache'),
+      path.join(userDataPath, 'Code Cache'),
+      path.join(userDataPath, 'GPUCache'),
+    ];
+
+    const deleted = [];
+    const failed  = [];
+
+    for (const p of idbPaths) {
+      if (fs.existsSync(p)) {
+        try {
+          fs.rmSync(p, { recursive: true, force: true });
+          deleted.push(p);
+          logger.logInfo('nuclear-reset', `Deleted: ${p}`);
+        } catch (e) {
+          failed.push(`${p}: ${e.message}`);
+          logger.logWarn('nuclear-reset', `Delete fail: ${p} — ${e.message}`);
+        }
+      }
+    }
+
+    logger.logInfo('nuclear-reset', `Reset complete — Deleted: ${deleted.length}, Failed: ${failed.length}`);
+    logger.logInfo('nuclear-reset', 'App 2 second mein restart hoga...');
+
+    // ── Step 2: 2 second baad restart ──
+    setTimeout(() => {
+      app.relaunch();
+      app.exit(0);
+    }, 2000);
+
+    return {
+      success: true,
+      deleted: deleted.length,
+      failed:  failed.length,
+      failedPaths: failed,
+      userDataPath,
+    };
+  } catch (e) {
+    logger.logError('nuclear-reset', `Nuclear reset fail: ${e.message}`);
+    return { success: false, error: e.message };
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════

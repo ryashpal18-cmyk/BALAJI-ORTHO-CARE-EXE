@@ -75,7 +75,8 @@ contextBridge.exposeInMainWorld('electron', {
 
   // ── App Version & Update ─────────────────────────────────────
   // ── Diagnostics ──────────────────────────────────────────────────────────
-  runDiagnostics: () => ipcRenderer.invoke('app:runDiagnostics'),
+  runDiagnostics:        () => ipcRenderer.invoke('app:runDiagnostics'),
+  nuclearIndexedDBReset: () => ipcRenderer.invoke('app:nuclearIndexedDBReset'),
 
   // ── App Version & Update ─────────────────────────────────────────────────
   getAppVersion:  () => ipcRenderer.invoke('app:getVersion'),
