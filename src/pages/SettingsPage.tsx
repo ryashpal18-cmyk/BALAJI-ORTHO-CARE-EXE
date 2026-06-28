@@ -84,6 +84,7 @@ export default function SettingsPage() {
   // ── Diagnostics ──
   const [diagRunning,  setDiagRunning]  = useState(false);
   const [diagResult,   setDiagResult]   = useState<null | { errors: number; warnings: number; passed: number; reportPath?: string; text: string }>(null);
+  const [nuclearRunning, setNuclearRunning] = useState(false);
 
   // ── About ──
   const [appVersionInfo, setAppVersionInfo] = useState<{ version: string; electron: string; node: string; platform: string } | null>(null);
@@ -220,6 +221,25 @@ export default function SettingsPage() {
       toast({ title: "Error", description: e?.message || "Diagnostic fail", variant: "destructive" });
     } finally {
       setDiagRunning(false);
+    }
+  };
+
+  const handleNuclearReset = async () => {
+    const confirmed = window.confirm(
+      "⚠️ IndexedDB Nuclear Reset\n\n" +
+      "Ye app ki local cache files delete karke restart karega.\n" +
+      "Aapka asli data (patients, bills) SAFE rahega — Supabase aur C:\\Balaji_Health_Backup\\ mein hai.\n\n" +
+      "App 2 second mein band hokar dobara khulega.\n\n" +
+      "Kya aap sure hain?"
+    );
+    if (!confirmed) return;
+    setNuclearRunning(true);
+    try {
+      await (window as any).electron?.nuclearIndexedDBReset?.();
+      // App restart ho jaayega — ye code nahi chalega
+    } catch (e: any) {
+      toast({ title: "Reset Error", description: e?.message || "Reset fail hua", variant: "destructive" });
+      setNuclearRunning(false);
     }
   };
 
@@ -1338,6 +1358,59 @@ export default function SettingsPage() {
                       )}
                     </div>
                   )}
+                </CardContent>
+              </Card>
+            )}
+
+            {isElectron && (
+              <Card className="dash-card">
+                <CardHeader>
+                  <CardTitle style={{ fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <FileWarning style={{ width: "16px", height: "16px", color: "#dc2626" }} />
+                    🔴 IndexedDB Nuclear Reset
+                  </CardTitle>
+                </CardHeader>
+                <CardContent style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div style={{
+                    padding: "10px 14px", borderRadius: "10px",
+                    background: "#fef2f2", border: "1.5px solid #fca5a5",
+                  }}>
+                    <p style={{ fontSize: "12.5px", color: "#991b1b", fontWeight: 600, margin: "0 0 6px" }}>
+                      ⚠️ Sirf tab use karo jab app mein ye errors aayein:
+                    </p>
+                    <p style={{ fontSize: "11.5px", color: "#7f1d1d", margin: 0, lineHeight: 1.7 }}>
+                      • "queueGetAll retry bhi fail"<br/>
+                      • "Internal error opening backing store"<br/>
+                      • "Fresh DB bhi nahi khuli"<br/>
+                      • Log file mein 1000+ same errors
+                    </p>
+                  </div>
+
+                  <div style={{
+                    padding: "10px 14px", borderRadius: "10px",
+                    background: "#f0fdf4", border: "1.5px solid #bbf7d0",
+                  }}>
+                    <p style={{ fontSize: "12px", color: "#166534", lineHeight: 1.7, margin: 0 }}>
+                      ✅ <strong>Data bilkul safe rahega</strong> — patients, bills, reports sab Supabase
+                      aur <code style={{ fontSize: "11px" }}>C:\Balaji_Health_Backup\</code> mein hain.<br/>
+                      Sirf local browser cache delete hogi. App restart ke baad data wapas load ho jaayega.
+                    </p>
+                  </div>
+
+                  <Button
+                    onClick={handleNuclearReset}
+                    disabled={nuclearRunning}
+                    style={{
+                      width: "fit-content", gap: "8px", fontSize: "13px",
+                      background: nuclearRunning ? "#94a3b8" : "#dc2626",
+                      border: "none", color: "#fff",
+                    }}
+                  >
+                    {nuclearRunning
+                      ? <><Loader2 style={{ width: "14px", height: "14px", animation: "spin 1s linear infinite" }} />Reset ho raha hai... App band hoga</>
+                      : <><XCircle style={{ width: "14px", height: "14px" }} />IndexedDB Reset &amp; Restart</>
+                    }
+                  </Button>
                 </CardContent>
               </Card>
             )}
