@@ -74,6 +74,10 @@ contextBridge.exposeInMainWorld('electron', {
   sendSMS: (data) => ipcRenderer.invoke('app:sendSMS', data),
 
   // ── App Version & Update ─────────────────────────────────────
+  // ── Diagnostics ──────────────────────────────────────────────────────────
+  runDiagnostics: () => ipcRenderer.invoke('app:runDiagnostics'),
+
+  // ── App Version & Update ─────────────────────────────────────────────────
   getAppVersion:  () => ipcRenderer.invoke('app:getVersion'),
   checkForUpdate: () => ipcRenderer.invoke('app:checkForUpdate'),
   downloadUpdate: () => ipcRenderer.invoke('app:downloadUpdate'),

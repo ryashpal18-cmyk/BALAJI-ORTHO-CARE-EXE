@@ -666,6 +666,293 @@ ipcMain.handle('app:sendSMS', async (_e, { apiUrl, apiKey, deviceId, mobile, mes
   }
 });
 
+// ─── RUNTIME DIAGNOSTICS — Ek click mein poori app check karo ───────────────
+// Ye handler software ke andar se hi run hota hai — koi alag tool nahi chahiye.
+// Har check ka result ek .txt report file mein save hota hai.
+ipcMain.handle('app:runDiagnostics', async () => {
+  const lines = [];
+  const sep   = '─'.repeat(70);
+  const ts    = () => new Date().toLocaleString('en-IN', { hour12: false });
+  const ok    = (msg) => `  ✅  ${msg}`;
+  const warn  = (msg) => `  ⚠️  ${msg}`;
+  const err   = (msg) => `  ❌  ${msg}`;
+  const info  = (msg) => `  ℹ️  ${msg}`;
+
+  lines.push('BALAJI ORTHO CARE CONNECT — RUNTIME DIAGNOSTIC REPORT');
+  lines.push(`Generated: ${ts()}`);
+  lines.push(`App Version: ${app.getVersion()}`);
+  lines.push(`Electron: ${process.versions.electron}  |  Node: ${process.versions.node}  |  Platform: ${process.platform}`);
+  lines.push(sep);
+
+  // ── 1. DATA FILES CHECK ──────────────────────────────────────────────────
+  lines.push('');
+  lines.push('[1] DATA FILES — C:\\Balaji_Health_Backup\\');
+  lines.push(sep);
+  const dataFiles = [
+    { path: PATIENTS_FILE,  name: 'patients.json'  },
+    { path: BILLS_FILE,     name: 'bills.json'     },
+    { path: REPORTS_FILE,   name: 'reports.json'   },
+    { path: XRAYS_FILE,     name: 'xrays.json'     },
+    { path: FRACTURE_FILE,  name: 'fractures.json' },
+    { path: PENDING_FILE,   name: 'pending_sync.json' },
+    { path: SETTINGS_FILE,  name: 'settings.json'  },
+    { path: AUTH_FILE,      name: 'auth.json'      },
+  ];
+
+  for (const f of dataFiles) {
+    if (!fs.existsSync(f.path)) {
+      lines.push(warn(`${f.name} — FILE MISSING (naya banaya jayega)`));
+      continue;
+    }
+    try {
+      const raw  = fs.readFileSync(f.path, 'utf-8');
+      const data = JSON.parse(raw);
+      const size = (fs.statSync(f.path).size / 1024).toFixed(1);
+      const count = Array.isArray(data) ? data.length : 'object';
+      lines.push(ok(`${f.name} — OK | Records: ${count} | Size: ${size} KB`));
+    } catch (e) {
+      lines.push(err(`${f.name} — CORRUPT! JSON parse fail: ${e.message}`));
+      const bakPath = `${f.path}.bak`;
+      if (fs.existsSync(bakPath)) {
+        try {
+          JSON.parse(fs.readFileSync(bakPath, 'utf-8'));
+          lines.push(warn(`  └─ .bak file theek hai — restore possible`));
+        } catch {
+          lines.push(err(`  └─ .bak bhi CORRUPT hai — data loss risk!`));
+        }
+      } else {
+        lines.push(err(`  └─ Koi .bak file nahi mili`));
+      }
+    }
+  }
+
+  // ── 2. DIRECTORIES CHECK ─────────────────────────────────────────────────
+  lines.push('');
+  lines.push('[2] DIRECTORIES');
+  lines.push(sep);
+  const dirs = [
+    BACKUP_DIR,
+    XRAYS_DIR,
+    APP_BACKUP_DIR,
+    SAFETY_SNAPSHOT_ROOT,
+    path.join(BACKUP_DIR, 'logs'),
+  ];
+  for (const d of dirs) {
+    if (fs.existsSync(d)) {
+      lines.push(ok(`EXISTS: ${d}`));
+    } else {
+      lines.push(warn(`MISSING: ${d} (app start par banta hai)`));
+    }
+  }
+
+  // ── 3. RECORD COUNT SUMMARY ──────────────────────────────────────────────
+  lines.push('');
+  lines.push('[3] RECORD COUNT SUMMARY');
+  lines.push(sep);
+  try {
+    const patients  = readJSON(PATIENTS_FILE);
+    const bills     = readJSON(BILLS_FILE);
+    const reports   = readJSON(REPORTS_FILE);
+    const xrays     = readJSON(XRAYS_FILE);
+    const fractures = readJSON(FRACTURE_FILE);
+    const pending   = readJSON(PENDING_FILE);
+    const today     = new Date().toDateString();
+
+    lines.push(info(`Total Patients  : ${patients.length}`));
+    lines.push(info(`Total Bills     : ${bills.length}`));
+    lines.push(info(`Total Reports   : ${reports.length}`));
+    lines.push(info(`Total X-Rays    : ${xrays.length}`));
+    lines.push(info(`Total Fractures : ${fractures.length}`));
+    lines.push(info(`Pending Sync    : ${pending.length}`));
+    lines.push(info(`Aaj ke Bills    : ${bills.filter(b => new Date(b.created_at||0).toDateString()===today).length}`));
+    lines.push(info(`Aaj ke Patients : ${patients.filter(p => new Date(p.created_at||0).toDateString()===today).length}`));
+    lines.push(info(`Active Fractures: ${fractures.filter(f => f.plaster_status==='Active').length}`));
+
+    if (pending.length > 50) {
+      lines.push(warn(`Pending sync bahut zyada hai (${pending.length}) — internet check karein`));
+    } else if (pending.length > 0) {
+      lines.push(warn(`${pending.length} records sync hone baki hain`));
+    }
+  } catch (e) {
+    lines.push(err(`Record count nahi mil saka: ${e.message}`));
+  }
+
+  // ── 4. INTERNET / SUPABASE CHECK ─────────────────────────────────────────
+  lines.push('');
+  lines.push('[4] CONNECTIVITY CHECK');
+  lines.push(sep);
+  const isNet = await checkInternet();
+  if (isNet) {
+    lines.push(ok('Internet: CONNECTED'));
+    // Supabase ping
+    try {
+      const settings  = readJSON(SETTINGS_FILE, {});
+      if (settings.supabaseUrl && settings.supabaseKey) {
+        const pingUrl = `${settings.supabaseUrl}/rest/v1/`;
+        const result  = await new Promise((resolve) => {
+          const urlObj  = new URL(pingUrl);
+          const req = require('https').get({
+            hostname: urlObj.hostname,
+            path: urlObj.pathname,
+            headers: { 'apikey': settings.supabaseKey },
+            timeout: 5000,
+          }, (res) => resolve({ status: res.statusCode }));
+          req.on('error', (e) => resolve({ status: 0, error: e.message }));
+          req.on('timeout', () => { req.destroy(); resolve({ status: 0, error: 'timeout' }); });
+        });
+        if (result.status >= 200 && result.status < 500) {
+          lines.push(ok(`Supabase: REACHABLE (HTTP ${result.status})`));
+        } else {
+          lines.push(warn(`Supabase: Status ${result.status || result.error}`));
+        }
+      } else {
+        lines.push(warn('Supabase URL/Key settings mein configure nahi hai'));
+      }
+    } catch (e) {
+      lines.push(err(`Supabase check fail: ${e.message}`));
+    }
+  } else {
+    lines.push(warn('Internet: OFFLINE — Supabase check skip kiya'));
+  }
+
+  // ── 5. SETTINGS CHECK ────────────────────────────────────────────────────
+  lines.push('');
+  lines.push('[5] SETTINGS CHECK');
+  lines.push(sep);
+  try {
+    const s = readJSON(SETTINGS_FILE, {});
+    lines.push(info(`Clinic Name  : ${s.centerName || '(blank)'}`));
+    lines.push(info(`Doctor Name  : ${s.doctorName || '(blank)'}`));
+    lines.push(info(`Auto Sync    : ${s.autoSync ? 'ON' : 'OFF'}`));
+    lines.push(info(`Supabase URL : ${s.supabaseUrl ? s.supabaseUrl.slice(0,40)+'...' : '(not set)'}`));
+    lines.push(info(`Supabase Key : ${s.supabaseKey ? '****' + s.supabaseKey.slice(-8) : '(not set)'}`));
+    if (!s.centerName) lines.push(warn('Clinic name khali hai — Settings mein bharein'));
+    if (!s.supabaseUrl || !s.supabaseKey) lines.push(warn('Supabase config missing — cloud sync nahi hoga'));
+  } catch (e) {
+    lines.push(err(`Settings read fail: ${e.message}`));
+  }
+
+  // ── 6. LOG FILES CHECK ───────────────────────────────────────────────────
+  lines.push('');
+  lines.push('[6] LOG FILES (last 3 days)');
+  lines.push(sep);
+  try {
+    const logDir = path.join(BACKUP_DIR, 'logs');
+    if (!fs.existsSync(logDir)) {
+      lines.push(warn('Log folder nahi mila'));
+    } else {
+      const logFiles = fs.readdirSync(logDir)
+        .filter(f => f.endsWith('.log'))
+        .sort()
+        .slice(-3)
+        .reverse();
+      if (!logFiles.length) {
+        lines.push(info('Abhi tak koi log file nahi bani'));
+      } else {
+        for (const lf of logFiles) {
+          const lPath = path.join(logDir, lf);
+          const lSize = (fs.statSync(lPath).size / 1024).toFixed(1);
+          const content = fs.readFileSync(lPath, 'utf-8');
+          const errCount  = (content.match(/\[ERROR\]/g) || []).length;
+          const warnCount = (content.match(/\[WARN\]/g)  || []).length;
+          const status = errCount > 0 ? err : warnCount > 0 ? warn : ok;
+          lines.push(status(`${lf} | Size: ${lSize} KB | Errors: ${errCount} | Warnings: ${warnCount}`));
+
+          // Last error extract karo
+          if (errCount > 0) {
+            const lastErr = content.split('[ERROR]').slice(-1)[0]?.split('─'.repeat(10))[0]?.trim()?.slice(0, 200);
+            if (lastErr) lines.push(`       Last Error: ${lastErr}`);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    lines.push(err(`Log files check fail: ${e.message}`));
+  }
+
+  // ── 7. SAFETY SNAPSHOT CHECK ─────────────────────────────────────────────
+  lines.push('');
+  lines.push('[7] DAILY SAFETY SNAPSHOTS');
+  lines.push(sep);
+  try {
+    if (!fs.existsSync(SAFETY_SNAPSHOT_ROOT)) {
+      lines.push(warn('Snapshot folder exist nahi karta'));
+    } else {
+      const snaps = fs.readdirSync(SAFETY_SNAPSHOT_ROOT).sort().reverse().slice(0, 5);
+      if (!snaps.length) {
+        lines.push(warn('Koi snapshot nahi mila abhi tak'));
+      } else {
+        const today2 = new Date().toISOString().slice(0, 10);
+        if (snaps[0] === today2) {
+          lines.push(ok(`Aaj ka snapshot le liya gaya: ${snaps[0]}`));
+        } else {
+          lines.push(warn(`Aaj ka snapshot nahi mila. Last: ${snaps[0]}`));
+        }
+        for (const s of snaps) {
+          lines.push(info(`  Snapshot: ${s}`));
+        }
+      }
+    }
+  } catch (e) {
+    lines.push(err(`Snapshot check fail: ${e.message}`));
+  }
+
+  // ── 8. IPC / PRELOAD CHECK ───────────────────────────────────────────────
+  lines.push('');
+  lines.push('[8] APP HEALTH');
+  lines.push(sep);
+  lines.push(ok(`Main process: RUNNING (PID: ${process.pid})`));
+  lines.push(ok(`App ready: YES`));
+  lines.push(ok(`Window: ${mainWindow && !mainWindow.isDestroyed() ? 'OPEN' : 'CLOSED'}`));
+  lines.push(info(`Memory: ${(process.memoryUsage().rss / 1024 / 1024).toFixed(1)} MB`));
+  lines.push(info(`Uptime: ${Math.round(process.uptime())} seconds`));
+
+  // ── FINAL SUMMARY ────────────────────────────────────────────────────────
+  const fullText  = lines.join('\n');
+  const errCount  = (fullText.match(/❌/g) || []).length;
+  const warnCount = (fullText.match(/⚠️/g) || []).length;
+  const okCount   = (fullText.match(/✅/g) || []).length;
+
+  const summary = [
+    '',
+    sep,
+    'DIAGNOSTIC SUMMARY',
+    sep,
+    `✅ Pass    : ${okCount}`,
+    `⚠️  Warnings: ${warnCount}`,
+    `❌ Errors  : ${errCount}`,
+    '',
+    errCount > 0
+      ? '🚨 KUCH SERIOUS ERRORS HAIN — Upar dekho aur fix karo'
+      : warnCount > 0
+        ? '⚠️  Kuch warnings hain — review karo'
+        : '🎉 Sab theek lag raha hai!',
+    '',
+    `Report generated: ${ts()}`,
+    sep,
+  ];
+
+  const reportText = fullText + '\n' + summary.join('\n');
+
+  // Report file save karo
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const reportFile = path.join(BACKUP_DIR, `diagnostic_report_${new Date().toISOString().slice(0,10)}.txt`);
+    fs.writeFileSync(reportFile, reportText, 'utf-8');
+    logger.logInfo('diagnostics', `Report save hui: ${reportFile}`);
+    return {
+      success:   true,
+      reportPath: reportFile,
+      errors:    errCount,
+      warnings:  warnCount,
+      passed:    okCount,
+      text:      reportText,
+    };
+  } catch (e) {
+    return { success: false, error: e.message, text: reportText };
+  }
+});
+
 // ─── APP INFO / DIAGNOSTICS (About tab + crash logging) ──────────────────
 ipcMain.handle('app:getVersion', async () => ({
   version:  app.getVersion(),
