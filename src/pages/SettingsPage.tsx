@@ -125,7 +125,15 @@ export default function SettingsPage() {
         setUpdateCurrent(info.version);
       }
       if (electron?.getLogsDir) setLogsDir(await electron.getLogsDir());
-      if (electron?.getSafetySnapshotDir) setSnapshotDir(await electron.getSafetySnapshotDir());
+      // ✅ try-catch — agar handler missing ho to app crash na kare
+      if (electron?.getSafetySnapshotDir) {
+        try {
+          const dir = await electron.getSafetySnapshotDir();
+          setSnapshotDir(dir);
+        } catch {
+          setSnapshotDir(null); // silently ignore
+        }
+      }
     })();
 
     // updater:status events sun lo
