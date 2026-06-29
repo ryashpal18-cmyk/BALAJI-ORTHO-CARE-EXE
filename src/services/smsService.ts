@@ -1,71 +1,122 @@
-import { supabase } from "@/integrations/supabase/client";
-import { queueAdd } from "@/lib/offlineDb";
+// ─────────────────────────────────────────────────────────────────────────────
+// SMS Service — Offline-first
+//
+// FLOW:
+//   Online  → Electron IPC se turant bhejo → ok to sms_logs mein save karo
+//   Offline → IndexedDB queue mein daal do → internet aane pe auto-sync karega
+//
+// Kabhi bhi direct fetch() nahi karte — CORS issue hoga Electron mein.
+// Hamesha window.electron.sendSMS (IPC → main.js → node fetch) use karte hain.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { supabase }  from "@/integrations/supabase/client";
+import { queueAdd }  from "@/lib/offlineDb";
+import { isOnline }  from "@/lib/offlineSync";
+import { cLog }      from "@/lib/clientLogger";
 
 export type SendSmsResult = {
-  ok: boolean;
-  queued: boolean;
+  ok:     boolean;   // SMS gaya ya queue mein gaya — dono ok:true
+  queued: boolean;   // true = offline queue mein hai, baad mein jaayega
+  error?: string;    // sirf agar kuch serious fail hua
 };
 
-export async function sendSMS(
+// ── Mobile number normalize karo ─────────────────────────────────────────────
+function normalizeMobile(mobile: string): string {
+  const digits = mobile.replace(/\D/g, "");
+  return digits.startsWith("91") ? digits : `91${digits}`;
+}
+
+// ── Queue mein daal do — internet aane pe jayega ──────────────────────────────
+async function queueSMS(
   mobile: string,
   message: string,
-  patientName: string = "",
-  smsType: string = "general"
+  patientName: string,
+  smsType: string
 ): Promise<SendSmsResult> {
-  const digits = mobile.replace(/\D/g, "");
-  const num = digits.startsWith("91") ? digits : `91${digits}`;
+  await queueAdd({
+    table:   "sms_logs",
+    op:      "sms",
+    payload: { mobile, message, patientName, smsType },
+  });
+  cLog.info("sms", `SMS queue mein daal diya — patient: ${patientName}, type: ${smsType}`);
 
-  const apiUrl    = import.meta.env.VITE_TEXTBEE_API_URL;
-  const apiKey    = import.meta.env.VITE_TEXTBEE_API_KEY;
-  const deviceId  = import.meta.env.VITE_TEXTBEE_DEVICE_ID;
+  // Supabase mein "pending" status save karo (agar online ho)
+  try {
+    await supabase.from("sms_logs" as any).insert({
+      patient_name: patientName,
+      mobile,
+      message,
+      status:   "pending",
+      sms_type: smsType,
+    } as any);
+  } catch { /* offline hai to ye bhi queue mein jaayega — ok hai */ }
+
+  return { ok: true, queued: true };
+}
+
+// ── Main sendSMS function ─────────────────────────────────────────────────────
+export async function sendSMS(
+  mobile:      string,
+  message:     string,
+  patientName: string = "",
+  smsType:     string = "general"
+): Promise<SendSmsResult> {
+
+  if (!mobile) {
+    cLog.warn("sms", `Mobile number nahi hai — patient: ${patientName}`);
+    return { ok: false, queued: false, error: "Mobile number nahi hai" };
+  }
+
+  const num = normalizeMobile(mobile);
+
+  // ── Step 1: Internet check karo ──────────────────────────────────────────
+  const online = await isOnline();
+
+  if (!online) {
+    // Offline — seedha queue mein daal do, try bhi mat karo
+    cLog.info("sms", `Offline — SMS queue mein daal diya: ${patientName}`);
+    return queueSMS(num, message, patientName, smsType);
+  }
+
+  // ── Step 2: Online — Electron IPC se bhejo ───────────────────────────────
+  const apiUrl   = import.meta.env.VITE_TEXTBEE_API_URL;
+  const apiKey   = import.meta.env.VITE_TEXTBEE_API_KEY;
+  const deviceId = import.meta.env.VITE_TEXTBEE_DEVICE_ID;
+
+  const electron = (window as any).electron;
 
   try {
-    let ok = false;
-
-    // Electron mein — main process se bhejo (CORS issue nahi hoga)
-    const electron = (window as any).electron;
     if (electron?.sendSMS) {
+      // ✅ Electron IPC — main.js mein node-fetch karta hai (CORS-free)
       const result = await electron.sendSMS({ apiUrl, apiKey, deviceId, mobile: num, message });
-      ok = result?.ok === true;
-      if (!ok) throw new Error(result?.error || "SMS fail");
-    } else {
-      // Browser/dev fallback — direct fetch
-      const res = await fetch(apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-        },
-        body: JSON.stringify({ deviceId, recipients: [num], message }),
-      });
-      if (!res.ok) throw new Error(`TextBee ${res.status}`);
-      ok = true;
-    }
 
-    if (ok) {
-      try {
-        await supabase.from("sms_logs" as any).insert({
-          patient_name: patientName, mobile: num, message,
-          status: "sent", sms_type: smsType,
-        } as any);
-      } catch {
-        // log fail — SMS to gaya
+      if (result?.ok === true) {
+        // SMS gaya — Supabase mein "sent" log karo
+        try {
+          await supabase.from("sms_logs" as any).insert({
+            patient_name: patientName,
+            mobile:       num,
+            message,
+            status:       "sent",
+            sms_type:     smsType,
+          } as any);
+        } catch { /* log fail — SMS to gaya, ignore */ }
+
+        cLog.info("sms", `✅ SMS bheja gaya — patient: ${patientName}, type: ${smsType}`);
+        return { ok: true, queued: false };
       }
-      return { ok: true, queued: false };
+
+      // IPC ne fail bataya — queue mein daal do
+      cLog.warn("sms", `SMS fail (IPC) — queue mein daal raha hai: ${result?.error || "unknown"}`);
+      return queueSMS(num, message, patientName, smsType);
+
+    } else {
+      // Electron nahi mila (browser dev mode) — queue mein daal do
+      cLog.warn("sms", "Electron SMS handler nahi mila — queue mein daal raha hai");
+      return queueSMS(num, message, patientName, smsType);
     }
-    throw new Error("SMS fail");
-  } catch {
-    // Queue mein daal do — sync hone par jayega
-    await queueAdd({
-      table: "sms_logs", op: "sms",
-      payload: { mobile: num, message, patientName, smsType },
-    });
-    try {
-      await supabase.from("sms_logs" as any).insert({
-        patient_name: patientName, mobile: num, message,
-        status: "pending", sms_type: smsType,
-      } as any);
-    } catch { /* ok */ }
-    return { ok: true, queued: true };
+  } catch (err: any) {
+    cLog.error("sms", `SMS exception — queue mein daal raha hai: ${err?.message}`, err);
+    return queueSMS(num, message, patientName, smsType);
   }
 }
