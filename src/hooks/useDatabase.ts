@@ -226,11 +226,11 @@ export function usePhysioSessions() {
     staleTime: 30000,
     queryFn: async () => {
       const rows = await offlineFetch("physiotherapy_sessions", async () => {
-        const { data, error } = await supabase.from("physiotherapy_sessions").select("*, patients(name)").order("created_at", { ascending: false }).limit(20);
+        const { data, error } = await supabase.from("physiotherapy_sessions").select("*, patients(name)").order("created_at", { ascending: false }).limit(500); // ✅ 20 → 500
         if (error) throw error;
         return data || [];
       });
-      return [...rows].sort((a: any, b: any) => (b.created_at || "").localeCompare(a.created_at || "")).slice(0, 20);
+      return [...rows].sort((a: any, b: any) => (b.created_at || "").localeCompare(a.created_at || ""));
     },
   });
 }
