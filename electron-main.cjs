@@ -27,6 +27,28 @@ ipcMain.handle("log:getDir", () => getLogDir());
 // ── IPC: Logs folder File Explorer mein kholna ───────────────────────────
 ipcMain.handle("log:openFolder", () => shell.openPath(getLogDir()));
 
+// ── IPC: Safety snapshot directory path ──────────────────────────────────
+// FIX: preload.js mein getSafetySnapshotDir() ne 'log:getSnapshotDir' call kiya tha
+// lekin ye handler electron-main.cjs mein missing tha — 92 errors/session aa rahe the
+// Note: app.getPath() app ready hone ke baad call hona chahiye, isliye lazy init use kar rahe hain
+let _safetySnapshotRoot = null;
+function getSafetySnapshotRoot() {
+  if (!_safetySnapshotRoot) {
+    try {
+      _safetySnapshotRoot = path.join(app.getPath('documents'), 'Balaji_Ortho_Backups', 'safety_snapshots');
+    } catch (_) {
+      _safetySnapshotRoot = path.join('C:\\Users', 'konicaminolta', 'Documents', 'Balaji_Ortho_Backups', 'safety_snapshots');
+    }
+  }
+  return _safetySnapshotRoot;
+}
+ipcMain.handle("log:getSnapshotDir", () => {
+  const root = getSafetySnapshotRoot();
+  try { if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true }); } catch (_) {}
+  return root;
+});
+ipcMain.handle("safety:getSnapshotDir", () => getSafetySnapshotRoot());
+
 function createWindow() {
   logInfo("main", "App start ho raha hai");
 

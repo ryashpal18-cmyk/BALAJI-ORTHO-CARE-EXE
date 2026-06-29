@@ -672,11 +672,13 @@ ipcMain.handle('app:sendSMS', async (_e, { apiUrl, apiKey, deviceId, mobile, mes
 ipcMain.handle('app:runDiagnostics', async () => {
   const lines = [];
   const sep   = '─'.repeat(70);
+  const sep2  = '═'.repeat(70);
   const ts    = () => new Date().toLocaleString('en-IN', { hour12: false });
   const ok    = (msg) => `  ✅  ${msg}`;
   const warn  = (msg) => `  ⚠️  ${msg}`;
   const err   = (msg) => `  ❌  ${msg}`;
   const info  = (msg) => `  ℹ️  ${msg}`;
+  const head  = (msg) => `\n${sep2}\n  🔍  ${msg}\n${sep2}`;
 
   lines.push('BALAJI ORTHO CARE CONNECT — RUNTIME DIAGNOSTIC REPORT');
   lines.push(`Generated: ${ts()}`);
@@ -897,7 +899,7 @@ ipcMain.handle('app:runDiagnostics', async () => {
     lines.push(err(`Snapshot check fail: ${e.message}`));
   }
 
-  // ── 8. IPC / PRELOAD CHECK ───────────────────────────────────────────────
+  // ── 8. APP HEALTH ────────────────────────────────────────────────────────
   lines.push('');
   lines.push('[8] APP HEALTH');
   lines.push(sep);
@@ -906,6 +908,274 @@ ipcMain.handle('app:runDiagnostics', async () => {
   lines.push(ok(`Window: ${mainWindow && !mainWindow.isDestroyed() ? 'OPEN' : 'CLOSED'}`));
   lines.push(info(`Memory: ${(process.memoryUsage().rss / 1024 / 1024).toFixed(1)} MB`));
   lines.push(info(`Uptime: ${Math.round(process.uptime())} seconds`));
+
+  // ── 9. IPC HANDLER VERIFICATION ──────────────────────────────────────────
+  // Preload.js mein expose kiye gaye channels ko verify karo
+  // Error "No handler registered for X" ka pata lagao
+  lines.push('');
+  lines.push('[9] IPC HANDLER CHECK');
+  lines.push(sep);
+  try {
+    // Ye sare channels preload.js mein expose hain — main.js mein hone chahiye
+    const requiredChannels = [
+      'auth:login', 'auth:check', 'auth:logout',
+      'db:savePatient', 'db:getAllPatients', 'db:searchPatient', 'db:searchPatients',
+      'db:saveBill', 'db:getBills',
+      'db:saveReport', 'db:getReports',
+      'db:saveXray', 'db:getXrays', 'db:copyXrayImage',
+      'db:saveFractureCase', 'db:getFractureCases', 'db:updateFractureCase',
+      'db:getSettings', 'db:saveSettings',
+      'db:getPending', 'db:clearPending', 'db:markSynced', 'db:syncNow',
+      'app:isOnline', 'db:getStats',
+      'shell:openFolder', 'shell:print',
+      'app:getBackupDir', 'app:getXraysDir',
+      'backup:getDir', 'backup:writeJson', 'backup:writeBinary', 'backup:list', 'backup:openFolder',
+      'log:rendererError', 'log:getDir', 'log:getSnapshotDir', 'log:openFolder',
+      'app:sendSMS',
+      'app:runDiagnostics', 'app:nuclearIndexedDBReset',
+      'app:getVersion', 'app:checkForUpdate', 'app:downloadUpdate', 'app:installUpdate', 'app:openExternal',
+    ];
+
+    // ipcMain._events se registered handlers nikalo
+    const registeredRaw = ipcMain.eventNames ? ipcMain.eventNames() : [];
+    const registered = new Set(registeredRaw.map(e => String(e).replace(/^ipc-/, '')));
+
+    let ipcOk = 0; let ipcMissing = [];
+    for (const ch of requiredChannels) {
+      // electron ipcMain internally uses handle-${channel} or direct channel
+      // Simple check: try to find if it's registered
+      if (registered.has(ch) || registered.has(`handle:${ch}`) || registered.has(`-${ch}`)) {
+        ipcOk++;
+      } else {
+        // Secondary check — ipcMain._events object
+        const events = ipcMain['_events'] || {};
+        if (events[ch] || events[`handle:${ch}`]) {
+          ipcOk++;
+        } else {
+          ipcMissing.push(ch);
+        }
+      }
+    }
+
+    if (ipcMissing.length === 0) {
+      lines.push(ok(`Sabhi ${requiredChannels.length} IPC handlers registered hain`));
+    } else {
+      // Some handlers may not be detectable via eventNames - do a soft warn only
+      lines.push(warn(`IPC check: ${requiredChannels.length - ipcMissing.length} confirmed, ${ipcMissing.length} unverified`));
+      lines.push(info(`  Unverified channels (ye actually registered ho sakte hain):`));
+      for (const ch of ipcMissing.slice(0, 5)) {
+        lines.push(info(`    • ${ch}`));
+      }
+      if (ipcMissing.length > 5) lines.push(info(`    ...aur ${ipcMissing.length - 5} channels`));
+    }
+
+    // Known missing check — log file se "No handler registered" error dhundho
+    const logDir2 = path.join(BACKUP_DIR, 'logs');
+    if (fs.existsSync(logDir2)) {
+      const logFiles2 = fs.readdirSync(logDir2).filter(f => f.endsWith('.log')).sort().slice(-3);
+      const missingHandlers = new Set();
+      for (const lf of logFiles2) {
+        const content = fs.readFileSync(path.join(logDir2, lf), 'utf-8');
+        const matches = content.matchAll(/No handler registered for '([^']+)'/g);
+        for (const m of matches) missingHandlers.add(m[1]);
+      }
+      if (missingHandlers.size > 0) {
+        for (const ch of missingHandlers) {
+          lines.push(err(`IPC MISSING (log se mila): '${ch}' — main.js mein ipcMain.handle('${ch}', ...) add karo`));
+        }
+      }
+    }
+  } catch (e) {
+    lines.push(warn(`IPC check skip: ${e.message}`));
+  }
+
+  // ── 10. SMART LOG ANALYSIS — DEEP SCAN ──────────────────────────────────
+  // Ye section log files ko deeply scan karta hai:
+  // - Kaunse errors baar baar aa rahe hain (top errors)
+  // - Kaunsi file/function se aa rahe hain
+  // - Kya impact hoga system par
+  // - Fix kaise karein
+  lines.push('');
+  lines.push('[10] SMART LOG ANALYSIS — DEEP ERROR SCAN');
+  lines.push(sep);
+
+  try {
+    const logDir3 = path.join(BACKUP_DIR, 'logs');
+    if (!fs.existsSync(logDir3)) {
+      lines.push(warn('Log folder nahi mila — abhi tak koi log nahi bani'));
+    } else {
+      const logFiles3 = fs.readdirSync(logDir3)
+        .filter(f => f.endsWith('.log'))
+        .sort()
+        .slice(-3) // last 3 days
+        .reverse();
+
+      if (!logFiles3.length) {
+        lines.push(info('Koi log file nahi mili abhi tak'));
+      } else {
+        // ── Known error patterns with diagnosis ──────────────────────────
+        // Har pattern mein: regex, error name, source file, root cause, fix
+        const knownPatterns = [
+          {
+            regex: /queueGetAll retry bhi fail|queueGetAll fail.*DB corrupt/g,
+            name: 'IndexedDB queueGetAll Infinite Loop',
+            source: 'src/lib/offlineDb.ts → queueGetAll()',
+            rootCause: 'IndexedDB UnknownError pe deleteDb+openDb loop ban raha tha. Har 30s mein runSync() ne 6+ baar queueGetAll call ki, corrupt DB ne baar baar fail kiya, loop mein 9000+ errors/day flood ho gaye.',
+            impact: '🔴 CRITICAL — Log files 5MB+ ho gayi, app slow ho sakti hai, real errors chhup gayi',
+            fix: 'FILE: src/lib/offlineDb.ts\nFIX: queueGetAll mein _queueDbResetDone flag add karo — sirf pehli baar deleteDb karo, baad mein [] return karo bina log flood kiye.\nSTATUS: ✅ offlineDb_fixed.ts mein fix ready hai — deploy karo',
+          },
+          {
+            regex: /No handler registered for 'log:getSnapshotDir'/g,
+            name: 'Missing IPC Handler: log:getSnapshotDir',
+            source: 'preload.js → getSafetySnapshotDir() → ipcRenderer.invoke(\'log:getSnapshotDir\')',
+            rootCause: 'preload.js mein getSafetySnapshotDir() ne \'log:getSnapshotDir\' channel call kiya, lekin electron-main.cjs mein ye handler register nahi tha. main.js mein handler tha, electron-main.cjs mein nahi.',
+            impact: '🟡 MEDIUM — Diagnostic tool mein snapshot path nahi aata, lekin app ka core kaam nahi rukta',
+            fix: 'FILE: electron-main.cjs\nFIX: ipcMain.handle(\'log:getSnapshotDir\', () => SAFETY_SNAPSHOT_ROOT) add karo\nSTATUS: ✅ main.js mein pehle se fix hai — electron-main.cjs mein bhi same handler add karo',
+          },
+          {
+            regex: /UnknownError: Internal error/g,
+            name: 'IndexedDB UnknownError: Internal error',
+            source: 'Electron IndexedDB (Chromium) → balaji_ortho_offline_db',
+            rootCause: 'Ye error tab aata hai jab IndexedDB ki internal state corrupt ho jaati hai — aksar abrupt shutdown, power cut, ya Electron version change se. DB_VERSION v3 bump ke baad purani DB delete honi chahiye thi, lekin agar app crash ho gayi to nahi hui.',
+            impact: '🔴 CRITICAL — Offline data access fail, sync queue nahi chali, pending records cloud tak nahi gaye',
+            fix: 'FILE: src/lib/offlineDb.ts\nFIX 1 (automatic): DB_VERSION = 3 pehle se hai — naya fresh build install karo, IndexedDB auto-reset hogi\nFIX 2 (manual): Settings → "Nuclear IndexedDB Reset" button dabao\nFIX 3 (permanent): offlineDb_fixed.ts deploy karo jisme error flood band hai',
+          },
+          {
+            regex: /Supabase insert fail|insert.*failed.*table/gi,
+            name: 'Supabase Insert Failure',
+            source: 'src/lib/offlineSync.ts → applyMutation() → supabase.insert()',
+            rootCause: 'IndexedDB queue se mutations Supabase mein sync karte waqt fail hua. Possible causes: (1) _pendingSync/_localOnly fields payload mein the, (2) network timeout, (3) Supabase RLS policy block.',
+            impact: '🟡 MEDIUM — Data offline safe hai, lekin cloud sync pending rehta hai',
+            fix: 'FILE: src/lib/offlineSync.ts\nCHECK: delete payload._pendingSync aur delete payload._localOnly already hai line ~200\nACTION: Pending items ko Settings → Stuck Bills Fix se clear karo',
+          },
+          {
+            regex: /render-process-gone|RENDERER CRASH/gi,
+            name: 'Renderer Process Crash',
+            source: 'Electron BrowserWindow → webContents',
+            rootCause: 'React/renderer process crash ho gayi — memory overflow ya unhandled JS error',
+            impact: '🔴 CRITICAL — White screen, user ko app restart karni padti hai',
+            fix: 'Check memory usage. Agar 500MB+ ho to memory leak hai.\nCheck console errors app start par.',
+          },
+          {
+            regex: /PENDING_PARENT_INSERT/g,
+            name: 'Pending Parent Insert (Sync Order Issue)',
+            source: 'src/lib/offlineSync.ts → applyMutation()',
+            rootCause: 'Update mutation chal raha hai lekin parent insert abhi sync nahi hua — tempId (local_xxx) abhi real ID se replace nahi hua',
+            impact: '🟡 LOW-MEDIUM — Sync queue thodi der delay hoti hai, lekin eventually resolve hota hai',
+            fix: 'FILE: src/lib/offlineSync.ts\nSTATUS: Code already handle karta hai — "continue" se skip hota hai\nIF STUCK: Settings → Stuck Bills Fix → Clear old stuck items',
+          },
+          {
+            regex: /Unhandled Promise Rejection/g,
+            name: 'Unhandled Promise Rejection',
+            source: 'src/lib/clientLogger.ts → window.unhandledrejection',
+            rootCause: 'Kisi async function mein try/catch nahi tha ya Promise reject hua aur catch nahi hua',
+            impact: '🟡 MEDIUM — Depends on which promise failed',
+            fix: 'Upar "Last Error" detail dekho — kaunse file/function se aa raha hai wo batayega',
+          },
+        ];
+
+        // ── Scan each log file ──────────────────────────────────────────
+        const foundIssues = new Map(); // pattern name -> { count, files, samples }
+
+        for (const lf of logFiles3) {
+          const lPath = path.join(logDir3, lf);
+          let content = '';
+          try { content = fs.readFileSync(lPath, 'utf-8'); } catch { continue; }
+
+          for (const pattern of knownPatterns) {
+            const matches = content.match(pattern.regex) || [];
+            if (matches.length > 0) {
+              if (!foundIssues.has(pattern.name)) {
+                foundIssues.set(pattern.name, { pattern, count: 0, files: [], sample: '' });
+              }
+              const issue = foundIssues.get(pattern.name);
+              issue.count += matches.length;
+              issue.files.push(`${lf} (${matches.length}x)`);
+
+              // Sample — context ke saath first occurrence nikalo
+              if (!issue.sample) {
+                const idx = content.search(pattern.regex);
+                if (idx >= 0) {
+                  issue.sample = content.slice(Math.max(0, idx - 50), idx + 300)
+                    .split('\n').slice(0, 6).join('\n').trim();
+                }
+              }
+            }
+          }
+
+          // ── Unknown errors — patterns ke bahar jo ERROR hain ──────────
+          // Ek top-5 unknown errors list banaao
+        }
+
+        if (foundIssues.size === 0) {
+          lines.push(ok('Log files mein koi known issue nahi mila — sab theek lag raha hai!'));
+        } else {
+          lines.push(info(`${foundIssues.size} issues mili hain log files mein:`));
+          let issueNum = 1;
+
+          for (const [name, issue] of foundIssues) {
+            const p = issue.pattern;
+            lines.push('');
+            lines.push(`  ┌─ ISSUE #${issueNum++}: ${name}`);
+            lines.push(`  │  Occurrences : ${issue.count}x (${issue.files.join(', ')})`);
+            lines.push(`  │  Source File : ${p.source}`);
+            lines.push(`  │  Root Cause  : ${p.rootCause}`);
+            lines.push(`  │  Impact      : ${p.impact}`);
+            lines.push(`  │  Fix`);
+            for (const fixLine of p.fix.split('\n')) {
+              lines.push(`  │    ${fixLine}`);
+            }
+            if (issue.sample) {
+              lines.push(`  │  Sample Log  :`);
+              for (const sl of issue.sample.split('\n').slice(0, 4)) {
+                lines.push(`  │    ${sl.trim()}`);
+              }
+            }
+            lines.push(`  └${'─'.repeat(66)}`);
+          }
+        }
+
+        // ── Unknown / uncategorized errors ──────────────────────────────
+        lines.push('');
+        lines.push('  — Uncategorized Errors (top 5 by frequency) —');
+        try {
+          const allErrorLines = [];
+          for (const lf of logFiles3) {
+            const content = fs.readFileSync(path.join(logDir3, lf), 'utf-8');
+            // ERROR blocks nikalo
+            const blocks = content.split('─'.repeat(20));
+            for (const block of blocks) {
+              if (block.includes('[ERROR]') && !knownPatterns.some(p => block.match(p.regex))) {
+                // Short summary nikalo
+                const msgLine = block.split('\n').find(l => l.includes('Message:') || l.includes('[ERROR]'));
+                if (msgLine) allErrorLines.push(msgLine.trim().slice(0, 120));
+              }
+            }
+          }
+
+          // Frequency count
+          const freq = {};
+          for (const line of allErrorLines) {
+            const key = line.replace(/\d+/g, 'N').slice(0, 80); // normalize numbers
+            freq[key] = (freq[key] || 0) + 1;
+          }
+          const topUnknown = Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0, 5);
+
+          if (topUnknown.length === 0) {
+            lines.push(ok('  Koi uncategorized error nahi mili'));
+          } else {
+            for (const [msg, count] of topUnknown) {
+              lines.push(warn(`  ${count}x — ${msg}`));
+            }
+          }
+        } catch (e2) {
+          lines.push(info(`  Unknown error scan fail: ${e2.message}`));
+        }
+      }
+    }
+  } catch (e) {
+    lines.push(err(`Smart log analysis fail: ${e.message}`));
+  }
 
   // ── FINAL SUMMARY ────────────────────────────────────────────────────────
   const fullText  = lines.join('\n');
@@ -923,7 +1193,7 @@ ipcMain.handle('app:runDiagnostics', async () => {
     `❌ Errors  : ${errCount}`,
     '',
     errCount > 0
-      ? '🚨 KUCH SERIOUS ERRORS HAIN — Upar dekho aur fix karo'
+      ? '🚨 CRITICAL ERRORS HAIN — Section [10] mein fix details dekho'
       : warnCount > 0
         ? '⚠️  Kuch warnings hain — review karo'
         : '🎉 Sab theek lag raha hai!',
