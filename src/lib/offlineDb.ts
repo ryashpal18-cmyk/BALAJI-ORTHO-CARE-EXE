@@ -26,6 +26,26 @@ export type QueuedMutation = {
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
+// ── DB Error Rate Limiter ────────────────────────────────────────────────
+// IndexedDB UnknownError aane par ye counter track karta hai.
+// 3 se zyada baar fail ho to LOG band kar do (lekin [] return karte raho)
+// Warna ek corrupt DB ek din mein 9000+ errors flood kar deta hai.
+let _dbConsecutiveErrors = 0;
+let _dbSilenced = false;
+function _dbErrorLog(msg: string, err?: unknown) {
+  _dbConsecutiveErrors++;
+  if (_dbConsecutiveErrors <= 3) {
+    cLog.error("indexeddb", msg, err);
+  } else if (!_dbSilenced) {
+    cLog.warn("indexeddb", `IndexedDB baar baar fail ho rahi hai (${_dbConsecutiveErrors}x) — logs mute kar diye, app chal raha hai`);
+    _dbSilenced = true;
+  }
+}
+function _dbReset() {
+  _dbConsecutiveErrors = 0;
+  _dbSilenced = false;
+}
+
 // ✅ Corrupt DB ko delete karke fresh banata hai
 function deleteDb(): Promise<void> {
   return new Promise((resolve) => {
@@ -215,15 +235,34 @@ export async function queueAdd(mutation: Omit<QueuedMutation, "id" | "createdAt"
   }
 }
 
+// ── queueGetAll fix: IndexedDB UnknownError pe infinite error loop hota tha ──
+// Problem: har 30s mein runSync -> queueGetAll fail -> deleteDb -> openDb -> loop
+// Result: 9000+ errors/day log flood
+// Fix: 
+//   1. Pehli baar fail hone par deleteDb + fresh open karo (original behavior)
+//   2. Agar fresh DB bhi fail ho to SIRF [] return karo — aur doosri baar deleteDb mat karo
+//   3. Rate limiter se repeated logging band karo
+let _queueDbResetDone = false; // Sirf ek baar nuclear reset allow karo per session
+
 export async function queueGetAll(): Promise<QueuedMutation[]> {
   try {
     const db = await openDb();
     const t  = tx(db, [QUEUE_STORE], "readonly");
-    return reqToPromise(t.objectStore(QUEUE_STORE).getAll());
+    const result = await reqToPromise<QueuedMutation[]>(t.objectStore(QUEUE_STORE).getAll());
+    // Success hone par error counter reset karo
+    _dbReset();
+    return result;
   } catch (err) {
-    cLog.error("queue", "queueGetAll fail — DB corrupt lag rahi hai, delete karke fresh start", err);
+    _dbErrorLog("queueGetAll fail — DB problem", err);
 
-    // ── Nuclear fix: corrupt DB delete karo, fresh banaao ──
+    // ── Sirf pehli baar nuclear reset karo ──
+    // Agar pehle se reset ho chuka hai to seedha [] return karo
+    // (Warna infinite delete+open+fail loop banta hai)
+    if (_queueDbResetDone) {
+      return []; // silent return — app chal raha hai
+    }
+
+    _queueDbResetDone = true;
     dbPromise = null;
     try {
       await deleteDb();
@@ -232,9 +271,11 @@ export async function queueGetAll(): Promise<QueuedMutation[]> {
       const t2  = tx(db2, [QUEUE_STORE], "readonly");
       const result = await reqToPromise<QueuedMutation[]>(t2.objectStore(QUEUE_STORE).getAll());
       cLog.info("queue", "Fresh DB se queueGetAll success — queue empty se start");
+      _dbReset();
+      _queueDbResetDone = false; // Reset flag so next session can try again if needed
       return result;
     } catch (err2) {
-      cLog.error("queue", "Fresh DB bhi fail — indexedDB environment problem", err2);
+      _dbErrorLog("Fresh DB bhi fail — IndexedDB environment problem, empty return kar raha hai", err2);
       return []; // app crash mat karo — empty return karo
     }
   }
