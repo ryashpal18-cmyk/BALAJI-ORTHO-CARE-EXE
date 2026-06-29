@@ -28,6 +28,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [fading, setFading]     = useState(false);
   const navigate = useNavigate();
   const wrapRef  = useRef<HTMLDivElement>(null);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine); // ✅ Offline banner
 
   const { data: followups } = useFollowupsAround();
   const t        = todayStr();
@@ -38,6 +39,17 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const notifCount = todayFu.length + missedFu.length;
 
   // ── Background auto-slide every 6 seconds ──
+  useEffect(() => {
+    const handleOnline  = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener("online",  handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online",  handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
   useEffect(() => {
     const interval = setInterval(() => {
       setFading(true);
@@ -346,6 +358,32 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               pointerEvents: "none", zIndex: 0,
             }} />
             <div style={{ position: "relative", zIndex: 1 }}>
+              {/* ✅ Offline Banner — internet nahi hai to clearly dikhe */}
+              {isOffline && (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: "10px",
+                  padding: "10px 18px", marginBottom: "16px",
+                  background: "linear-gradient(135deg, #1e3a5f, #1e4d8c)",
+                  borderRadius: "12px", border: "1.5px solid #3b82f6",
+                  color: "#fff", fontSize: "13px", fontWeight: 500,
+                  boxShadow: "0 2px 12px rgba(59,130,246,0.3)",
+                }}>
+                  <span style={{ fontSize: "18px" }}>📡</span>
+                  <div style={{ flex: 1 }}>
+                    <span style={{ fontWeight: 700 }}>Offline Mode — </span>
+                    Saara data PC mein save hai, kaam jaari hai.
+                    <span style={{ color: "#93c5fd", fontSize: "12px", marginLeft: "8px" }}>
+                      Internet aate hi sab kuch automatically sync ho jaayega.
+                    </span>
+                  </div>
+                  <div style={{
+                    width: "8px", height: "8px", borderRadius: "50%",
+                    background: "#f87171", flexShrink: 0,
+                    boxShadow: "0 0 6px #f87171",
+                    animation: "pulse 2s infinite",
+                  }} />
+                </div>
+              )}
               {children}
             </div>
           </main>
