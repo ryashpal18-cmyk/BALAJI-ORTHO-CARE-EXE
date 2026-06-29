@@ -89,7 +89,7 @@ export async function downloadAllDataToCache(): Promise<void> {
       .order("name");
     if (patients && patients.length > 0) {
       await cacheReplaceTable("patients", patients);
-      console.info(`${patients.length} patients PC mein save ho gaye`);
+      cLog.info("sync", `${patients.length} patients PC mein save ho gaye`);
     }
 
     // 2. Billing — patient naam ke saath (joined)
@@ -99,7 +99,7 @@ export async function downloadAllDataToCache(): Promise<void> {
       .order("created_at", { ascending: false });
     if (billing && billing.length > 0) {
       await cacheReplaceTable("billing", billing);
-      console.info(`${billing.length} bills PC mein save ho gaye`);
+      cLog.info("sync", `${billing.length} bills PC mein save ho gaye`);
     }
 
     // 3. Appointments
@@ -109,7 +109,7 @@ export async function downloadAllDataToCache(): Promise<void> {
       .order("date", { ascending: false });
     if (appointments && appointments.length > 0) {
       await cacheReplaceTable("appointments", appointments);
-      console.info(`${appointments.length} appointments PC mein save ho gaye`);
+      cLog.info("sync", `${appointments.length} appointments PC mein save ho gaye`);
     }
 
     // 4. Prescriptions
@@ -120,7 +120,7 @@ export async function downloadAllDataToCache(): Promise<void> {
       .limit(500);
     if (prescriptions && prescriptions.length > 0) {
       await cacheReplaceTable("prescriptions", prescriptions);
-      console.info(`${prescriptions.length} prescriptions PC mein save ho gaye`);
+      cLog.info("sync", `${prescriptions.length} prescriptions PC mein save ho gaye`);
     }
 
     // 5. Physiotherapy sessions
@@ -131,7 +131,7 @@ export async function downloadAllDataToCache(): Promise<void> {
       .limit(500);
     if (physio && physio.length > 0) {
       await cacheReplaceTable("physiotherapy_sessions", physio);
-      console.info(`${physio.length} physio sessions PC mein save ho gaye`);
+      cLog.info("sync", `${physio.length} physio sessions PC mein save ho gaye`);
     }
 
     // 6. Beds
@@ -141,12 +141,55 @@ export async function downloadAllDataToCache(): Promise<void> {
       .order("bed_number", { ascending: true });
     if (beds && beds.length > 0) {
       await cacheReplaceTable("beds", beds);
-      console.info(`${beds.length} beds PC mein save ho gaye`);
+      cLog.info("sync", `${beds.length} beds PC mein save ho gaye`);
+    }
+
+    // 7. ✅ Reports (X-Ray reports) — pehle missing tha, offline mein blank dikhta tha
+    const { data: reports } = await supabase
+      .from("xray_reports")
+      .select("*, patients(name, mobile)")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (reports && reports.length > 0) {
+      await cacheReplaceTable("xray_reports", reports);
+      cLog.info("sync", `${reports.length} X-ray reports PC mein save ho gaye`);
+    }
+
+    // 8. ✅ Fracture cases — Ortho page offline ke liye
+    const { data: fractureCases } = await supabase
+      .from("fracture_cases")
+      .select("*, patients(name, mobile, age, gender)")
+      .order("created_at", { ascending: false })
+      .limit(300);
+    if (fractureCases && fractureCases.length > 0) {
+      await cacheReplaceTable("fracture_cases", fractureCases);
+      cLog.info("sync", `${fractureCases.length} fracture cases PC mein save ho gaye`);
+    }
+
+    // 9. ✅ Fracture X-rays — Ortho X-ray viewer offline ke liye
+    const { data: fractureXrays } = await supabase
+      .from("fracture_xrays" as any)
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (fractureXrays && fractureXrays.length > 0) {
+      await cacheReplaceTable("fracture_xrays", fractureXrays);
+      cLog.info("sync", `${fractureXrays.length} fracture X-rays PC mein save ho gaye`);
+    }
+
+    // 10. ✅ Hospitals — referral list offline ke liye
+    const { data: hospitals } = await supabase
+      .from("hospitals")
+      .select("*")
+      .order("name");
+    if (hospitals && hospitals.length > 0) {
+      await cacheReplaceTable("hospitals", hospitals);
+      cLog.info("sync", `${hospitals.length} hospitals PC mein save ho gaye`);
     }
 
     cLog.info("sync", "✅ Saara data PC mein save ho gaya — ab offline bhi kaam karega");
   } catch (err) {
-    cLog.error("sync", "Data download mein error aaya");
+    cLog.error("sync", "Data download mein error aaya", err);
   } finally {
     downloadInProgress = false;
   }
@@ -207,15 +250,32 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
 
   if (m.op === "sms") {
     const { mobile, message, patientName, smsType } = m.payload;
-    console.info(`SMS bhej raha hai — patient: ${patientName}`);
-    const res = await fetch(import.meta.env.VITE_TEXTBEE_API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_TEXTBEE_API_KEY },
-      body: JSON.stringify({ deviceId: import.meta.env.VITE_TEXTBEE_DEVICE_ID, recipients: [mobile], message }),
-    });
-    if (!res.ok) { console.error(`SMS fail (${res.status})`); throw new Error(`SMS gateway error (${res.status})`); }
+    cLog.info("sync", `SMS bhej raha hai — patient: ${patientName}, type: ${smsType}`);
+
+    // ✅ Electron IPC use karo — direct fetch() Electron mein CORS fail karta hai
+    const electron = (window as any).electron;
+    const apiUrl   = import.meta.env.VITE_TEXTBEE_API_URL;
+    const apiKey   = import.meta.env.VITE_TEXTBEE_API_KEY;
+    const deviceId = import.meta.env.VITE_TEXTBEE_DEVICE_ID;
+
+    if (!electron?.sendSMS) {
+      throw new Error("Electron SMS handler nahi mila — retry hoga");
+    }
+
+    const result = await electron.sendSMS({ apiUrl, apiKey, deviceId, mobile, message });
+    if (!result?.ok) {
+      throw new Error(result?.error || "SMS gateway fail");
+    }
+
+    // Log update karo Supabase mein
     try {
-      await supabase.from("sms_logs" as any).insert({ patient_name: patientName, mobile, message, status: "sent", sms_type: smsType } as any);
+      await supabase.from("sms_logs" as any).insert({
+        patient_name: patientName,
+        mobile,
+        message,
+        status:   "sent",
+        sms_type: smsType,
+      } as any);
     } catch { cLog.warn("sync", "SMS gaya par log save nahi hua"); }
     return;
   }
@@ -294,20 +354,34 @@ export function startAutoSync() {
   autoSyncStarted = true;
   cLog.info("sync", "Auto-sync engine start");
 
-  // App start hone ke 3 second baad pehle data download karo
+  // ── App start hone ke 3 second baad ──────────────────────────────────────
   setTimeout(async () => {
     const online = typeof navigator !== "undefined" ? navigator.onLine : false;
     if (online) {
-      cLog.info("sync", "App start — pehle data download ho raha hai");
+      cLog.info("sync", "App start — pehle data download, phir pending sync");
       await downloadAllDataToCache();
       await runSync();
+    } else {
+      cLog.info("sync", "App start — offline hai, cache se kaam chalega");
     }
   }, 3000);
 
-  // Har 30 second mein sync
+  // ── Har 30 second mein sync check ────────────────────────────────────────
   setInterval(async () => {
     const online = await isOnline();
-    if (online !== lastKnownOnline) emitNetworkChange(online);
+    const wasOffline = !lastKnownOnline;
+
+    if (online !== lastKnownOnline) {
+      emitNetworkChange(online);
+      if (online && wasOffline) {
+        // ✅ Internet wapas aaya — pehle poora data download karo, phir queue sync karo
+        cLog.info("sync", "🌐 Internet wapas aa gayi — data + queue sync shuru");
+        await downloadAllDataToCache();
+        await runSync();
+      }
+    }
+
+    // Online hai to har 30 sec mein pending queue sync karo
     if (online) runSync();
   }, 30000);
 }
