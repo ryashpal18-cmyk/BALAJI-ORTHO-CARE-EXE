@@ -187,6 +187,60 @@ export async function downloadAllDataToCache(): Promise<void> {
       cLog.info("sync", `${hospitals.length} hospitals PC mein save ho gaye`);
     }
 
+    // 11. ✅ Stock movements — Inventory page offline ke liye
+    const { data: stockMoves } = await supabase
+      .from("stock_movements" as any)
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (stockMoves && stockMoves.length > 0) {
+      await cacheReplaceTable("stock_movements", stockMoves);
+      cLog.info("sync", `${stockMoves.length} stock movements PC mein save ho gaye`);
+    }
+
+    // 12. ✅ Audit logs — AuditLog page offline ke liye
+    const { data: auditLogs } = await supabase
+      .from("audit_logs" as any)
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (auditLogs && auditLogs.length > 0) {
+      await cacheReplaceTable("audit_logs", auditLogs);
+      cLog.info("sync", `${auditLogs.length} audit logs PC mein save ho gaye`);
+    }
+
+    // 13. ✅ Insurance claims — InsuranceClaims page offline ke liye
+    const { data: insuranceClaims } = await supabase
+      .from("insurance_claims" as any)
+      .select("*, patients(name, mobile)")
+      .order("created_at", { ascending: false })
+      .limit(300);
+    if (insuranceClaims && insuranceClaims.length > 0) {
+      await cacheReplaceTable("insurance_claims", insuranceClaims);
+      cLog.info("sync", `${insuranceClaims.length} insurance claims PC mein save ho gaye`);
+    }
+
+    // 14. ✅ Branches — Branches page offline ke liye
+    const { data: branches } = await supabase
+      .from("branches" as any)
+      .select("*")
+      .order("name");
+    if (branches && branches.length > 0) {
+      await cacheReplaceTable("branches", branches);
+      cLog.info("sync", `${branches.length} branches PC mein save ho gaye`);
+    }
+
+    // 15. ✅ Booking requests — BookingRequests page offline ke liye
+    const { data: bookingRequests } = await supabase
+      .from("booking_requests" as any)
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(300);
+    if (bookingRequests && bookingRequests.length > 0) {
+      await cacheReplaceTable("booking_requests", bookingRequests);
+      cLog.info("sync", `${bookingRequests.length} booking requests PC mein save ho gaye`);
+    }
+
     cLog.info("sync", "✅ Saara data PC mein save ho gaya — ab offline bhi kaam karega");
   } catch (err) {
     cLog.error("sync", "Data download mein error aaya", err);
