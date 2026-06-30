@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { supabase } from "@/integrations/supabase/client";
+import { isOnline } from "@/lib/offlineSync";
+import { cacheGetAll } from "@/lib/offlineDb";
 import { useNavigate } from "react-router-dom";
 import { useFollowupsAround } from "@/hooks/useOrtho";
 import { SyncStatusBadge } from "@/components/SyncStatusBadge";
@@ -73,12 +75,36 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     if (query.trim().length < 2) { setResults([]); setShowDrop(false); return; }
     setLoading(true);
     const timer = setTimeout(async () => {
-      const { data } = await supabase
-        .from("patients")
-        .select("id, name, mobile, age, gender")
-        .ilike("name", `%${query}%`)
-        .limit(8);
-      setResults(data || []);
+      const online = await isOnline();
+      if (online) {
+        try {
+          const { data, error } = await supabase
+            .from("patients")
+            .select("id, name, mobile, age, gender")
+            .ilike("name", `%${query}%`)
+            .limit(8);
+          if (error) throw error;
+          setResults(data || []);
+        } catch {
+          // online query fail ho gayi (net flaky) — cache se search karo
+          const all = await cacheGetAll("patients");
+          const q = query.toLowerCase();
+          setResults(
+            (all as any[])
+              .filter((p) => (p.name || "").toLowerCase().includes(q) || (p.mobile || "").includes(query))
+              .slice(0, 8)
+          );
+        }
+      } else {
+        // ✅ Offline — local cache (PC pe save hua data) mein search karo
+        const all = await cacheGetAll("patients");
+        const q = query.toLowerCase();
+        setResults(
+          (all as any[])
+            .filter((p) => (p.name || "").toLowerCase().includes(q) || (p.mobile || "").includes(query))
+            .slice(0, 8)
+        );
+      }
       setShowDrop(true);
       setLoading(false);
     }, 300);

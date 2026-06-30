@@ -1,7 +1,8 @@
 import {
   LayoutDashboard, BedDouble, Calendar, Receipt, Activity,
   FileText, BarChart3, Settings, Stethoscope, LogOut,
-  MessageCircle, MessageSquare, Pill, Bone, ClipboardList,
+  MessageCircle, MessageSquare, Pill, Bone, ClipboardList, RefreshCw, FilePlus2, IndianRupee,
+  Package, ShieldCheck, ShieldPlus, Building2, CalendarCheck,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import logo from "@/assets/logo.png";
@@ -13,22 +14,34 @@ import {
   SidebarFooter, SidebarHeader, useSidebar,
 } from "@/components/ui/sidebar";
 import { getCurrentRole, getCurrentPerms } from "@/lib/appConfig";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { BranchSelector } from "@/components/BranchSelector";
 
 const ALL_MENU_ITEMS = [
   { title: "Dashboard",           url: "/dashboard",           icon: LayoutDashboard },
   { title: "OPD",                 url: "/opd",                 icon: Stethoscope },
   { title: "IPD / Beds",          url: "/ipd",                 icon: BedDouble },
   { title: "Appointments",        url: "/appointments",        icon: Calendar },
+  { title: "Prescription Pad",    url: "/prescription",        icon: FilePlus2 },
   { title: "Billing",             url: "/billing",             icon: Receipt },
+  { title: "Due Amount",          url: "/due-amount",          icon: IndianRupee },
   { title: "Cash Tally",          url: "/cash-tally",          icon: Receipt },
   { title: "Medicine Master",     url: "/medicine-master",     icon: Pill },
+  { title: "Inventory / Stock",   url: "/inventory",           icon: Package },
   { title: "Patient Medicine",    url: "/patient-medicine",    icon: ClipboardList },
   { title: "Medicine Commission", url: "/medicine-commission", icon: Pill },
   { title: "Physiotherapy",       url: "/physiotherapy",       icon: Activity },
   { title: "Ortho / Fracture",    url: "/ortho",               icon: Bone },
+  { title: "Reports / X-Ray",     url: "/reports",             icon: FileText },
+  { title: "PlasterSync",         url: "/plaster-sync",        icon: RefreshCw },
   { title: "Analytics",           url: "/analytics",           icon: BarChart3 },
+  { title: "Revenue Dashboard",   url: "/revenue-dashboard",   icon: IndianRupee },
   { title: "WhatsApp",            url: "/whatsapp",            icon: MessageCircle },
   { title: "SMS Logs",            url: "/sms-logs",            icon: MessageSquare },
+  { title: "Insurance Claims",    url: "/insurance-claims",    icon: ShieldPlus },
+  { title: "Booking Requests",    url: "/booking-requests",    icon: CalendarCheck },
+  { title: "Branches",            url: "/branches",            icon: Building2 },
+  { title: "Audit Log",           url: "/audit-log",           icon: ShieldCheck },
   { title: "Settings",            url: "/settings",            icon: Settings },
 ];
 
@@ -41,11 +54,10 @@ export function AppSidebar() {
   const perms      = getCurrentPerms();
   const isAdmin    = role === "admin";
 
-  // Filter menu based on role
   const menuItems = ALL_MENU_ITEMS.filter(item => {
-    if (isAdmin) return true;           // Admin sees everything
-    if (item.url === "/settings") return false; // Staff can't access settings
-    return perms.includes(item.url);    // Staff sees only allowed pages
+    if (isAdmin) return true;
+    if (item.url === "/settings" || item.url === "/audit-log" || item.url === "/branches") return false;
+    return perms.includes(item.url);
   });
 
   const handleLogout = async () => {
@@ -62,7 +74,6 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
-      {/* ── Header ── */}
       <SidebarHeader style={{ padding: "0", background: "transparent" }}>
         <div style={{
           padding: collapsed ? "16px 10px" : "16px",
@@ -94,7 +105,8 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
 
-      {/* ── Menu ── */}
+      <BranchSelector collapsed={collapsed} />
+
       <SidebarContent style={{ padding: "8px 0" }}>
         <SidebarGroup>
           {!collapsed && (
@@ -149,7 +161,6 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      {/* ── Footer ── */}
       <SidebarFooter style={{ padding: "8px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
         {!collapsed && (
           <div style={{
@@ -165,6 +176,9 @@ export function AppSidebar() {
           </div>
         )}
         <SidebarMenu>
+          <SidebarMenuItem>
+            <ThemeToggle collapsed={collapsed} />
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={handleLogout}
