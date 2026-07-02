@@ -92,10 +92,27 @@ function openDb(): Promise<IDBDatabase> {
       });
 
     try {
-      const db = await tryOpen();
-      resolve(db);
+      // ✅ Pehle 2 baar chhoti si delay ke saath retry karo — "backing store"
+      // wali error aksar temporary hoti hai (antivirus scan chal raha, ya
+      // pichli process ne file abhi release nahi ki). Delete/reset sirf tab
+      // karo jab genuinely 3 baar try karke bhi na khule.
+      let db: IDBDatabase | null = null;
+      let lastErr: unknown = null;
+      for (let attempt = 1; attempt <= 3 && !db; attempt++) {
+        try {
+          db = await tryOpen();
+        } catch (e) {
+          lastErr = e;
+          if (attempt < 3) {
+            cLog.warn("indexeddb", `DB open attempt ${attempt} fail — ${800 * attempt}ms baad retry`);
+            await new Promise((r) => setTimeout(r, 800 * attempt));
+          }
+        }
+      }
+      if (db) { resolve(db); return; }
+      throw lastErr;
     } catch (err) {
-      cLog.error("indexeddb", "Database kholne mein fail — corrupt DB delete karke retry", err);
+      cLog.error("indexeddb", "3 baar try karne ke baad bhi DB nahi khuli — ab corrupt maan ke delete + fresh banayenge", err);
       dbPromise = null;
       try {
         await deleteDb();
@@ -130,15 +147,28 @@ export async function cacheGetAll(table: string): Promise<any[]> {
     const t     = tx(db, [CACHE_STORE], "readonly");
     const all: any[] = await reqToPromise(t.objectStore(CACHE_STORE).getAll());
     const prefix = `${table}::`;
+    _dbReset();
     return all.filter((r) => typeof r._key === "string" && r._key.startsWith(prefix)).map((r) => r.data);
   } catch (err) {
-    cLog.error("indexeddb", `${table} cache read fail — DB corrupt, delete + reset`, err);
+    // 🚨 CRITICAL FIX: pehle yahan poora DB delete kar diya jaata tha har read
+    // error par — isse har chhoti si glitch pe SAARA offline data (patients,
+    // bills, sab) permanently khatam ho jaata tha. Ab hum sirf DOBARA try
+    // karte hain (dbPromise reset karke), aur delete SIRF tab jab openDb()
+    // khud fail ho (wo already apni jagah handle karta hai). Read fail hone
+    // par purana cached data kabhi delete nahi hota.
+    _dbErrorLog(`${table} cache read fail — retry kar rahe hain (data delete nahi karenge)`, err);
     dbPromise = null;
     try {
-      await deleteDb();
-      await openDb(); // fresh DB banaao
-    } catch (_) {}
-    return []; // fresh start — data Supabase se reload hoga
+      const db2 = await openDb();
+      const t2  = tx(db2, [CACHE_STORE], "readonly");
+      const all2: any[] = await reqToPromise(t2.objectStore(CACHE_STORE).getAll());
+      const prefix = `${table}::`;
+      _dbReset();
+      return all2.filter((r) => typeof r._key === "string" && r._key.startsWith(prefix)).map((r) => r.data);
+    } catch (err2) {
+      _dbErrorLog(`${table} cache read dobara fail — is baar bhi data delete nahi kiya, khaali list de rahe hain`, err2);
+      return []; // ✅ data disk pe intact rehta hai, sirf is call ka result khaali hai
+    }
   }
 }
 
@@ -352,6 +382,29 @@ export function onQueueChange(fn: Listener) {
 
 function notifyQueueChanged() {
   queueCount().then((c) => listeners.forEach((fn) => fn(c)));
+}
+
+// ─── Real disk safety-backup ──────────────────────────────────────────────
+// 🚨 Pehle koi real backup nahi thi — sirf IndexedDB pe bharosa tha, aur DB
+// corrupt hone par sab kuch chala jaata tha. Ab ye function IndexedDB ke
+// zaroori tables ko C:\Balaji_Health_Backup\*.json mein bhi likh deta hai
+// (Electron ke through), taaki IndexedDB fail ho bhi jaaye to data disk pe
+// surakshit rahe. Ye best-effort hai — Electron ke bahar (browser) mein
+// chup-chaap skip ho jaata hai.
+const BACKUP_TABLES = ["patients", "billing", "fracture_cases", "fracture_xrays"];
+
+export async function backupCacheToDisk(): Promise<void> {
+  try {
+    const w = window as any;
+    if (!w.electron?.writeBackupSnapshot) return; // browser mode — skip
+    const tables: Record<string, any[]> = {};
+    for (const t of BACKUP_TABLES) {
+      tables[t] = await cacheGetAll(t);
+    }
+    await w.electron.writeBackupSnapshot(tables);
+  } catch (err) {
+    cLog.error("indexeddb", "backupCacheToDisk fail", err);
+  }
 }
 
 export function tempId() {

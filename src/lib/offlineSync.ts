@@ -4,7 +4,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { cLog } from "@/lib/clientLogger";
-import { queueGetAll, queueRemove, queueUpdate, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, QueuedMutation } from "./offlineDb";
+import { queueGetAll, queueRemove, queueUpdate, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, backupCacheToDisk, QueuedMutation } from "./offlineDb";
 
 
 declare global {
@@ -287,17 +287,36 @@ function emitSyncStatus(pending: number, lastError?: string) {
 
 const MAX_RETRIES = 8;
 
+// 🚨 FIX: pehle sirf row ki apni "id" se "local_" prefix hataya jaata tha.
+// Lekin agar offline mein naya patient banao aur turant uski billing bhi
+// banao, to billing.patient_id = "local_<uuid>" hi rehta tha — Supabase
+// isse "invalid input syntax for type uuid" bolke reject kar deta tha
+// (dekha gaya: diagnostic report mein "table: billing" wali error).
+// Fix: kisi bhi "*_id" field mein agar "local_" prefix mile, use bhi hatao —
+// kyunki wahi UUID hi (prefix hata ke) parent record ka final Supabase id
+// banega (upsert-based insert ki wajah se id badalta nahi hai).
+function stripLocalPrefixes(payload: Record<string, any>) {
+  const out = { ...payload };
+  for (const key of Object.keys(out)) {
+    if (key.endsWith("_id") && typeof out[key] === "string" && out[key].startsWith("local_")) {
+      out[key] = out[key].slice("local_".length);
+    }
+  }
+  return out;
+}
+
 async function applyMutation(m: QueuedMutation): Promise<void> {
   const table = m.table as any;
 
   if (m.op === "insert") {
-    const payload = { ...m.payload };
+    let payload = { ...m.payload };
     // ✅ tempId ab "local_<real-uuid>" hai — prefix hata ke wahi UUID
     // Supabase pe bhi id ke roop mein use karo (naya generate mat karo).
     if (m.tempId) {
       const realId = m.tempId.startsWith("local_") ? m.tempId.slice("local_".length) : m.tempId;
       payload.id = realId;
     }
+    payload = stripLocalPrefixes(payload);
     // ✅ FIX: Local-only fields Supabase ko mat bhejo — schema mein nahi hain
     delete payload._pendingSync;
     delete payload._localOnly;
@@ -313,7 +332,7 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
   if (m.op === "update") {
     if (!m.rowId) throw new Error("update mutation missing rowId");
     if (m.rowId.startsWith("local_")) throw new Error("PENDING_PARENT_INSERT");
-    const updatePayload = { ...m.payload };
+    const updatePayload = stripLocalPrefixes({ ...m.payload });
     delete updatePayload._pendingSync;
     delete updatePayload._localOnly;
     const { error } = await supabase.from(table).update(updatePayload).eq("id", m.rowId);
@@ -446,7 +465,18 @@ export function startAutoSync() {
     } else {
       cLog.info("sync", "App start — offline hai, cache se kaam chalega");
     }
+    // ✅ App start pe ek baar disk backup bhi le lo (chahe online ho ya offline)
+    backupCacheToDisk();
   }, 3000);
+
+  // ✅ Har 3 minute mein disk pe real safety backup — IndexedDB kabhi fail
+  // ho jaaye to bhi data yahan se restore ho sake
+  setInterval(() => { backupCacheToDisk(); }, 3 * 60 * 1000);
+
+  // ✅ App band karte waqt bhi ek final backup try karo
+  if (typeof window !== "undefined") {
+    window.addEventListener("beforeunload", () => { backupCacheToDisk(); });
+  }
 
   // ── Har 30 second mein sync check ────────────────────────────────────────
   setInterval(async () => {

@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { supabase } from "@/integrations/supabase/client";
-import { isOnline } from "./offlineSync";
+import { isOnline, runSync } from "./offlineSync";
 import { cLog } from "@/lib/clientLogger";
 import {
   cacheGetAll,
@@ -75,28 +75,18 @@ export async function offlineInsert(
   opts: { idField?: string } = {}
 ): Promise<any> {
   const idField = opts.idField || "id";
-  const online = await isOnline();
 
-  if (online) {
-    try {
-      const { data, error } = await supabase.from(table as any).insert(payload).select().single();
-      if (error) throw error;
-      await cacheUpsertRow(table, data, idField);
-      if (table === "patients") await _updatePatientNameInBillingCache(data);
-      cLog.info("online", `${table} insert OK — online Supabase mein save hua`);
-      return data;
-    } catch (err) {
-      cLog.error("supabase", `${table} online insert fail — offline queue mein daal raha hai`, err);
-      // fall through to offline path
-    }
-  }
-
-  // Offline path
+  // ✅ HAMESHA local-first — chahe net ho ya na ho, turant IndexedDB mein
+  // save hota hai (instant, kabhi network ka wait nahi). Net ho to turant
+  // background mein cloud sync trigger ho jaata hai (non-blocking).
   const localRow = { ...payload, [idField]: payload[idField] || tempId(), _pendingSync: true };
   await cacheUpsertRow(table, localRow, idField);
   await queueAdd({ table, op: "insert", payload: localRow, tempId: localRow[idField] });
   if (table === "patients") await _updatePatientNameInBillingCache(localRow);
-  cLog.info("offline", `${table} offline save hua — baad mein sync hoga`);
+  cLog.info("offline", `${table} local save hua (instant) — background sync trigger`);
+
+  isOnline().then((online) => { if (online) runSync(); });
+
   return localRow;
 }
 
@@ -107,49 +97,27 @@ export async function offlineUpdate(
   opts: { idField?: string; select?: string } = {}
 ): Promise<any> {
   const idField = opts.idField || "id";
-  const online = await isOnline();
 
-  if (online && !rowId.startsWith("local_")) {
-    try {
-      const { data, error } = await supabase.from(table as any).update(updates).eq(idField, rowId).select().single();
-      if (error) throw error;
-      await cacheUpsertRow(table, data, idField);
-      cLog.info("online", `${table} update OK — rowId: ${rowId}`);
-      return data;
-    } catch (err) {
-      cLog.error("supabase", `${table} online update fail — offline queue mein daal raha hai`, err);
-      // fall through to offline path
-    }
-  }
-
+  // ✅ HAMESHA local-first
   const cached = await cacheGetAll(table);
   const existing = cached.find((r: any) => r[idField] === rowId) || { [idField]: rowId };
   const merged = { ...existing, ...updates, _pendingSync: true };
   await cacheUpsertRow(table, merged, idField);
   await queueAdd({ table, op: "update", payload: updates, rowId });
-  cLog.info("offline", `${table} update offline queue mein daal diya — rowId: ${rowId}`);
+  cLog.info("offline", `${table} local update hua (instant) — background sync trigger — rowId: ${rowId}`);
+
+  isOnline().then((online) => { if (online) runSync(); });
+
   return merged;
 }
 
 export async function offlineDelete(table: string, rowId: string): Promise<void> {
-  const online = await isOnline();
-
-  if (online && !rowId.startsWith("local_")) {
-    try {
-      const { error } = await supabase.from(table as any).delete().eq("id", rowId);
-      if (error) throw error;
-      await cacheDeleteRow(table, rowId);
-      cLog.info("online", `${table} delete OK — rowId: ${rowId}`);
-      return;
-    } catch (err) {
-      cLog.error("supabase", `${table} online delete fail`, err);
-      // fall through to offline path
-    }
-  }
-
+  // ✅ HAMESHA local-first
   await cacheDeleteRow(table, rowId);
   await queueAdd({ table, op: "delete", rowId });
-  cLog.info("offline", `${table} offline delete queue mein daal diya — rowId: ${rowId}`);
+  cLog.info("offline", `${table} local delete hua (instant) — background sync trigger — rowId: ${rowId}`);
+
+  isOnline().then((online) => { if (online) runSync(); });
 }
 
 // ── Billing cache mein patient naam inject karo ──────────────────────────
