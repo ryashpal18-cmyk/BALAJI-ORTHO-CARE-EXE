@@ -241,6 +241,27 @@ export async function downloadAllDataToCache(): Promise<void> {
       cLog.info("sync", `${bookingRequests.length} booking requests PC mein save ho gaye`);
     }
 
+    // 16. ✅ Medicine entries + mapping — Patient Medicine / commission page offline ke liye
+    const { data: medicineEntries } = await supabase
+      .from("medicine_entries" as any)
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(1000);
+    if (medicineEntries && medicineEntries.length > 0) {
+      await cacheReplaceTable("medicine_entries", medicineEntries);
+      cLog.info("sync", `${medicineEntries.length} medicine entries PC mein save ho gaye`);
+    }
+
+    const { data: invoiceMedicineMapping } = await supabase
+      .from("invoice_medicine_mapping" as any)
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(2000);
+    if (invoiceMedicineMapping && invoiceMedicineMapping.length > 0) {
+      await cacheReplaceTable("invoice_medicine_mapping", invoiceMedicineMapping);
+      cLog.info("sync", `${invoiceMedicineMapping.length} medicine mappings PC mein save ho gaye`);
+    }
+
     cLog.info("sync", "✅ Saara data PC mein save ho gaya — ab offline bhi kaam karega");
   } catch (err) {
     cLog.error("sync", "Data download mein error aaya", err);
