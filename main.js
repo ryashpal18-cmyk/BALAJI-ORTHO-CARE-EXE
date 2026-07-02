@@ -7,7 +7,7 @@
 
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu, net } = require('electron');
 const path  = require('path');
 const fs    = require('fs');
 const https = require('https');
@@ -186,7 +186,7 @@ function addPending(item) {
 // asal me chal raha ho.
 function pingHost(url) {
   return new Promise((resolve) => {
-    const req = https.get(url, { timeout: 5000 }, (res) => {
+    const req = https.get(url, { timeout: 2000 }, (res) => {
       resolve(res.statusCode < 500);
     });
     req.on('error', () => resolve(false));
@@ -194,12 +194,37 @@ function pingHost(url) {
   });
 }
 
+// ✅ Result ko thodi der cache karo — patient save, bill save, entry save sab
+// isOnline() call karte hain. Bina cache ke har save pe naya network ping
+// lagta, aur genuinely offline hone par ye 5-10 second ki delay deta tha.
+let _internetCache = { value: false, ts: 0 };
+const INTERNET_CACHE_MS = 4000;
+
 async function checkInternet() {
+  // ✅ Fast path: OS se instantly pata chal jaata hai (bina network call ke)
+  // ki system hi offline hai. Agar OS bole "no connection", to Supabase/Google
+  // ko ping karne ki zarurat nahi — turant false return karo.
+  try {
+    if (net && typeof net.isOnline === 'function' && !net.isOnline()) {
+      _internetCache = { value: false, ts: Date.now() };
+      return false;
+    }
+  } catch {}
+
+  // Short cache — baar baar entries save karte waqt repeat ping avoid karo
+  if (Date.now() - _internetCache.ts < INTERNET_CACHE_MS) {
+    return _internetCache.value;
+  }
+
   const primary = await pingHost('https://idcxmeczzfnipmybikue.supabase.co');
-  if (primary) return true;
-  // Fallback host — Supabase project khud down/unreachable ho sakta hai par
-  // baaki internet chal raha ho, isliye general connectivity bhi confirm karo.
-  return pingHost('https://www.google.com/generate_204');
+  let result = primary;
+  if (!result) {
+    // Fallback host — Supabase project khud down/unreachable ho sakta hai par
+    // baaki internet chal raha ho, isliye general connectivity bhi confirm karo.
+    result = await pingHost('https://www.google.com/generate_204');
+  }
+  _internetCache = { value: result, ts: Date.now() };
+  return result;
 }
 
 // ─── SUPABASE REST UPSERT ─────────────────────────────────────────────────────
