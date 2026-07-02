@@ -1,6 +1,6 @@
 {
   "name": "balaji-ortho-connect",
-  "version": "1.0.111",
+  "version": "1.0.105",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -11,7 +11,6 @@
     "dist": "npm run build && electron-builder --win portable"
   },
   "dependencies": {
-    "electron-updater": "^6.3.9",
     "@hookform/resolvers": "^3.9.0",
     "@radix-ui/react-accordion": "^1.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.1",
@@ -46,9 +45,11 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.0.0",
     "date-fns": "^3.6.0",
+    "electron-updater": "^6.3.9",
     "embla-carousel-react": "^8.3.0",
     "html2pdf.js": "^0.10.2",
     "input-otp": "^1.2.4",
+    "jspdf": "^4.2.1",
     "lucide-react": "^0.462.0",
     "next-themes": "^0.3.0",
     "react": "^18.3.1",

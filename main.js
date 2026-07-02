@@ -391,6 +391,25 @@ function openWhatsAppWindow(url) {
 
   whatsappWindow.loadURL(url);
 
+  // ✅ FIX: Offline hone par WhatsApp Web load fail hoti thi aur Chromium ka
+  // "no internet" error page dikhta tha (jo user ko "error" jaisa lagta tha).
+  // Ab is jagah ek simple, saaf message dikhate hain — koi error nahi,
+  // sirf batate hain ki internet aane par WhatsApp yahan khud khul jayega.
+  whatsappWindow.webContents.on('did-fail-load', (_e, errorCode, _desc, _url, isMainFrame) => {
+    if (!isMainFrame) return;
+    if (errorCode === -3) return; // ERR_ABORTED — user ne khud navigate kiya, ignore
+    const offlineHtml = `
+      <html><body style="display:flex;align-items:center;justify-content:center;height:100vh;
+        margin:0;font-family:sans-serif;background:#1a3a6b;color:#fff;text-align:center;">
+        <div>
+          <h2>📶 Internet nahi hai</h2>
+          <p>WhatsApp yahan internet aane par automatically load ho jayega.</p>
+          <p style="opacity:0.8;font-size:14px;">Ye window ab band kar sakte hain — koi error nahi hai.</p>
+        </div>
+      </body></html>`;
+    whatsappWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(offlineHtml)}`);
+  });
+
   // Hide on close — login session bacha rahega
   whatsappWindow.on('close', (e) => {
     e.preventDefault();
