@@ -14,6 +14,8 @@ import { Building2, Plus, Pencil } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useBranches, Branch } from "@/lib/branchContext";
 import { logAudit } from "@/hooks/useAuditLog";
+import { offlineInsert, offlineUpdate } from "@/lib/offlineQuery";
+import { isOnline } from "@/lib/offlineSync";
 
 export default function Branches() {
   const { data: branches = [], isLoading } = useBranches();
@@ -27,18 +29,19 @@ export default function Branches() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (editing) {
-        const { error } = await supabase.from("branches" as any).update(form).eq("id", editing.id);
-        if (error) throw error;
+        await offlineUpdate("branches", editing.id, form);
         await logAudit({ action: "update", module: "branches", recordId: editing.id, description: form.name });
       } else {
-        const { error } = await supabase.from("branches" as any).insert(form);
-        if (error) throw error;
+        await offlineInsert("branches", form);
         await logAudit({ action: "create", module: "branches", description: form.name });
       }
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ["branches"] });
-      toast({ title: editing ? "Branch update ho gaya ✓" : "Branch add ho gaya ✓" });
+      const online = await isOnline();
+      toast({ title: online
+        ? (editing ? "Branch update ho gaya ✓" : "Branch add ho gaya ✓")
+        : "📥 Offline save ho gaya — net aane par sync hoga" });
       setOpen(false);
     },
     onError: () => toast({ title: "Save fail hua", variant: "destructive" }),

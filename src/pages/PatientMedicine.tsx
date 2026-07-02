@@ -6,6 +6,9 @@ import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Pill, Search, Save, Trash2, Plus, User, FileText } from "lucide-react";
+import { offlineFetch, offlineFetchScoped, offlineInsert, offlineDelete } from "@/lib/offlineQuery";
+import { isOnline } from "@/lib/offlineSync";
+import { cacheGetAll } from "@/lib/offlineDb";
 
 const DEFAULT_MEDICINES = [
   { id: "med1", name: "Tab Aconex SP",      rate: 68.72  },
@@ -30,17 +33,19 @@ export default function PatientMedicine() {
 
   // Fetch patients
   useEffect(() => {
-    supabase.from("patients").select("id, name, mobile").order("name")
-      .then(({ data }) => {
-        const list = data || [];
-        setPatients(list);
-        // Auto-select patient from URL param
-        const pid = searchParams.get("patientId");
-        if (pid) {
-          const found = list.find((p: any) => p.id === pid);
-          if (found) setSelectedPatient(found);
-        }
-      });
+    offlineFetch<any>("patients", async () => {
+      const { data, error } = await supabase.from("patients").select("id, name, mobile").order("name");
+      if (error) throw error;
+      return data || [];
+    }).then((list) => {
+      setPatients(list);
+      // Auto-select patient from URL param
+      const pid = searchParams.get("patientId");
+      if (pid) {
+        const found = list.find((p: any) => p.id === pid);
+        if (found) setSelectedPatient(found);
+      }
+    });
   }, []);
 
   // Auto-select bill from invoiceId param
@@ -53,21 +58,31 @@ export default function PatientMedicine() {
     if (found) setSelectedBill(found);
   }, [bills, searchParams]);
 
-  // Fetch medicines from DB
+  // Fetch medicines from DB (offline-safe, same cache as Medicine Master)
   useEffect(() => {
-    supabase.from("medicines" as any).select("*").order("created_at")
-      .then(({ data, error }) => {
-        if (!error && data && (data as any[]).length > 0) setMedicines(data as any[]);
-      });
+    offlineFetch<any>("medicines", async () => {
+      const { data, error } = await supabase.from("medicines" as any).select("*").order("created_at");
+      if (error) throw error;
+      return (data as any[]) || [];
+    }).then((rows) => { if (rows.length > 0) setMedicines(rows); });
   }, []);
 
   // Fetch bills when patient selected
   useEffect(() => {
     if (!selectedPatient) return;
-    supabase.from("billing").select("*")
-      .eq("patient_id", selectedPatient.id)
-      .order("created_at", { ascending: false })
-      .then(({ data }) => setBills(data || []));
+    offlineFetchScoped<any>(
+      "billing",
+      async () => {
+        const { data, error } = await supabase.from("billing").select("*")
+          .eq("patient_id", selectedPatient.id)
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+        return data || [];
+      },
+      (cached) => cached
+        .filter((b: any) => b.patient_id === selectedPatient.id)
+        .sort((a: any, b: any) => (b.created_at || "").localeCompare(a.created_at || "")),
+    ).then((data) => setBills(data || []));
   }, [selectedPatient]);
 
   // Fetch existing medicine entry for selected bill
@@ -78,11 +93,30 @@ export default function PatientMedicine() {
 
   const loadExistingEntry = async (bill: any) => {
     const invoiceNo = `INV-${bill.id.slice(0, 8).toUpperCase()}`;
-    const { data } = await supabase
-      .from("medicine_entries" as any)
-      .select("*, invoice_medicine_mapping(*)")
-      .eq("invoice_no", invoiceNo)
-      .maybeSingle();
+    const online = await isOnline();
+    let data: any = null;
+
+    if (online) {
+      try {
+        const res = await supabase
+          .from("medicine_entries" as any)
+          .select("*, invoice_medicine_mapping(*)")
+          .eq("invoice_no", invoiceNo)
+          .maybeSingle();
+        data = res.data;
+      } catch { /* offline ya network error — neeche cache se fallback */ }
+    }
+
+    if (!data) {
+      // Offline fallback — local cache se dhoondo (isi device par bana entry milega)
+      const entries = await cacheGetAll("medicine_entries");
+      const entry = (entries as any[]).find((e) => e.invoice_no === invoiceNo);
+      if (entry) {
+        const mappings = await cacheGetAll("invoice_medicine_mapping");
+        const mapping = (mappings as any[]).filter((m) => m.entry_id === entry.id);
+        data = { ...entry, invoice_medicine_mapping: mapping };
+      }
+    }
 
     if (data) {
       setExistingEntry(data);
@@ -112,10 +146,13 @@ export default function PatientMedicine() {
     const invoiceNo = `INV-${selectedBill.id.slice(0, 8).toUpperCase()}`;
 
     try {
-      // Delete existing entry if any
+      // Delete existing entry if any (offline-safe — net na ho to queue me chala jaayega)
       if (existingEntry) {
-        await supabase.from("invoice_medicine_mapping" as any).delete().eq("entry_id", existingEntry.id);
-        await supabase.from("medicine_entries" as any).delete().eq("id", existingEntry.id);
+        const mapping = (existingEntry as any).invoice_medicine_mapping || [];
+        for (const m of mapping) {
+          await offlineDelete("invoice_medicine_mapping", m.id);
+        }
+        await offlineDelete("medicine_entries", existingEntry.id);
       }
 
       if (chosen.length === 0) {
@@ -125,28 +162,28 @@ export default function PatientMedicine() {
         return;
       }
 
-      // Create new entry
-      const { data: entry, error } = await supabase
-        .from("medicine_entries" as any)
-        .insert({
-          invoice_no: invoiceNo,
-          patient_name: selectedPatient.name,
-          total_amount: total,
-          commission,
-        } as any)
-        .select().single();
-      if (error) throw error;
+      // Create new entry (offline-safe)
+      const entry = await offlineInsert("medicine_entries", {
+        invoice_no: invoiceNo,
+        patient_name: selectedPatient.name,
+        total_amount: total,
+        commission,
+      });
 
-      const rows = chosen.map(m => ({
-        entry_id: (entry as any).id,
-        medicine_id: m.id,
-        medicine_name: m.name,
-        rate: m.rate,
-      }));
-      const { error: mErr } = await supabase.from("invoice_medicine_mapping" as any).insert(rows as any);
-      if (mErr) throw mErr;
+      for (const m of chosen) {
+        await offlineInsert("invoice_medicine_mapping", {
+          entry_id: entry.id,
+          medicine_id: m.id,
+          medicine_name: m.name,
+          rate: m.rate,
+        });
+      }
 
-      toast({ title: "✅ Saved!", description: `Total: ₹${total.toFixed(2)} | Commission: ₹${commission.toFixed(2)}` });
+      const online = await isOnline();
+      toast({
+        title: online ? "✅ Saved!" : "📥 Offline save ho gaya — net aane par sync hoga",
+        description: `Total: ₹${total.toFixed(2)} | Commission: ₹${commission.toFixed(2)}`,
+      });
       loadExistingEntry(selectedBill);
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });

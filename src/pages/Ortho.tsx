@@ -481,7 +481,7 @@ function FractureProfileDialog({ open, onClose, caseData }: { open: boolean; onC
                         {/* X-Ray header */}
                         <div style={{padding:"8px 12px",background:"linear-gradient(90deg,#f8fafc,#f0f9ff)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                           <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <span style={{fontSize:14,background:i===xrays.length-1?"#dcfce7":"#e0e7ff",borderRadius:99,padding:"2px 8px",fontWeight:700,fontSize:10,color:i===xrays.length-1?"#16a34a":"#4338ca"}}>
+                            <span style={{fontSize:10,background:i===xrays.length-1?"#dcfce7":"#e0e7ff",borderRadius:99,padding:"2px 8px",fontWeight:700,color:i===xrays.length-1?"#16a34a":"#4338ca"}}>
                               {i===xrays.length-1?"🆕 Latest":x.report_type?.replace("Ortho X-Ray — ","") || `Visit ${i+1}`}
                             </span>
                             <span style={{fontSize:10,color:"#6b7280"}}>{fmtDate(x.created_at)}</span>

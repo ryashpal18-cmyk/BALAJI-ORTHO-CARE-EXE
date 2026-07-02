@@ -7,6 +7,8 @@ import { useToast } from "@/hooks/use-toast";
 import { CalendarCheck, Check, X, Phone, Copy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { logAudit } from "@/hooks/useAuditLog";
+import { offlineFetch, offlineUpdate, offlineInsert } from "@/lib/offlineQuery";
+import { isOnline } from "@/lib/offlineSync";
 
 interface BookingRequest {
   id: string;
@@ -28,24 +30,28 @@ export default function BookingRequests() {
     staleTime: 0,
     refetchOnMount: true,
     queryFn: async (): Promise<BookingRequest[]> => {
-      const { data, error } = await supabase
-        .from("booking_requests" as any)
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data || []) as any;
+      return offlineFetch<BookingRequest>("booking_requests", async () => {
+        const { data, error } = await supabase
+          .from("booking_requests" as any)
+          .select("*")
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+        return (data || []) as any;
+      });
     },
   });
 
   const updateStatus = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: "Confirmed" | "Rejected" }) => {
-      const { error } = await supabase.from("booking_requests" as any).update({ status }).eq("id", id);
-      if (error) throw error;
+      await offlineUpdate("booking_requests", id, { status });
       await logAudit({ action: "update", module: "booking-requests", recordId: id, description: `Status: ${status}` });
     },
-    onSuccess: (_d, vars) => {
+    onSuccess: async (_d, vars) => {
       queryClient.invalidateQueries({ queryKey: ["booking-requests"] });
-      toast({ title: vars.status === "Confirmed" ? "Confirm kar diya ✓" : "Reject kar diya" });
+      const online = await isOnline();
+      toast({ title: online
+        ? (vars.status === "Confirmed" ? "Confirm kar diya ✓" : "Reject kar diya")
+        : "📥 Offline save ho gaya — net aane par sync hoga" });
     },
   });
 
@@ -53,24 +59,27 @@ export default function BookingRequests() {
   const confirmAndCreateAppointment = async (req: BookingRequest) => {
     try {
       let patientId: string | null = null;
-      const { data: existingPatients } = await supabase
-        .from("patients").select("id").eq("mobile", req.mobile).limit(1);
-      if (existingPatients?.length) {
-        patientId = existingPatients[0].id;
-      } else {
-        const { data: newPatient, error: pErr } = await supabase
-          .from("patients").insert({ name: req.patient_name, mobile: req.mobile }).select().single();
-        if (pErr) throw pErr;
+      const online = await isOnline();
+      if (online) {
+        try {
+          const { data: existingPatients } = await supabase
+            .from("patients").select("id").eq("mobile", req.mobile).limit(1);
+          if (existingPatients?.length) {
+            patientId = existingPatients[0].id;
+          }
+        } catch { /* offline ya network error — neeche naya patient offline banega */ }
+      }
+      if (!patientId) {
+        const newPatient = await offlineInsert("patients", { name: req.patient_name, mobile: req.mobile });
         patientId = newPatient.id;
       }
-      const { error: aErr } = await supabase.from("appointments").insert({
+      await offlineInsert("appointments", {
         patient_id: patientId,
         date: req.preferred_date,
         time_slot: req.preferred_time,
         notes: req.reason,
         status: "Scheduled",
       });
-      if (aErr) throw aErr;
       await updateStatus.mutateAsync({ id: req.id, status: "Confirmed" });
     } catch {
       toast({ title: "Appointment banane me dikkat aayi", variant: "destructive" });

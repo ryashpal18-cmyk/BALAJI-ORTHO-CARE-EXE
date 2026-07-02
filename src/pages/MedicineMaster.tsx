@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Pill, Plus, Pencil, Trash2, Save, X } from "lucide-react";
+import { offlineFetch, offlineInsert, offlineUpdate, offlineDelete } from "@/lib/offlineQuery";
+import { isOnline } from "@/lib/offlineSync";
 
 interface Medicine {
   id: string;
@@ -26,12 +28,25 @@ export default function MedicineMaster() {
 
   const fetchMedicines = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("medicines" as any)
-      .select("*")
-      .order("created_at", { ascending: true });
-    if (error) {
-      // If table doesn't exist, use default medicines
+    try {
+      const rows = await offlineFetch<Medicine>("medicines", async () => {
+        const { data, error } = await supabase
+          .from("medicines" as any)
+          .select("*")
+          .order("created_at", { ascending: true });
+        if (error) throw error;
+        return (data as any) || [];
+      });
+      setMedicines(rows.length ? rows : [
+        { id: "med1", name: "Tab Aconex SP", rate: 68.72 },
+        { id: "med2", name: "Tab Calcikem K27", rate: 135.73 },
+        { id: "med3", name: "Tab Cefnex 200 LB", rate: 150.20 },
+        { id: "med4", name: "SYP Unisure D3 Nano", rate: 48.54 },
+        { id: "med5", name: "Tab Cytocal + D3", rate: 126.89 },
+        { id: "med6", name: "Cap Raquil DSR", rate: 118.94 },
+      ]);
+    } catch {
+      // dono online aur cache fail — default list dikhao taaki billing na ruke
       setMedicines([
         { id: "med1", name: "Tab Aconex SP", rate: 68.72 },
         { id: "med2", name: "Tab Calcikem K27", rate: 135.73 },
@@ -40,8 +55,6 @@ export default function MedicineMaster() {
         { id: "med5", name: "Tab Cytocal + D3", rate: 126.89 },
         { id: "med6", name: "Cap Raquil DSR", rate: 118.94 },
       ]);
-    } else {
-      setMedicines((data as any) || []);
     }
     setLoading(false);
   };
@@ -54,15 +67,14 @@ export default function MedicineMaster() {
       return;
     }
     setSaving(true);
-    const { error } = await supabase
-      .from("medicines" as any)
-      .insert({ name: newName.trim(), rate: parseFloat(newRate) } as any);
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "✅ Medicine Add Ho Gayi!" });
+    try {
+      await offlineInsert("medicines", { name: newName.trim(), rate: parseFloat(newRate) });
+      const online = await isOnline();
+      toast({ title: online ? "✅ Medicine Add Ho Gayi!" : "📥 Offline save ho gayi — net aane par sync hogi" });
       setNewName(""); setNewRate(""); setAdding(false);
       fetchMedicines();
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || "Save fail hua", variant: "destructive" });
     }
     setSaving(false);
   };
@@ -79,28 +91,27 @@ export default function MedicineMaster() {
       return;
     }
     setSaving(true);
-    const { error } = await supabase
-      .from("medicines" as any)
-      .update({ name: editName.trim(), rate: parseFloat(editRate) } as any)
-      .eq("id", id);
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "✅ Medicine Update Ho Gayi!" });
+    try {
+      await offlineUpdate("medicines", id, { name: editName.trim(), rate: parseFloat(editRate) });
+      const online = await isOnline();
+      toast({ title: online ? "✅ Medicine Update Ho Gayi!" : "📥 Offline update ho gayi — net aane par sync hogi" });
       setEditingId(null);
       fetchMedicines();
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || "Update fail hua", variant: "destructive" });
     }
     setSaving(false);
   };
 
   const handleDelete = async (id: string, name: string) => {
     if (!window.confirm(`"${name}" delete karna chahte ho?`)) return;
-    const { error } = await supabase.from("medicines" as any).delete().eq("id", id);
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "🗑️ Medicine Delete Ho Gayi!" });
+    try {
+      await offlineDelete("medicines", id);
+      const online = await isOnline();
+      toast({ title: online ? "🗑️ Medicine Delete Ho Gayi!" : "📥 Offline delete ho gaya — net aane par sync hoga" });
       fetchMedicines();
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || "Delete fail hua", variant: "destructive" });
     }
   };
 

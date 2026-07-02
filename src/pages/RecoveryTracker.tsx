@@ -9,6 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useFractureXrays, uploadFractureXray, useFractureCases } from "@/hooks/useOrtho";
+import { useAddPhysioSession } from "@/hooks/useDatabase";
+import { cacheGetAll } from "@/lib/offlineDb";
+import { isOnline } from "@/lib/offlineSync";
 import {
   ArrowLeft, Activity, Camera, Upload, TrendingDown, Bone, Calendar,
 } from "lucide-react";
@@ -52,6 +55,7 @@ export default function RecoveryTracker() {
 
   const [uploading, setUploading] = useState(false);
   const { data: xrays, refetch: refetchXrays } = useFractureXrays(caseId);
+  const addPhysioSession = useAddPhysioSession();
 
   const { data: allCases = [], isLoading: casesLoading } = useFractureCases();
   const [directCase, setDirectCase] = useState<FractureCase | null>(null);
@@ -86,12 +90,28 @@ export default function RecoveryTracker() {
 
     const patientId = cachedCase?.patient_id || directCase?.patient_id;
     if (patientId) {
-      const { data: s } = await supabase
-        .from("physiotherapy_sessions")
-        .select("*")
-        .eq("fracture_case_id", caseId)
-        .order("created_at", { ascending: true });
-      setSessions((s as any) || []);
+      // Offline-safe: pehle online try karo, fail/offline ho to cache se fallback lo
+      const online = await isOnline();
+      if (online) {
+        try {
+          const { data: s, error } = await supabase
+            .from("physiotherapy_sessions")
+            .select("*")
+            .eq("fracture_case_id", caseId)
+            .order("created_at", { ascending: true });
+          if (error) throw error;
+          setSessions((s as any) || []);
+          setLoading(false);
+          return;
+        } catch {
+          /* offline ya network error — neeche cache se fallback */
+        }
+      }
+      const cachedSessions = await cacheGetAll("physiotherapy_sessions");
+      const filtered = (cachedSessions as any[])
+        .filter((sess) => sess.fracture_case_id === caseId)
+        .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+      setSessions(filtered as any);
     }
     setLoading(false);
   };
@@ -102,21 +122,24 @@ export default function RecoveryTracker() {
     if (!fxCase) return;
     setLogging(true);
     const nextSessionNo = sessions.length + 1;
-    const { error } = await supabase.from("physiotherapy_sessions").insert({
-      patient_id: fxCase.patient_id,
-      fracture_case_id: fxCase.id,
-      pain_scale: parseInt(painScale) || 0,
-      exercise_plan: exercisePlan.trim() || "Recovery exercises",
-      progress_notes: notes.trim() || null,
-      session_number: nextSessionNo,
-      total_sessions: Math.max(nextSessionNo, 10),
-    });
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "✅ Progress log ho gaya!" });
+    try {
+      // ✅ offline-safe insert — net na ho to IndexedDB queue me save hoga
+      // aur internet wapas aate hi apne aap sync ho jayega
+      await addPhysioSession.mutateAsync({
+        patient_id: fxCase.patient_id,
+        fracture_case_id: fxCase.id,
+        pain_scale: parseInt(painScale) || 0,
+        exercise_plan: exercisePlan.trim() || "Recovery exercises",
+        progress_notes: notes.trim() || null,
+        session_number: nextSessionNo,
+        total_sessions: Math.max(nextSessionNo, 10),
+      });
+      const online = await isOnline();
+      toast({ title: online ? "✅ Progress log ho gaya!" : "📥 Offline save ho gaya — net aane par sync hoga" });
       setExercisePlan(""); setNotes(""); setPainScale("5");
       fetchData();
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || "Progress log fail ho gaya", variant: "destructive" });
     }
     setLogging(false);
   };
