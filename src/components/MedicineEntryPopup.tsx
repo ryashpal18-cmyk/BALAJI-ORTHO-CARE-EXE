@@ -5,6 +5,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Pill } from "lucide-react";
+import { offlineFetch, offlineInsert } from "@/lib/offlineQuery";
+import { isOnline } from "@/lib/offlineSync";
 
 interface Medicine { id: string; name: string; rate: number }
 
@@ -23,9 +25,11 @@ export function MedicineEntryPopup({ open, onClose, patientName, invoiceNo }: Pr
   useEffect(() => {
     if (!open) return;
     setSelected({});
-    supabase.from("medicines").select("*").order("name").then(({ data }) => {
-      setMedicines((data as any) || []);
-    });
+    offlineFetch<Medicine>("medicines", async () => {
+      const { data, error } = await supabase.from("medicines").select("*").order("name");
+      if (error) throw error;
+      return (data as any) || [];
+    }).then((rows) => setMedicines(rows));
   }, [open]);
 
   const chosen = medicines.filter((m) => selected[m.id]);
@@ -39,26 +43,25 @@ export function MedicineEntryPopup({ open, onClose, patientName, invoiceNo }: Pr
     }
     setSaving(true);
     try {
-      const { data: entry, error } = await supabase
-        .from("medicine_entries")
-        .insert({
-          invoice_no: invoiceNo,
-          patient_name: patientName,
-          total_amount: total,
-          commission,
-        } as any)
-        .select()
-        .single();
-      if (error) throw error;
-      const rows = chosen.map((m) => ({
-        entry_id: (entry as any).id,
-        medicine_id: m.id,
-        medicine_name: m.name,
-        rate: m.rate,
-      }));
-      const { error: mErr } = await supabase.from("invoice_medicine_mapping").insert(rows as any);
-      if (mErr) throw mErr;
-      toast({ title: "Saved", description: `Commission: ₹${commission.toFixed(2)}` });
+      const entry = await offlineInsert("medicine_entries", {
+        invoice_no: invoiceNo,
+        patient_name: patientName,
+        total_amount: total,
+        commission,
+      });
+      for (const m of chosen) {
+        await offlineInsert("invoice_medicine_mapping", {
+          entry_id: entry.id,
+          medicine_id: m.id,
+          medicine_name: m.name,
+          rate: m.rate,
+        });
+      }
+      const online = await isOnline();
+      toast({
+        title: online ? "Saved" : "📥 Offline save ho gaya — net aane par sync hoga",
+        description: `Commission: ₹${commission.toFixed(2)}`,
+      });
       onClose();
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });

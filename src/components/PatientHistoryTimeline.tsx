@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   Pill, Receipt, Bone, CalendarClock, FilePlus2, History,
 } from "lucide-react";
+import { offlineFetchScoped } from "@/lib/offlineQuery";
 
 type TimelineItem = {
   id: string;
@@ -34,11 +35,43 @@ export function PatientHistoryTimeline({ patientId }: { patientId: string }) {
     if (!patientId) return;
     (async () => {
       setLoading(true);
-      const [{ data: rx }, { data: bills }, { data: fx }, { data: appts }] = await Promise.all([
-        supabase.from("prescriptions").select("*").eq("patient_id", patientId),
-        supabase.from("billing").select("*").eq("patient_id", patientId),
-        supabase.from("fracture_cases" as any).select("*").eq("patient_id", patientId),
-        supabase.from("appointments").select("*").eq("patient_id", patientId),
+      const [rx, bills, fx, appts] = await Promise.all([
+        offlineFetchScoped<any>(
+          "prescriptions",
+          async () => {
+            const { data, error } = await supabase.from("prescriptions").select("*").eq("patient_id", patientId);
+            if (error) throw error;
+            return data || [];
+          },
+          (cached) => cached.filter((r: any) => r.patient_id === patientId),
+        ),
+        offlineFetchScoped<any>(
+          "billing",
+          async () => {
+            const { data, error } = await supabase.from("billing").select("*").eq("patient_id", patientId);
+            if (error) throw error;
+            return data || [];
+          },
+          (cached) => cached.filter((b: any) => b.patient_id === patientId),
+        ),
+        offlineFetchScoped<any>(
+          "fracture_cases",
+          async () => {
+            const { data, error } = await supabase.from("fracture_cases" as any).select("*").eq("patient_id", patientId);
+            if (error) throw error;
+            return data || [];
+          },
+          (cached) => cached.filter((f: any) => f.patient_id === patientId),
+        ),
+        offlineFetchScoped<any>(
+          "appointments",
+          async () => {
+            const { data, error } = await supabase.from("appointments").select("*").eq("patient_id", patientId);
+            if (error) throw error;
+            return data || [];
+          },
+          (cached) => cached.filter((a: any) => a.patient_id === patientId),
+        ),
       ]);
 
       const merged: TimelineItem[] = [
