@@ -74,19 +74,16 @@ export function useAdjustStock() {
         stock_quantity: newQty,
       });
 
-      // movement log (best-effort — online hi chalega, offline mein skip)
+      // movement log — ✅ ab offline mein bhi queue hoga (skip nahi hoga)
       try {
-        const online = await isOnline();
-        if (online) {
-          await supabase.from("stock_movements" as any).insert({
-            medicine_id: medicineId,
-            medicine_name: medicineName,
-            change_qty: changeQty,
-            reason,
-            note: note || null,
-            created_by: actorName || localStorage.getItem("userName") || "Unknown",
-          });
-        }
+        await offlineInsert("stock_movements", {
+          medicine_id: medicineId,
+          medicine_name: medicineName,
+          change_qty: changeQty,
+          reason,
+          note: note || null,
+          created_by: actorName || localStorage.getItem("userName") || "Unknown",
+        });
       } catch (err) {
         cLog.error("supabase", "stock_movements insert fail", err);
       }
@@ -117,16 +114,14 @@ export async function deductStockForSale(medicineId: string, medicineName: strin
     const newQty = Math.max(0, Number(existing.stock_quantity || 0) - qty);
     await offlineUpdate("medicines", medicineId, { stock_quantity: newQty });
 
-    const online = await isOnline();
-    if (online) {
-      await supabase.from("stock_movements" as any).insert({
-        medicine_id: medicineId,
-        medicine_name: medicineName,
-        change_qty: -qty,
-        reason: "sale",
-        created_by: localStorage.getItem("userName") || "Unknown",
-      });
-    }
+    // ✅ offline mein bhi queue hoga
+    await offlineInsert("stock_movements", {
+      medicine_id: medicineId,
+      medicine_name: medicineName,
+      change_qty: -qty,
+      reason: "sale",
+      created_by: localStorage.getItem("userName") || "Unknown",
+    });
   } catch (err) {
     cLog.error("supabase", "deductStockForSale fail", err);
   }
@@ -138,17 +133,19 @@ export function useStockMovements(medicineId?: string) {
     queryKey: ["stock-movements", medicineId || "all"],
     ...QUERY_OPTS,
     queryFn: async () => {
-      const online = await isOnline();
-      if (!online) return [];
-      let query = supabase
-        .from("stock_movements" as any)
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(200);
-      if (medicineId) query = query.eq("medicine_id", medicineId);
-      const { data, error } = await query;
-      if (error) throw error;
-      return data || [];
+      const rows = await offlineFetch<any>("stock_movements", async () => {
+        let query = supabase
+          .from("stock_movements" as any)
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(200);
+        if (medicineId) query = query.eq("medicine_id", medicineId);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data || [];
+      });
+      const filtered = medicineId ? rows.filter((r: any) => r.medicine_id === medicineId) : rows;
+      return [...filtered].sort((a: any, b: any) => (b.created_at || "").localeCompare(a.created_at || "")).slice(0, 200);
     },
   });
 }
