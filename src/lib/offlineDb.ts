@@ -355,5 +355,10 @@ function notifyQueueChanged() {
 }
 
 export function tempId() {
-  return `local_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  // ✅ Real UUID use karo (local_ prefix ke saath) — isse sync ke time
+  // upsert(id) karke duplicate-safe (idempotent) retry ho sakta hai.
+  const uuid = (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${Math.random().toString(36).slice(2, 9)}`;
+  return `local_${uuid}`;
 }

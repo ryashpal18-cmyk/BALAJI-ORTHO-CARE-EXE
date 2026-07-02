@@ -292,11 +292,18 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
 
   if (m.op === "insert") {
     const payload = { ...m.payload };
-    if (m.tempId) delete payload.id;
+    // ✅ tempId ab "local_<real-uuid>" hai — prefix hata ke wahi UUID
+    // Supabase pe bhi id ke roop mein use karo (naya generate mat karo).
+    if (m.tempId) {
+      const realId = m.tempId.startsWith("local_") ? m.tempId.slice("local_".length) : m.tempId;
+      payload.id = realId;
+    }
     // ✅ FIX: Local-only fields Supabase ko mat bhejo — schema mein nahi hain
     delete payload._pendingSync;
     delete payload._localOnly;
-    const { data, error } = await supabase.from(table).insert(payload).select().single();
+    // ✅ upsert use karo (insert nahi) — agar retry ho (network drop mid-sync
+    // ke baad), to same id pe dobara likhega, duplicate row nahi banega.
+    const { data, error } = await supabase.from(table).upsert(payload, { onConflict: "id" }).select().single();
     if (error) { console.error(`Insert failed — table: ${table}`); throw error; }
     if (m.tempId && data) await cacheReplaceRowKey(table, m.tempId, data, "id");
     console.info(`Insert sync OK — table: ${table}`);
