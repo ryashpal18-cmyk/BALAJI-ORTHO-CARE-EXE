@@ -357,9 +357,10 @@ export default function XRayViewer({ initialImage }: XRayViewerProps = {}) {
   const generateReport = async () => {
     if (!images[activeIndex]) { notify("❌ Pehle X-ray load karo"); return; }
     try {
-      // Dynamically load jsPDF
-      // @ts-ignore
-      const { jsPDF } = await import("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+      // ✅ FIX: pehle jsPDF CDN se load hota tha (internet chahiye hota tha,
+      // offline mein PDF banna hi fail ho jaata tha). Ab local npm package
+      // use ho raha hai — poora offline chalega.
+      const { jsPDF } = await import("jspdf");
       const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
       // Header
