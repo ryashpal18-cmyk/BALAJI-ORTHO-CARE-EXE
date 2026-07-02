@@ -612,6 +612,52 @@ ipcMain.handle('shell:print',      async (_e, html) => {
 ipcMain.handle('app:getBackupDir', async () => BACKUP_DIR);
 ipcMain.handle('app:getXraysDir',  async () => XRAYS_DIR);
 
+// ─── REAL INDEXEDDB → DISK SAFETY BACKUP ──────────────────────────────────
+// 🚨 CRITICAL: Pehle patients.json/bills.json etc. kabhi likhi hi nahi jaati
+// thi (purana legacy IPC path use nahi hota tha), isliye diagnostic report
+// mein hamesha "0 records" dikhta tha aur agar IndexedDB corrupt ho jaaye to
+// koi asli backup nahi tha restore karne ke liye. Ab renderer periodically
+// (aur app band karte waqt) apna poora IndexedDB cache yahan bhejta hai, aur
+// hum use in files mein likh dete hain — ab ye files genuinely useful hain.
+const TABLE_FILE_MAP = {
+  patients: PATIENTS_FILE,
+  billing: BILLS_FILE,
+  fracture_cases: FRACTURE_FILE,
+  fracture_xrays: XRAYS_FILE,
+};
+
+ipcMain.handle('backup:writeSnapshot', async (_e, tables) => {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    let written = 0;
+    for (const [tableName, rows] of Object.entries(tables || {})) {
+      if (!Array.isArray(rows)) continue;
+      const targetFile = TABLE_FILE_MAP[tableName]
+        || path.join(BACKUP_DIR, `${tableName}.json`);
+      writeJSON(targetFile, rows);
+      written += rows.length;
+    }
+    logger.logInfo('backup', `IndexedDB snapshot disk pe likha gaya — ${written} total records`);
+    return { success: true, written };
+  } catch (e) {
+    logger.logError('backup', `Snapshot write fail: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+});
+
+// Restore ke liye — agar kabhi IndexedDB genuinely mar jaaye, is se data wapas mil sakta hai
+ipcMain.handle('backup:readSnapshot', async () => {
+  try {
+    const result = {};
+    for (const [tableName, filePath] of Object.entries(TABLE_FILE_MAP)) {
+      result[tableName] = readJSON(filePath);
+    }
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // ─── NEW APP DATA BACKUP (Settings → Backup tab) ──────────────────────────
 ipcMain.handle('backup:getDir', async () => {
   ensureAppBackupDir();

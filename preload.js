@@ -57,6 +57,10 @@ contextBridge.exposeInMainWorld('electron', {
   getBackupDir:    ()       => ipcRenderer.invoke('app:getBackupDir'),
   getXraysDir:     ()       => ipcRenderer.invoke('app:getXraysDir'),
 
+  // ✅ Real IndexedDB → disk safety backup (patients.json etc. ab genuinely likhi jaati hain)
+  writeBackupSnapshot: (tables) => ipcRenderer.invoke('backup:writeSnapshot', tables),
+  readBackupSnapshot:  ()       => ipcRenderer.invoke('backup:readSnapshot'),
+
   // ── Backup ─────────────────────────────────────────────────
   backupGetDir:       ()      => ipcRenderer.invoke('backup:getDir'),
   backupWriteJson:    (data)  => ipcRenderer.invoke('backup:writeJson', data),
