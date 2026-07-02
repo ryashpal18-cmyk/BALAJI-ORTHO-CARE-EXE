@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { offlineFetch, offlineFetchScoped, offlineInsert, offlineUpdate, offlineDelete } from "@/lib/offlineQuery";
 import { cLog } from "@/lib/clientLogger";
-import { cacheGetAll } from "@/lib/offlineDb";
+import { cacheGetAll, cacheReplaceTable } from "@/lib/offlineDb";
 import { isOnline } from "@/lib/offlineSync";
 
 const QUERY_OPTS = {
@@ -140,31 +140,31 @@ export function useBills() {
 }
 
 export function usePatients() {
+  const qc = useQueryClient();
   return useQuery({
     queryKey: ["patients"],
     staleTime: 30000, // ✅ 30 sec — setQueryData ka data turant dikh jaayega
     refetchOnMount: true,
     queryFn: async () => {
-      // ✅ Pehle IndexedDB cache se lo (naye offline patients bhi milenge)
+      // ✅ Cache-first — turant local se do, network ka kabhi wait nahi
+      // (naye offline patients bhi yahan milenge). Search/list hamesha fast.
       const cached = await cacheGetAll("patients");
+      const sorted = [...cached].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
 
-      // Online hai to Supabase se fresh data lo aur cache update karo
+      // Online hai to background mein silently fresh data le aao — UI block nahi hoga
       const online = typeof navigator !== "undefined" ? navigator.onLine : false;
       if (online) {
-        try {
-          const { data, error } = await supabase.from("patients").select("*").order("name");
-          if (!error && data && data.length > 0) {
-            // Offline mein register hue patients cache mein hain — merge karo
-            const onlineIds = new Set(data.map((p: any) => p.id));
-            const offlineOnly = cached.filter((p: any) => !onlineIds.has(p.id));
-            const merged = [...data, ...offlineOnly];
-            return merged.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
-          }
-        } catch (err) { cLog.warn("patients", "Supabase fetch fail — cache use kar rahe hain", err); }
+        supabase.from("patients").select("*").order("name").then(({ data, error }) => {
+          if (error || !data || data.length === 0) return;
+          const onlineIds = new Set(data.map((p: any) => p.id));
+          const offlineOnly = cached.filter((p: any) => !onlineIds.has(p.id));
+          cacheReplaceTable("patients", [...data, ...offlineOnly]).then(() => {
+            qc.invalidateQueries({ queryKey: ["patients"] });
+          });
+        }).catch((err) => cLog.warn("patients", "Background refresh fail — cache use ho raha hai", err));
       }
 
-      // Offline — sirf cache se do (naye patients bhi hain yahan)
-      return [...cached].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+      return sorted;
     },
   });
 }
@@ -416,6 +416,15 @@ export function useSearchPatients(search: string) {
     queryKey: ["patients", "search", search],
     queryFn: async () => {
       if (!search) return [] as any[];
+
+      // ✅ Cache-first — mobile number type karte hi turant local se milta
+      // hai, internet ka kabhi wait nahi karna padta.
+      const cached = await cacheGetAll("patients");
+      const term = search.toLowerCase();
+      const localMatches = cached
+        .filter((p: any) => (p.name || "").toLowerCase().includes(term) || (p.mobile || "").includes(search))
+        .slice(0, 20);
+
       const online = await isOnline();
       if (online) {
         try {
@@ -424,17 +433,17 @@ export function useSearchPatients(search: string) {
             .select("*")
             .or(`name.ilike.%${search}%,mobile.ilike.%${search}%`)
             .limit(20);
-          if (error) throw error;
-          return data as any[];
+          if (!error && data) {
+            // Online result + koi offline-only naya patient jo abhi tak sync nahi hua
+            const onlineIds = new Set(data.map((p: any) => p.id));
+            const offlineOnly = localMatches.filter((p: any) => !onlineIds.has(p.id));
+            return [...data, ...offlineOnly] as any[];
+          }
         } catch {
-          // fall through to offline cache search below
+          // fall through to cache result
         }
       }
-      const cached = await cacheGetAll("patients");
-      const term = search.toLowerCase();
-      return cached
-        .filter((p: any) => (p.name || "").toLowerCase().includes(term) || (p.mobile || "").includes(search))
-        .slice(0, 20);
+      return localMatches;
     },
     enabled: search.length > 0,
   });
