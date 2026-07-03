@@ -44,8 +44,13 @@ export default function PatientProfile() {
     setLoading(true);
     try {
       const online = navigator.onLine;
+      // 🚨 FIX: Agar patient abhi tak Supabase pe sync nahi hua (id "local_"
+      // se shuru hoti hai), to online query karne ka koi fayda nahi — "local_"
+      // ek valid UUID nahi hai, Supabase error dega aur patient details
+      // khaali dikhengi. Aise records ke liye seedha cache se hi dhoondo.
+      const isLocalOnly = id.startsWith("local_");
 
-      if (online) {
+      if (online && !isLocalOnly) {
         try {
           const [pRes, bRes, physioRes, xrayRes, medRes] = await Promise.all([
             supabase.from("patients").select("*").eq("id", id).single(),
