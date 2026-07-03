@@ -50,6 +50,7 @@ import { BranchProvider } from "@/lib/branchContext";
 import { PinLockScreen } from "@/components/PinLockScreen";
 import { shouldShowLock, markActive, isPinEnabled } from "@/lib/pinLock";
 import { useAppointmentReminders } from "@/hooks/useAppointmentReminders";
+import { BugAlertWatcher } from "@/components/BugAlertWatcher";
 import Dashboard from "./pages/Dashboard";
 import OPD from "./pages/OPD";
 import IPD from "./pages/IPD";
@@ -134,6 +135,7 @@ const App = () => {
               <Toaster />
               <Sonner />
               <AppointmentReminders />
+              <BugAlertWatcher />
               {locked && <PinLockScreen onUnlock={handleUnlock} />}
               <HashRouter>
                 <Routes>
