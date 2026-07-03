@@ -158,8 +158,15 @@ export function usePatients() {
           if (error || !data || data.length === 0) return;
           const onlineIds = new Set(data.map((p: any) => p.id));
           const offlineOnly = cached.filter((p: any) => !onlineIds.has(p.id));
+          const merged = [...data, ...offlineOnly].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
           cacheReplaceTable("patients", [...data, ...offlineOnly]).then(() => {
-            qc.invalidateQueries({ queryKey: ["patients"] });
+            // ✅ FIX: pehle yahan invalidateQueries call hota tha, jisse queryFn
+            // dobara chalta, jo phir se background fetch karta, jo phir invalidate
+            // karta — ek INFINITE LOOP ban jaata tha (bina ruke Supabase ko call
+            // karte rehna). setQueryData seedha cache update karta hai, queryFn ko
+            // dobara nahi chalata — loop nahi banta, UI phir bhi turant update ho
+            // jaata hai.
+            qc.setQueryData(["patients"], merged);
           });
         }).catch((err) => cLog.warn("patients", "Background refresh fail — cache use ho raha hai", err));
       }
