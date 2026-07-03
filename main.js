@@ -7,7 +7,7 @@
 
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, dialog, Menu, net } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu, net, Notification } = require('electron');
 const path  = require('path');
 const fs    = require('fs');
 const https = require('https');
@@ -756,6 +756,199 @@ ipcMain.handle('app:sendSMS', async (_e, { apiUrl, apiKey, deviceId, mobile, mes
   }
 });
 
+// ─── KNOWN ERROR PATTERNS — module-level (diagnostics + live notification dono use karte hain) ─
+// Har pattern mein: regex, error name, source file, root cause, fix
+const KNOWN_ERROR_PATTERNS = [
+  {
+    regex: /queueGetAll retry bhi fail|queueGetAll fail.*DB corrupt/g,
+    name: 'IndexedDB queueGetAll Infinite Loop',
+    source: 'src/lib/offlineDb.ts → queueGetAll()',
+    rootCause: 'IndexedDB UnknownError pe deleteDb+openDb loop ban raha tha. Har 30s mein runSync() ne 6+ baar queueGetAll call ki, corrupt DB ne baar baar fail kiya, loop mein 9000+ errors/day flood ho gaye.',
+    impact: '🔴 CRITICAL — Log files 5MB+ ho gayi, app slow ho sakti hai, real errors chhup gayi',
+    fix: 'FILE: src/lib/offlineDb.ts\nFIX: queueGetAll mein _queueDbResetDone flag add karo — sirf pehli baar deleteDb karo, baad mein [] return karo bina log flood kiye.\nSTATUS: ✅ offlineDb_fixed.ts mein fix ready hai — deploy karo',
+  },
+  {
+    regex: /No handler registered for 'log:getSnapshotDir'/g,
+    name: 'Missing IPC Handler: log:getSnapshotDir',
+    source: 'preload.js → getSafetySnapshotDir() → ipcRenderer.invoke(\'log:getSnapshotDir\')',
+    rootCause: 'preload.js mein getSafetySnapshotDir() ne \'log:getSnapshotDir\' channel call kiya, lekin electron-main.cjs mein ye handler register nahi tha. main.js mein handler tha, electron-main.cjs mein nahi.',
+    impact: '🟡 MEDIUM — Diagnostic tool mein snapshot path nahi aata, lekin app ka core kaam nahi rukta',
+    fix: 'FILE: electron-main.cjs\nFIX: ipcMain.handle(\'log:getSnapshotDir\', () => SAFETY_SNAPSHOT_ROOT) add karo\nSTATUS: ✅ main.js mein pehle se fix hai — electron-main.cjs mein bhi same handler add karo',
+  },
+  {
+    regex: /UnknownError: Internal error/g,
+    name: 'IndexedDB UnknownError: Internal error',
+    source: 'Electron IndexedDB (Chromium) → balaji_ortho_offline_db',
+    rootCause: 'Ye error tab aata hai jab IndexedDB ki internal state corrupt ho jaati hai — aksar abrupt shutdown, power cut, ya Electron version change se. DB_VERSION v3 bump ke baad purani DB delete honi chahiye thi, lekin agar app crash ho gayi to nahi hui.',
+    impact: '🔴 CRITICAL — Offline data access fail, sync queue nahi chali, pending records cloud tak nahi gaye',
+    fix: 'FILE: src/lib/offlineDb.ts\nFIX 1 (automatic): DB_VERSION = 3 pehle se hai — naya fresh build install karo, IndexedDB auto-reset hogi\nFIX 2 (manual): Settings → "Nuclear IndexedDB Reset" button dabao\nFIX 3 (permanent): offlineDb_fixed.ts deploy karo jisme error flood band hai',
+  },
+  {
+    regex: /Supabase insert fail|insert.*failed.*table/gi,
+    name: 'Supabase Insert Failure',
+    source: 'src/lib/offlineSync.ts → applyMutation() → supabase.insert()',
+    rootCause: 'IndexedDB queue se mutations Supabase mein sync karte waqt fail hua. Possible causes: (1) _pendingSync/_localOnly fields payload mein the, (2) network timeout, (3) Supabase RLS policy block.',
+    impact: '🟡 MEDIUM — Data offline safe hai, lekin cloud sync pending rehta hai',
+    fix: 'FILE: src/lib/offlineSync.ts\nCHECK: delete payload._pendingSync aur delete payload._localOnly already hai line ~200\nACTION: Pending items ko Settings → Stuck Bills Fix se clear karo',
+  },
+  {
+    regex: /render-process-gone|RENDERER CRASH/gi,
+    name: 'Renderer Process Crash',
+    source: 'Electron BrowserWindow → webContents',
+    rootCause: 'React/renderer process crash ho gayi — memory overflow ya unhandled JS error',
+    impact: '🔴 CRITICAL — White screen, user ko app restart karni padti hai',
+    fix: 'Check memory usage. Agar 500MB+ ho to memory leak hai.\nCheck console errors app start par.',
+  },
+  {
+    regex: /PENDING_PARENT_INSERT/g,
+    name: 'Pending Parent Insert (Sync Order Issue)',
+    source: 'src/lib/offlineSync.ts → applyMutation()',
+    rootCause: 'Update mutation chal raha hai lekin parent insert abhi sync nahi hua — tempId (local_xxx) abhi real ID se replace nahi hua',
+    impact: '🟡 LOW-MEDIUM — Sync queue thodi der delay hoti hai, lekin eventually resolve hota hai',
+    fix: 'FILE: src/lib/offlineSync.ts\nSTATUS: Code already handle karta hai — "continue" se skip hota hai\nIF STUCK: Settings → Stuck Bills Fix → Clear old stuck items',
+  },
+  {
+    regex: /Unhandled Promise Rejection/g,
+    name: 'Unhandled Promise Rejection',
+    source: 'src/lib/clientLogger.ts → window.unhandledrejection',
+    rootCause: 'Kisi async function mein try/catch nahi tha ya Promise reject hua aur catch nahi hua',
+    impact: '🟡 MEDIUM — Depends on which promise failed',
+    fix: 'Upar "Last Error" detail dekho — kaunse file/function se aa raha hai wo batayega',
+  },
+  {
+    regex: /(\w+) is not defined/g,
+    name: 'Missing Import (ReferenceError)',
+    source: 'Renderer JS — kisi hook/component mein',
+    rootCause: 'Code mein ek function/variable use ho raha hai jo us file mein import nahi kiya gaya. Ye galti se ek naya feature add karte waqt ho sakta hai.',
+    impact: '🔴 CRITICAL — Jo bhi button/action isko trigger karta hai, wo crash ho jaayega ya kaam nahi karega',
+    fix: 'Sample Log mein jo function/variable naam dikh raha hai, us file ke top ke "import { ... }" statement mein use add karo.',
+  },
+  {
+    regex: /Maximum update depth exceeded|Too many re-renders/g,
+    name: 'Infinite Re-render / Refetch Loop',
+    source: 'React component ya React Query hook',
+    rootCause: 'Koi query/effect apne hi result se khud ko dobara trigger kar raha hai (jaise invalidateQueries() ek aisi query ke andar se call hona jo khud usi query ko refetch karti hai).',
+    impact: '🔴 CRITICAL — App slow ho jaata hai, battery/data zyada use hoti hai, kabhi kabhi UI freeze ho sakta hai',
+    fix: 'Jis query/effect se ye trigger ho raha hai, wahan invalidateQueries() ki jagah setQueryData() use karo (cache seedha update karo, dobara fetch trigger na ho).',
+  },
+];
+
+// ✅ Toast ke "View More" button se call hota hai — poori detail file kholta hai
+ipcMain.handle('bug:openDetail', async (_e, detailPath) => {
+  try {
+    await shell.openPath(detailPath || path.join(BACKUP_DIR, 'last_bug_detail.txt'));
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ─── LIVE ERROR NOTIFICATION WATCHER ──────────────────────────────────────
+// Diagnostic report ka wait kiye bina — agar koi ek error baar baar (50+)
+// aa rahi hai, turant Windows notification bhej do. Notification pe click
+// karne se poori details (code/source/fix ke saath) ek .txt file mein khulti
+// hai — bilkul GitHub Actions ke build-error jaisा.
+const NOTIFIED_THRESHOLDS = [50, 200, 1000, 5000]; // har threshold pe sirf ek baar notify
+const _notifiedState = new Map(); // "date::normalizedMsg" -> highest threshold already notified
+
+function _normalizeErrorMsg(msg) {
+  return msg.replace(/\d+/g, 'N').trim().slice(0, 100);
+}
+
+function checkForRepeatingErrors() {
+  try {
+    const logDir = path.join(BACKUP_DIR, 'logs');
+    if (!fs.existsSync(logDir)) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const logFiles = fs.readdirSync(logDir).filter(f => f.endsWith('.log') && f.includes(today));
+    if (!logFiles.length) return;
+
+    const content = fs.readFileSync(path.join(logDir, logFiles[0]), 'utf-8');
+    const blocks = content.split('─'.repeat(20));
+
+    const freq = new Map(); // normalizedMsg -> { count, sample, matchedPattern }
+    for (const block of blocks) {
+      if (!block.includes('[ERROR]')) continue;
+      // ✅ Header line ([time] [ERROR] [source]) chhod ke, uske baad wali
+      // asli message wali line lo — warna sab errors ek hi group mein aa
+      // jaate (kyunki header mein bhi "[ERROR]" text hota hai).
+      const blockLines = block.split('\n').map(l => l.trim()).filter(Boolean);
+      const headerIdx = blockLines.findIndex(l => l.includes('[ERROR]'));
+      const msgLine = headerIdx >= 0 ? blockLines[headerIdx + 1] : null;
+      if (!msgLine) continue;
+      const norm = _normalizeErrorMsg(msgLine);
+      if (!freq.has(norm)) {
+        const matched = KNOWN_ERROR_PATTERNS.find(p => block.match(p.regex));
+        freq.set(norm, { count: 0, sample: block.trim().slice(0, 800), matched });
+      }
+      freq.get(norm).count++;
+    }
+
+    for (const [norm, data] of freq) {
+      const stateKey = `${today}::${norm}`;
+      const alreadyNotifiedAt = _notifiedState.get(stateKey) || 0;
+      // Sabse bada threshold dhoondo jo cross hua hai aur abhi tak notify nahi hua
+      const crossedThreshold = [...NOTIFIED_THRESHOLDS].reverse().find(t => data.count >= t && t > alreadyNotifiedAt);
+      if (!crossedThreshold) continue;
+
+      _notifiedState.set(stateKey, crossedThreshold);
+
+      const title = data.matched
+        ? `⚠️ Bug baar-baar aa raha hai: ${data.matched.name}`
+        : `⚠️ Ek error baar-baar aa raha hai (${data.count}x)`;
+      const body = data.matched
+        ? `${data.count}x aaj hua hai. ${data.matched.impact}\nClick karo poori details ke liye.`
+        : `"${norm}" — ${data.count}x aaj hua hai.\nClick karo poori details ke liye.`;
+
+      // Detail file banao — GitHub Actions build-log jaisa format
+      const detailLines = [
+        'BUG DETAIL REPORT',
+        '═'.repeat(70),
+        `Generated       : ${new Date().toLocaleString('en-IN', { hour12: false })}`,
+        `Error Message   : ${norm}`,
+        `Occurrences     : ${data.count}x aaj (${today})`,
+        `App Version     : ${app.getVersion()}`,
+        '─'.repeat(70),
+      ];
+      if (data.matched) {
+        detailLines.push(
+          `Bug Name        : ${data.matched.name}`,
+          `Source File     : ${data.matched.source}`,
+          `Root Cause      : ${data.matched.rootCause}`,
+          `Impact          : ${data.matched.impact}`,
+          '',
+          'HOW TO FIX:',
+          data.matched.fix,
+        );
+      } else {
+        detailLines.push('Ye ek naya/unknown error hai — koi pehle se pehchana pattern match nahi hua.');
+        detailLines.push('Neeche wali "raw log" copy karke Claude ko bhej do, wo dekh ke bata dega.');
+      }
+      detailLines.push('', '─'.repeat(70), 'RAW LOG (jaisa error code ke saath dikhta hai):', '─'.repeat(70), data.sample);
+
+      const detailPath = path.join(BACKUP_DIR, 'last_bug_detail.txt');
+      try { fs.writeFileSync(detailPath, detailLines.join('\n'), 'utf-8'); } catch (_) {}
+
+      // ✅ Native OS notification ki jagah — app ke andar hi wahi toast style
+      // dikhao jaisa "Bill Saved" ke waqt aata hai, "View More" button ke saath
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('bug-detected', { title, body, detailPath });
+      }
+      logger.logInfo('error-watcher', `In-app toast bheja: ${norm} (${data.count}x)`);
+    }
+  } catch (e) {
+    logger.logError('error-watcher', `checkForRepeatingErrors fail: ${e.message}`);
+  }
+}
+
+// Har 2 minute mein check karo (app ready hone ke 1 minute baad se shuru)
+app.whenReady().then(() => {
+  setTimeout(() => {
+    checkForRepeatingErrors();
+    setInterval(checkForRepeatingErrors, 2 * 60 * 1000);
+  }, 60 * 1000);
+});
+
 // ─── RUNTIME DIAGNOSTICS — Ek click mein poori app check karo ───────────────
 // Ye handler software ke andar se hi run hota hai — koi alag tool nahi chahiye.
 // Har check ka result ek .txt report file mein save hota hai.
@@ -801,7 +994,15 @@ ipcMain.handle('app:runDiagnostics', async () => {
       const data = JSON.parse(raw);
       const size = (fs.statSync(f.path).size / 1024).toFixed(1);
       const count = Array.isArray(data) ? data.length : 'object';
-      lines.push(ok(`${f.name} — OK | Records: ${count} | Size: ${size} KB`));
+      const mtimeMs = fs.statSync(f.path).mtimeMs;
+      const ageHrs = ((Date.now() - mtimeMs) / (1000 * 60 * 60)).toFixed(1);
+      lines.push(ok(`${f.name} — OK | Records: ${count} | Size: ${size} KB | Last updated: ${ageHrs}h pehle`));
+      // ✅ NAYI CHECK: agar patients/bills file 48 ghante se update hi nahi
+      // hui, to matlab backupCacheToDisk() silently ruk gaya hai — turant
+      // pakadna zaroori hai warna real backup hone ka bharosa jhoothā hoga.
+      if ((f.path === PATIENTS_FILE || f.path === BILLS_FILE) && Number(ageHrs) > 48) {
+        lines.push(warn(`  └─ ${f.name} 48+ ghante se update nahi hui — backup rukk gaya ho sakta hai, app khol ke check karo`));
+      }
     } catch (e) {
       lines.push(err(`${f.name} — CORRUPT! JSON parse fail: ${e.message}`));
       const bakPath = `${f.path}.bak`;
@@ -1141,65 +1342,7 @@ ipcMain.handle('app:runDiagnostics', async () => {
         lines.push(info('Koi log file nahi mili abhi tak'));
       } else {
         // ── Known error patterns with diagnosis ──────────────────────────
-        // Har pattern mein: regex, error name, source file, root cause, fix
-        const knownPatterns = [
-          {
-            regex: /queueGetAll retry bhi fail|queueGetAll fail.*DB corrupt/g,
-            name: 'IndexedDB queueGetAll Infinite Loop',
-            source: 'src/lib/offlineDb.ts → queueGetAll()',
-            rootCause: 'IndexedDB UnknownError pe deleteDb+openDb loop ban raha tha. Har 30s mein runSync() ne 6+ baar queueGetAll call ki, corrupt DB ne baar baar fail kiya, loop mein 9000+ errors/day flood ho gaye.',
-            impact: '🔴 CRITICAL — Log files 5MB+ ho gayi, app slow ho sakti hai, real errors chhup gayi',
-            fix: 'FILE: src/lib/offlineDb.ts\nFIX: queueGetAll mein _queueDbResetDone flag add karo — sirf pehli baar deleteDb karo, baad mein [] return karo bina log flood kiye.\nSTATUS: ✅ offlineDb_fixed.ts mein fix ready hai — deploy karo',
-          },
-          {
-            regex: /No handler registered for 'log:getSnapshotDir'/g,
-            name: 'Missing IPC Handler: log:getSnapshotDir',
-            source: 'preload.js → getSafetySnapshotDir() → ipcRenderer.invoke(\'log:getSnapshotDir\')',
-            rootCause: 'preload.js mein getSafetySnapshotDir() ne \'log:getSnapshotDir\' channel call kiya, lekin electron-main.cjs mein ye handler register nahi tha. main.js mein handler tha, electron-main.cjs mein nahi.',
-            impact: '🟡 MEDIUM — Diagnostic tool mein snapshot path nahi aata, lekin app ka core kaam nahi rukta',
-            fix: 'FILE: electron-main.cjs\nFIX: ipcMain.handle(\'log:getSnapshotDir\', () => SAFETY_SNAPSHOT_ROOT) add karo\nSTATUS: ✅ main.js mein pehle se fix hai — electron-main.cjs mein bhi same handler add karo',
-          },
-          {
-            regex: /UnknownError: Internal error/g,
-            name: 'IndexedDB UnknownError: Internal error',
-            source: 'Electron IndexedDB (Chromium) → balaji_ortho_offline_db',
-            rootCause: 'Ye error tab aata hai jab IndexedDB ki internal state corrupt ho jaati hai — aksar abrupt shutdown, power cut, ya Electron version change se. DB_VERSION v3 bump ke baad purani DB delete honi chahiye thi, lekin agar app crash ho gayi to nahi hui.',
-            impact: '🔴 CRITICAL — Offline data access fail, sync queue nahi chali, pending records cloud tak nahi gaye',
-            fix: 'FILE: src/lib/offlineDb.ts\nFIX 1 (automatic): DB_VERSION = 3 pehle se hai — naya fresh build install karo, IndexedDB auto-reset hogi\nFIX 2 (manual): Settings → "Nuclear IndexedDB Reset" button dabao\nFIX 3 (permanent): offlineDb_fixed.ts deploy karo jisme error flood band hai',
-          },
-          {
-            regex: /Supabase insert fail|insert.*failed.*table/gi,
-            name: 'Supabase Insert Failure',
-            source: 'src/lib/offlineSync.ts → applyMutation() → supabase.insert()',
-            rootCause: 'IndexedDB queue se mutations Supabase mein sync karte waqt fail hua. Possible causes: (1) _pendingSync/_localOnly fields payload mein the, (2) network timeout, (3) Supabase RLS policy block.',
-            impact: '🟡 MEDIUM — Data offline safe hai, lekin cloud sync pending rehta hai',
-            fix: 'FILE: src/lib/offlineSync.ts\nCHECK: delete payload._pendingSync aur delete payload._localOnly already hai line ~200\nACTION: Pending items ko Settings → Stuck Bills Fix se clear karo',
-          },
-          {
-            regex: /render-process-gone|RENDERER CRASH/gi,
-            name: 'Renderer Process Crash',
-            source: 'Electron BrowserWindow → webContents',
-            rootCause: 'React/renderer process crash ho gayi — memory overflow ya unhandled JS error',
-            impact: '🔴 CRITICAL — White screen, user ko app restart karni padti hai',
-            fix: 'Check memory usage. Agar 500MB+ ho to memory leak hai.\nCheck console errors app start par.',
-          },
-          {
-            regex: /PENDING_PARENT_INSERT/g,
-            name: 'Pending Parent Insert (Sync Order Issue)',
-            source: 'src/lib/offlineSync.ts → applyMutation()',
-            rootCause: 'Update mutation chal raha hai lekin parent insert abhi sync nahi hua — tempId (local_xxx) abhi real ID se replace nahi hua',
-            impact: '🟡 LOW-MEDIUM — Sync queue thodi der delay hoti hai, lekin eventually resolve hota hai',
-            fix: 'FILE: src/lib/offlineSync.ts\nSTATUS: Code already handle karta hai — "continue" se skip hota hai\nIF STUCK: Settings → Stuck Bills Fix → Clear old stuck items',
-          },
-          {
-            regex: /Unhandled Promise Rejection/g,
-            name: 'Unhandled Promise Rejection',
-            source: 'src/lib/clientLogger.ts → window.unhandledrejection',
-            rootCause: 'Kisi async function mein try/catch nahi tha ya Promise reject hua aur catch nahi hua',
-            impact: '🟡 MEDIUM — Depends on which promise failed',
-            fix: 'Upar "Last Error" detail dekho — kaunse file/function se aa raha hai wo batayega',
-          },
-        ];
+        const knownPatterns = KNOWN_ERROR_PATTERNS;
 
         // ── Scan each log file ──────────────────────────────────────────
         const foundIssues = new Map(); // pattern name -> { count, files, samples }
@@ -1297,6 +1440,51 @@ ipcMain.handle('app:runDiagnostics', async () => {
           }
         } catch (e2) {
           lines.push(info(`  Unknown error scan fail: ${e2.message}`));
+        }
+
+        // ── ✅ NAYI CHECK: LOOP DETECTION ─────────────────────────────────
+        // Agar koi ek hi log line 60 second ke andar 15+ baar repeat ho rahi
+        // hai, to ye ek loop bug ka pakka signal hai (jaisa infinite-refetch
+        // wala bug tha) — chahe wo error ho ya sirf info/warning.
+        lines.push('');
+        lines.push('  — Loop Detection (same message baar-baar repeat) —');
+        try {
+          const today3 = logFiles3[0]; // sabse recent log file
+          if (today3) {
+            const content = fs.readFileSync(path.join(logDir3, today3), 'utf-8');
+            // Har line se timestamp + normalized message nikalo
+            const entries = [];
+            const lineRe = /\[(\d{2}:\d{2}:\d{2})\][^\n]*?(?:\]\s*)([^\n]{10,100})/g;
+            let m;
+            while ((m = lineRe.exec(content)) !== null) {
+              entries.push({ time: m[1], msg: m[2].replace(/\d+/g, 'N').trim() });
+            }
+            // Same message, thodi der ke andar, kitni baar aayi — count karo
+            const msgTimeMap = new Map();
+            for (const e of entries) {
+              if (!msgTimeMap.has(e.msg)) msgTimeMap.set(e.msg, []);
+              msgTimeMap.get(e.msg).push(e.time);
+            }
+            let loopFound = false;
+            for (const [msg, times] of msgTimeMap) {
+              if (times.length >= 15) {
+                // Check karo ki ye 60 second ke andar hui ya poore din mein spread thi
+                const toSec = (t) => { const [h, mi, s] = t.split(':').map(Number); return h * 3600 + mi * 60 + s; };
+                const secs = times.map(toSec).sort((a, b) => a - b);
+                const span = secs[secs.length - 1] - secs[0];
+                if (span > 0 && times.length / (span / 60 || 1) >= 10) { // ~10+ per minute
+                  loopFound = true;
+                  lines.push(err(`LOOP DETECTED: "${msg}" — ${times.length}x in ${span}s (${(times.length / (span/60)).toFixed(0)}/min)`));
+                  lines.push(`       └─ Ye ek loop/infinite-retry bug ho sakta hai — jis feature se ye message aa raha hai use turant check karo`);
+                }
+              }
+            }
+            if (!loopFound) lines.push(ok('  Koi repeat-loop pattern nahi mila — normal hai'));
+          } else {
+            lines.push(info('  Koi log file nahi mili loop check ke liye'));
+          }
+        } catch (e3) {
+          lines.push(info(`  Loop detection skip: ${e3.message}`));
         }
       }
     }

@@ -96,12 +96,16 @@ contextBridge.exposeInMainWorld('electron', {
       'sync-complete',
       'sync-error',
       'updater:status',
+      'bug-detected',
     ];
     if (allowed.includes(channel)) {
       ipcRenderer.on(channel, (_event, ...args) => callback(...args));
     }
   },
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
+
+  // ✅ Bug-detection toast ke "View More" button se call hota hai
+  openBugDetail: (detailPath) => ipcRenderer.invoke('bug:openDetail', detailPath),
 });
 
 // Legacy ipcRenderer
