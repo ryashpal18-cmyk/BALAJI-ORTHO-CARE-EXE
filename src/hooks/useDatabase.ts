@@ -264,23 +264,26 @@ export function useReportPayments() {
 export function useAddBill() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (bill: any) => offlineInsert("billing", bill),
-    onSuccess: async (newBill: any) => {
-      // ✅ FIX: Naya bill turant cache mein inject karo — refetch ka wait nahi
-      // Patient info cache se lo agar missing ho
-      if (!newBill.patients && newBill.patient_id) {
+    mutationFn: async (bill: any) => {
+      // 🚨 FIX: pehle patient ka naam sirf onSuccess mein, sirf in-memory
+      // (react-query cache) ke liye attach hota tha — IndexedDB (disk) mein
+      // kabhi save nahi hota tha. Isliye app restart ya offline reload ke
+      // baad us bill ka patient naam gayab dikhta tha. Ab yahan, save hone
+      // SE PEHLE hi patient info payload mein jod dete hain — taaki disk pe
+      // bhi hamesha ke liye save ho jaaye.
+      let payload = { ...bill };
+      if (!payload.patients && payload.patient_id) {
         try {
           const cachedPatients = await cacheGetAll("patients");
-          const p = cachedPatients.find((p: any) => p.id === newBill.patient_id);
+          const p = cachedPatients.find((p: any) => p.id === payload.patient_id);
           if (p) {
-            newBill = {
-              ...newBill,
-              patients: { name: p.name || "", mobile: p.mobile || "", address: p.address || "" },
-            };
+            payload.patients = { name: p.name || "", mobile: p.mobile || "", address: p.address || "" };
           }
         } catch { /* silently ignore */ }
       }
-
+      return offlineInsert("billing", payload);
+    },
+    onSuccess: async (newBill: any) => {
       // ["billing", "all"] cache mein seedha inject karo
       qc.setQueryData(["billing", "all"], (old: any[] | undefined) => {
         if (!old) return [newBill];
