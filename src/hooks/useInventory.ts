@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { offlineFetch, offlineUpdate } from "@/lib/offlineQuery";
+import { offlineFetch, offlineUpdate, offlineInsert } from "@/lib/offlineQuery";
 import { cacheGetAll, cacheUpsertRow } from "@/lib/offlineDb";
 import { isOnline } from "@/lib/offlineSync";
 import { cLog } from "@/lib/clientLogger";
