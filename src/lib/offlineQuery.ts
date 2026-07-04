@@ -20,23 +20,22 @@ export async function offlineFetch<T = any>(
   opts: { idField?: string } = {}
 ): Promise<T[]> {
   const idField = opts.idField || "id";
-  const online = await isOnline();
 
-  if (!online) {
-    cLog.info("offline", `${table} — offline hai, cache se data le raha hai`);
-    return (await cacheGetAll(table)) as T[];
+  // ✅ HAMESHA local cache se pehle do — turant, kabhi network ka wait nahi.
+  // Yehi function Billing, Appointments, Prescriptions, X-ray, Physio sab
+  // jagah use hota hai — isliye ye ek fix poori app ko offline-first banata hai.
+  const cached = (await cacheGetAll(table)) as T[];
+
+  // Online ho to background mein silently fresh data le aao aur cache update
+  // karo — is call ka result abhi wait nahi karega, agli baar dikhega.
+  const online = typeof navigator !== "undefined" ? navigator.onLine : false;
+  if (online) {
+    fetcher()
+      .then((rows) => cacheReplaceTable(table, rows as any[], idField))
+      .catch((err) => cLog.warn("offline", `${table} background refresh fail — cache use ho raha hai`, err));
   }
 
-  try {
-    const rows = await fetcher();
-    await cacheReplaceTable(table, rows as any[], idField);
-    return rows;
-  } catch (err) {
-    cLog.error("supabase", `${table} fetch fail — cache fallback use kar raha hai`, err);
-    const cached = await cacheGetAll(table);
-    if (cached.length) return cached as T[];
-    throw err;
-  }
+  return cached;
 }
 
 export async function offlineFetchScoped<T = any>(
@@ -46,27 +45,23 @@ export async function offlineFetchScoped<T = any>(
   opts: { idField?: string } = {}
 ): Promise<T[]> {
   const idField = opts.idField || "id";
-  const online = await isOnline();
 
-  if (!online) {
-    cLog.info("offline", `${table} scoped — offline cache se data le raha hai`);
-    const cached = await cacheGetAll(table);
-    return fallbackFilter(cached) as T[];
+  // ✅ HAMESHA local cache se pehle do
+  const cached = await cacheGetAll(table);
+  const scoped = fallbackFilter(cached) as T[];
+
+  const online = typeof navigator !== "undefined" ? navigator.onLine : false;
+  if (online) {
+    fetcher()
+      .then(async (rows) => {
+        for (const row of rows as any[]) {
+          if (row && row[idField] !== undefined) await cacheUpsertRow(table, row, idField);
+        }
+      })
+      .catch((err) => cLog.warn("offline", `${table} scoped background refresh fail`, err));
   }
 
-  try {
-    const rows = await fetcher();
-    for (const row of rows as any[]) {
-      if (row && row[idField] !== undefined) await cacheUpsertRow(table, row, idField);
-    }
-    return rows;
-  } catch (err) {
-    cLog.error("supabase", `${table} scoped fetch fail — cache fallback`, err);
-    const cached = await cacheGetAll(table);
-    const fallback = fallbackFilter(cached);
-    if (fallback.length) return fallback as T[];
-    throw err;
-  }
+  return scoped;
 }
 
 export async function offlineInsert(
