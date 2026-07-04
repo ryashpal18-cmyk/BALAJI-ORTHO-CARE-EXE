@@ -848,7 +848,7 @@ ipcMain.handle('bug:openDetail', async (_e, detailPath) => {
 // aa rahi hai, turant Windows notification bhej do. Notification pe click
 // karne se poori details (code/source/fix ke saath) ek .txt file mein khulti
 // hai — bilkul GitHub Actions ke build-error jaisा.
-const NOTIFIED_THRESHOLDS = [50, 200, 1000, 5000]; // har threshold pe sirf ek baar notify
+const NOTIFIED_THRESHOLDS = [12, 50, 200, 1000, 5000]; // har threshold pe sirf ek baar notify
 const _notifiedState = new Map(); // "date::normalizedMsg" -> highest threshold already notified
 
 function _normalizeErrorMsg(msg) {
