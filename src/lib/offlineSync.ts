@@ -305,6 +305,26 @@ function stripLocalPrefixes(payload: Record<string, any>) {
   return out;
 }
 
+// 🚨 FIX: kabhi kabhi UI convenience ke liye payload mein ek "relation"
+// object bhi attach kar diya jaata hai (jaise billing.patients = {name,
+// mobile}) — taaki local cache mein patient ka naam turant dikhe. Lekin
+// Supabase ke asli table mein aisa koi column nahi hota (billing mein sirf
+// patient_id hai, "patients" nahi) — isliye sync fail ho jaata tha:
+// "Could not find the 'patients' column of 'billing' in the schema cache".
+// Ye function aise embedded objects ko sync se pehle hata deta hai — sirf
+// genuinely allowed JSONB columns (jaise record_data) ko chhodta hai.
+const ALLOWED_OBJECT_FIELDS = new Set(["record_data"]);
+function stripEmbeddedRelations(payload: Record<string, any>) {
+  const out = { ...payload };
+  for (const key of Object.keys(out)) {
+    const val = out[key];
+    if (val && typeof val === "object" && !Array.isArray(val) && !ALLOWED_OBJECT_FIELDS.has(key)) {
+      delete out[key];
+    }
+  }
+  return out;
+}
+
 async function applyMutation(m: QueuedMutation): Promise<void> {
   const table = m.table as any;
 
@@ -317,6 +337,7 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
       payload.id = realId;
     }
     payload = stripLocalPrefixes(payload);
+    payload = stripEmbeddedRelations(payload);
     // ✅ FIX: Local-only fields Supabase ko mat bhejo — schema mein nahi hain
     delete payload._pendingSync;
     delete payload._localOnly;
@@ -332,7 +353,8 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
   if (m.op === "update") {
     if (!m.rowId) throw new Error("update mutation missing rowId");
     if (m.rowId.startsWith("local_")) throw new Error("PENDING_PARENT_INSERT");
-    const updatePayload = stripLocalPrefixes({ ...m.payload });
+    let updatePayload = stripLocalPrefixes({ ...m.payload });
+    updatePayload = stripEmbeddedRelations(updatePayload);
     delete updatePayload._pendingSync;
     delete updatePayload._localOnly;
     const { error } = await supabase.from(table).update(updatePayload).eq("id", m.rowId);
