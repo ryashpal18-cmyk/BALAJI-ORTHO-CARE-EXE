@@ -196,16 +196,50 @@ export async function cacheReplaceTable(table: string, rows: any[], idField = "i
     const store = t.objectStore(CACHE_STORE);
     const all: any[] = await reqToPromise(store.getAll());
     const prefix = `${table}::`;
-    for (const r of all.filter((r) => r._key.startsWith(prefix))) store.delete(r._key);
+    const existing = all.filter((r) => r._key.startsWith(prefix));
+
+    // 🚨 FIX: "payment update karo, ek baar dikhe, phir wapas gayab" bug —
+    // jab bhi koi local change (payment update, waghera) hua, wo turant
+    // cache mein save hota hai (_pendingSync: true) aur background mein
+    // server ko sync bhejta hai. Lekin USI WAQT agar koi doosri query
+    // Supabase se STALE (purana) data background mein fetch kar rahi thi
+    // (sync poora hone se pehle), to ye function poori table ko us purane
+    // data se REPLACE kar deta tha — abhi-abhi kiya gaya change reset ho
+    // jaata tha. Ab jab tak local change server ko confirm-sync nahi ho
+    // jaata (_pendingSync saaf nahi hota), tab tak us row ko background
+    // server-refresh se overwrite nahi karenge — local change hi jeetega.
+    const pendingKeys = new Set(
+      existing.filter((r) => r.data && r.data._pendingSync).map((r) => r._key)
+    );
+
+    for (const r of existing) if (!pendingKeys.has(r._key)) store.delete(r._key);
+
     for (const row of rows) {
       const rowId = row[idField];
       if (rowId === undefined || rowId === null) continue;
-      store.put({ _key: `${table}::${rowId}`, data: row });
+      const key = `${table}::${rowId}`;
+      if (pendingKeys.has(key)) continue; // local (unsynced) change wins
+      store.put({ _key: key, data: row });
     }
     await new Promise((res, rej) => { t.oncomplete = () => res(true); t.onerror = () => rej(t.error); });
-    cLog.info("indexeddb", `${table} cache replace — ${rows.length} rows save ho gayi`);
+    cLog.info("indexeddb", `${table} cache replace — ${rows.length} rows save ho gayi${pendingKeys.size ? ` (${pendingKeys.size} pending local rows preserved)` : ""}`);
   } catch (err) {
     cLog.error("indexeddb", `${table} cacheReplaceTable fail`, err);
+  }
+}
+
+export async function cacheUpsertRowFromServer(table: string, row: any, idField = "id") {
+  try {
+    const db = await openDb();
+    const rowId = row[idField];
+    const t = tx(db, [CACHE_STORE], "readonly");
+    const existing = await reqToPromise(t.objectStore(CACHE_STORE).get(`${table}::${rowId}`));
+    // Agar is row mein abhi unsynced local change hai, to server ki purani
+    // copy se use overwrite mat karo (same wajah jo upar cacheReplaceTable mein hai).
+    if (existing && existing.data && existing.data._pendingSync) return;
+    await cacheUpsertRow(table, row, idField);
+  } catch (err) {
+    cLog.error("indexeddb", `${table} cacheUpsertRowFromServer fail`, err);
   }
 }
 

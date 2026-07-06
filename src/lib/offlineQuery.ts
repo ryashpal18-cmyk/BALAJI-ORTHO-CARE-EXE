@@ -9,6 +9,7 @@ import {
   cacheGetAll,
   cacheReplaceTable,
   cacheUpsertRow,
+  cacheUpsertRowFromServer,
   cacheDeleteRow,
   queueAdd,
   tempId,
@@ -64,7 +65,7 @@ export async function offlineFetchScoped<T = any>(
     try {
       const rows = await fetcher();
       for (const row of rows as any[]) {
-        if (row && row[idField] !== undefined) await cacheUpsertRow(table, row, idField);
+        if (row && row[idField] !== undefined) await cacheUpsertRowFromServer(table, row, idField);
       }
       return rows;
     } catch (err) {
@@ -79,7 +80,7 @@ export async function offlineFetchScoped<T = any>(
     fetcher()
       .then(async (rows) => {
         for (const row of rows as any[]) {
-          if (row && row[idField] !== undefined) await cacheUpsertRow(table, row, idField);
+          if (row && row[idField] !== undefined) await cacheUpsertRowFromServer(table, row, idField);
         }
       })
       .catch((err) => cLog.warn("offline", `${table} scoped background refresh fail`, err));

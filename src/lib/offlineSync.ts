@@ -4,7 +4,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { cLog } from "@/lib/clientLogger";
-import { queueGetAll, queueRemove, queueUpdate, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, backupCacheToDisk, QueuedMutation } from "./offlineDb";
+import { queueGetAll, queueRemove, queueUpdate, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetAll, backupCacheToDisk, QueuedMutation } from "./offlineDb";
 
 
 declare global {
@@ -359,6 +359,17 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     delete updatePayload._localOnly;
     const { error } = await supabase.from(table).update(updatePayload).eq("id", m.rowId);
     if (error) { console.error(`Update failed — table: ${table}`); throw error; }
+    // 🚨 FIX: Update sync ho jaane ke baad local cache row abhi bhi
+    // "_pendingSync: true" flagged reh jaata tha — isse wo row hamesha ke
+    // liye background server-refresh se "protected" (excluded) reh jaata,
+    // aur kabhi bhi fresh nahi hota. Ab sync confirm hote hi flag hata dete
+    // hain, taaki row wapas normal (non-pending) ban jaaye.
+    const cachedRow = (await cacheGetAll(table)).find((r: any) => r.id === m.rowId);
+    if (cachedRow && cachedRow._pendingSync) {
+      const cleaned = { ...cachedRow };
+      delete cleaned._pendingSync;
+      await cacheUpsertRow(table, cleaned, "id");
+    }
     console.info(`Update sync OK — table: ${table}`);
     return;
   }
