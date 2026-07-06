@@ -11,6 +11,7 @@ publish:
   - provider: github
     owner: ryashpal18-cmyk
     repo: BALAJI-ORTHO-CARE-EXE
+    releaseType: release
 
 files:
   - dist/**
