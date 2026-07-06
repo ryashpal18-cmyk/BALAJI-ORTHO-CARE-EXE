@@ -8,16 +8,6 @@ on:
 permissions:
   contents: write
 
-# ✅ FIX: Agar thodi-thodi der mein 2 baar push ho (jaise 2 baar upload karna),
-# to pehle GitHub dono builds PARALLEL chalata tha — dono ek saath version
-# bump karke push karne ki koshish karte, aur jo doosra hota wo "rejected"
-# ho jaata (git push race condition). Ab sirf EK build ek waqt mein chalega;
-# agar naya push aaya to purana build cancel ho jaayega aur naya turant shuru
-# ho jaayega — race condition hamesha ke liye khatam.
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   build:
     runs-on: windows-latest
