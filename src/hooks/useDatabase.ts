@@ -275,7 +275,14 @@ export function useAddBill() {
       if (!payload.patients && payload.patient_id) {
         try {
           const cachedPatients = await cacheGetAll("patients");
-          const p = cachedPatients.find((p: any) => p.id === payload.patient_id);
+          let p = cachedPatients.find((p: any) => p.id === payload.patient_id);
+          // ✅ Agar cache mein abhi nahi mila (rare timing case — patient
+          // turant-turant banaya gaya ho) aur net hai, to Supabase se seedha
+          // try karo — taaki naam kabhi bhi permanently blank na rahe.
+          if (!p && typeof navigator !== "undefined" && navigator.onLine) {
+            const { data } = await supabase.from("patients").select("name, mobile, address").eq("id", payload.patient_id).single();
+            if (data) p = data;
+          }
           if (p) {
             payload.patients = { name: p.name || "", mobile: p.mobile || "", address: p.address || "" };
           }
