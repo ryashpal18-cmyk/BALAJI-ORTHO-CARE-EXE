@@ -18,6 +18,27 @@ const logger = require('./logger.cjs');
 // startup ke dauran bhi koi exception silently na guzar jaaye.
 logger.setupGlobalHandlers();
 
+// ─── FIX: IndexedDB "UnknownError: Internal error" (konicaminolta PC) ──────
+// Root cause: iss PC pe C:\Users\konicaminolta\AppData\Roaming\... waala
+// default userData folder shayad redirected/synced/locked hai (roaming profile
+// ya backup tool), jisse Chromium ka LevelDB (IndexedDB/Local Storage ke peeche
+// waala engine) apna LOCK file properly nahi le paata — isliye HAR open attempt
+// (fresh DB samet) "UnknownError: Internal error" de raha tha. Nuclear reset ke
+// logs mein bhi "Local Storage"/"Cache" delete EBUSY/EPERM se fail ho rahe the —
+// matlab koi aur process/mechanism un files ko hold kiye hua hai.
+// Fix: Chromium ka poora userData (Local Storage, IndexedDB, Cache, etc.) ab
+// C:\Balaji_Health_Backup ke saath waali reliable local drive pe shift kar rahe
+// hain — yeh jagah already bina kisi lock/permission error ke kaam kar rahi hai.
+// YEH LINE app.whenReady() SE PEHLE HONI CHAHIYE, warna asar nahi karegi.
+const CHROMIUM_USERDATA_DIR = 'C:\\Balaji_Health_Backup\\chromium_userdata';
+try {
+  if (!fs.existsSync(CHROMIUM_USERDATA_DIR)) fs.mkdirSync(CHROMIUM_USERDATA_DIR, { recursive: true });
+  app.setPath('userData', CHROMIUM_USERDATA_DIR);
+  logger.logInfo('startup', `userData path set to: ${CHROMIUM_USERDATA_DIR}`);
+} catch (e) {
+  logger.logError('startup', `userData path set fail: ${e.message}`);
+}
+
 // ─── PATHS ────────────────────────────────────────────────────────────────────
 const BACKUP_DIR    = 'C:\\Balaji_Health_Backup';
 const PATIENTS_FILE = path.join(BACKUP_DIR, 'patients.json');
@@ -261,6 +282,84 @@ function supabaseInsert(supabaseUrl, supabaseKey, table, rows) {
     req.write(body);
     req.end();
   });
+}
+
+// ─── DIRECT CLOUD → DISK BACKUP (IndexedDB se bilkul independent) ────────────
+// ASLI WAJAH pata chali: patients.json/bills.json mein "0 records" isliye
+// aa rahe the kyunki backup:writeSnapshot handler renderer ke IndexedDB cache
+// se data leta hai — aur IndexedDB iss hafte khud hi nahi khul rahi thi
+// (upar wala userData fix isko theek karega). Lekin sirf usi fix pe depend
+// nahi karna — chahe IndexedDB future mein kabhi phir kharab ho jaaye, disk
+// backup files khaali NAHI honi chahiye jab tak Supabase pe asli data
+// (565 patients, 610 bills — jo diagnostic report mein dikha) maujood hai.
+// Isliye main process ab seedha Supabase se periodically fetch karke
+// yahi JSON files bhar deta hai — koi browser storage beech mein nahi aata.
+function supabaseFetchAll(supabaseUrl, supabaseKey, table) {
+  return new Promise((resolve) => {
+    if (!supabaseUrl || !supabaseKey) return resolve({ ok: false, rows: [] });
+    const urlObj  = new URL(`${supabaseUrl}/rest/v1/${table}?select=*`);
+    const options = {
+      hostname: urlObj.hostname,
+      path:     urlObj.pathname + urlObj.search,
+      method:   'GET',
+      headers: {
+        'apikey':        supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Range-Unit':    'items',
+        'Range':         '0-9999',   // ek baar mein 10,000 tak rows — clinic scale ke liye kaafi
+      },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try { resolve({ ok: true, rows: JSON.parse(data) }); }
+          catch (e) { resolve({ ok: false, rows: [], reason: `parse fail: ${e.message}` }); }
+        } else {
+          resolve({ ok: false, rows: [], status: res.statusCode, body: data });
+        }
+      });
+    });
+    req.on('error', (e) => resolve({ ok: false, rows: [], reason: e.message }));
+    req.setTimeout(15000, () => { req.destroy(); resolve({ ok: false, rows: [], reason: 'timeout' }); });
+    req.end();
+  });
+}
+
+let isCloudBackingUp = false;
+async function runDirectCloudBackup() {
+  if (isCloudBackingUp) return;
+  const settings = readJSON(SETTINGS_FILE, {});
+  if (!settings.supabaseUrl || !settings.supabaseKey) return;
+
+  const isOnline = await checkInternet();
+  if (!isOnline) return;
+
+  isCloudBackingUp = true;
+  try {
+    const tableFilePairs = [
+      ['patients',       PATIENTS_FILE],
+      ['billing',        BILLS_FILE],
+      ['fracture_cases', FRACTURE_FILE],
+      ['fracture_xrays', XRAYS_FILE],
+    ];
+    let totalWritten = 0;
+    for (const [table, file] of tableFilePairs) {
+      const result = await supabaseFetchAll(settings.supabaseUrl, settings.supabaseKey, table);
+      if (result.ok && Array.isArray(result.rows)) {
+        writeJSON(file, result.rows);
+        totalWritten += result.rows.length;
+      } else {
+        logger.logWarn('cloud-backup', `${table} fetch fail — ${result.reason || result.status}`);
+      }
+    }
+    logger.logInfo('cloud-backup', `Direct Supabase → disk backup done — ${totalWritten} total records likhe gaye`);
+  } catch (e) {
+    logger.logError('cloud-backup', `Direct cloud backup fail: ${e.message}`);
+  } finally {
+    isCloudBackingUp = false;
+  }
 }
 
 // ─── AUTO SYNC ────────────────────────────────────────────────────────────────
@@ -598,6 +697,7 @@ ipcMain.handle('db:markSynced',  async (_e, { type, mobile }) => {
   return { success: true };
 });
 ipcMain.handle('db:syncNow',    async () => { await runAutoSync(); return { success: true, remaining: readJSON(PENDING_FILE).length }; });
+ipcMain.handle('backup:runDirectCloudBackup', async () => { await runDirectCloudBackup(); return { success: true, data: readJSON(PATIENTS_FILE) ? { patients: readJSON(PATIENTS_FILE).length, bills: readJSON(BILLS_FILE).length } : {} }; });
 ipcMain.handle('app:isOnline',  async () => ({ online: await checkInternet() }));
 
 ipcMain.handle('db:getStats', async () => {
@@ -1729,6 +1829,11 @@ app.whenReady().then(() => {
   }, 8000);
   setTimeout(runAutoSync, 5000);
   setInterval(runAutoSync, 60 * 1000);
+  // Direct cloud→disk backup — IndexedDB ki sehat pe depend nahi karta,
+  // isliye patients.json/bills.json kabhi "0 records" nahi dikhayenge
+  // jab tak internet + Supabase reachable hain.
+  setTimeout(runDirectCloudBackup, 12000);
+  setInterval(runDirectCloudBackup, 10 * 60 * 1000);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
