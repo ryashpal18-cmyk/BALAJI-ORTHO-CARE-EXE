@@ -8,6 +8,16 @@ on:
 permissions:
   contents: write
 
+# ✅ FIX: Agar thodi-thodi der mein 2 baar push ho (jaise 2 baar upload karna),
+# to pehle GitHub dono builds PARALLEL chalata tha — dono ek saath version
+# bump karke push karne ki koshish karte, aur jo doosra hota wo "rejected"
+# ho jaata (git push race condition). Ab sirf EK build ek waqt mein chalega;
+# agar naya push aaya to purana build cancel ho jaayega aur naya turant shuru
+# ho jaayega — race condition hamesha ke liye khatam.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest
@@ -35,18 +45,29 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git reset --hard origin/main
-          npm version patch --no-git-tag-version
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          git add package.json package-lock.json
-          git commit -m "chore: bump version to v$VERSION [skip ci]"
-          git tag -d "v$VERSION" 2>/dev/null || true
-          git push origin ":refs/tags/v$VERSION" 2>/dev/null || true
-          git tag "v$VERSION"
-          git push origin main
-          git push origin "v$VERSION"
+
+          # ✅ FIX: agar (concurrency lagne ke baad bhi, kisi rare case mein)
+          # push reject ho jaaye, to khud hi latest khींch ke dobara try karo
+          # — 3 baar tak — bina fail hue.
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git reset --hard origin/main
+            npm version patch --no-git-tag-version
+            VERSION=$(node -p "require('./package.json').version")
+            git add package.json package-lock.json
+            git commit -m "chore: bump version to v$VERSION [skip ci]"
+            git tag -d "v$VERSION" 2>/dev/null || true
+            git push origin ":refs/tags/v$VERSION" 2>/dev/null || true
+            git tag -f "v$VERSION"
+
+            if git push origin main && git push origin "v$VERSION" --force; then
+              echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+              break
+            fi
+
+            echo "Push reject hua (attempt $attempt) — latest khींch ke retry kar rahe hain..."
+            sleep 5
+          done
 
       - name: Build React App
         run: npm run build
