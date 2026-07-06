@@ -1,6 +1,6 @@
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { StatCard } from "@/components/StatCard";
-import { Users, Calendar, Receipt, UserPlus, IndianRupee, MessageCircle, Pencil, CheckCircle, X } from "lucide-react";
+import { Users, Calendar, Receipt, UserPlus, IndianRupee, MessageCircle, Pencil, CheckCircle, X, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -147,10 +147,16 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
-          <Button className="emergency-btn gap-2 w-fit" onClick={() => navigate("/opd")}>
-            <UserPlus className="h-4 w-4" />
-            New Patient Admission
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button className="emergency-btn gap-2 w-fit" onClick={() => navigate("/opd")}>
+              <UserPlus className="h-4 w-4" />
+              New Patient Admission
+            </Button>
+            <Button variant="outline" className="gap-2 w-fit" onClick={() => navigate("/daily-cash-book")}>
+              <Wallet className="h-4 w-4" />
+              Daily Cash Book
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 dash-animate dash-animate-1">
