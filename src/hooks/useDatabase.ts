@@ -337,6 +337,47 @@ export function useDeleteBill() {
   });
 }
 
+// ─── Daily Cash Book ───
+export function useCashBookEntries() {
+  return useQuery({
+    queryKey: ["cash_book_entries"],
+    ...QUERY_OPTS,
+    queryFn: async () => {
+      return offlineFetch("cash_book_entries", async () => {
+        const { data, error } = await supabase
+          .from("cash_book_entries")
+          .select("*")
+          .order("entry_date", { ascending: true })
+          .order("created_at", { ascending: true });
+        if (error) throw error;
+        return data || [];
+      });
+    },
+  });
+}
+
+export function useAddCashBookEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (entry: any) => offlineInsert("cash_book_entries", entry),
+    onSuccess: (newEntry: any) => {
+      qc.setQueryData(["cash_book_entries"], (old: any[] | undefined) => (old ? [...old, newEntry] : [newEntry]));
+      qc.invalidateQueries({ queryKey: ["cash_book_entries"] });
+    },
+  });
+}
+
+export function useDeleteCashBookEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => offlineDelete("cash_book_entries", id),
+    onSuccess: (_res, id) => {
+      qc.setQueryData(["cash_book_entries"], (old: any[] | undefined) => (old ? old.filter((e) => e.id !== id) : old));
+      qc.invalidateQueries({ queryKey: ["cash_book_entries"] });
+    },
+  });
+}
+
 export function saveLocalData(type: string, data: any) {
   try {
     const existing = JSON.parse(localStorage.getItem(`local_${type}`) || "[]");
