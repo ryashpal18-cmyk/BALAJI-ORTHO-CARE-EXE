@@ -732,13 +732,14 @@ ipcMain.handle('shell:print',      async (_e, html) => {
 ipcMain.handle('app:getBackupDir', async () => BACKUP_DIR);
 ipcMain.handle('app:getXraysDir',  async () => XRAYS_DIR);
 
-// ─── REAL INDEXEDDB → DISK SAFETY BACKUP ──────────────────────────────────
+// ─── SQLITE CACHE → DISK SAFETY BACKUP (JSON snapshot) ────────────────────
 // 🚨 CRITICAL: Pehle patients.json/bills.json etc. kabhi likhi hi nahi jaati
 // thi (purana legacy IPC path use nahi hota tha), isliye diagnostic report
-// mein hamesha "0 records" dikhta tha aur agar IndexedDB corrupt ho jaaye to
+// mein hamesha "0 records" dikhta tha aur agar cache corrupt ho jaaye to
 // koi asli backup nahi tha restore karne ke liye. Ab renderer periodically
-// (aur app band karte waqt) apna poora IndexedDB cache yahan bhejta hai, aur
+// (aur app band karte waqt) apna poora SQLite cache yahan bhejta hai, aur
 // hum use in files mein likh dete hain — ab ye files genuinely useful hain.
+// (Naam "IndexedDB" purane code se reh gaya tha — ab ye SQLite se aata hai.)
 const TABLE_FILE_MAP = {
   patients: PATIENTS_FILE,
   billing: BILLS_FILE,
@@ -757,7 +758,7 @@ ipcMain.handle('backup:writeSnapshot', async (_e, tables) => {
       writeJSON(targetFile, rows);
       written += rows.length;
     }
-    logger.logInfo('backup', `IndexedDB snapshot disk pe likha gaya — ${written} total records`);
+    logger.logInfo('backup', `Local safety snapshot disk pe likha gaya — ${written} total records`);
     return { success: true, written };
   } catch (e) {
     logger.logError('backup', `Snapshot write fail: ${e.message}`);
