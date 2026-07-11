@@ -2029,8 +2029,64 @@ app.on('web-contents-created', (_e, contents) => {
 
 // Renderer crash ya hang ho jaaye (e.g. out-of-memory, GPU crash) to bhi
 // log ho jaaye — warna sirf "white screen" dikhega aur pata nahi chalega kyun.
+//
+// ✅ AUTO-RECOVERY: SQLite (better-sqlite3) hamesha main process mein
+// synchronously chalta hai — koi bhi DB read/write ek hi IPC handler call
+// ke andar poora complete hota hai. Renderer (Chromium) process alag hai,
+// isliye renderer crash hone se koi SQLite transaction beech mein nahi
+// rukta aur DB corrupt hone ka koi risk nahi hai. Isliye window ko
+// recreate karna yahan safe hai.
+//
+// Recovery sirf genuinely-abnormal reasons pe try karte hain
+// ('crashed', 'oom', 'abnormal-exit', 'launch-failed', 'integrity-failure').
+// 'clean-exit' / 'killed' jaanbujh kar (intentional close/shutdown) ho sakta
+// hai, isliye unpe recreate nahi karte — warna app quit karte waqt bhi naya
+// window khul sakta hai.
+//
+// Crash-loop se bachne ke liye: 1 minute ke andar 3 se zyada baar crash ho
+// to auto-recovery रोक dete hain (taaki baar-baar crash karne waala issue
+// CPU/disk ko hammer na kare) — us case mein manual restart chahiye hoga,
+// jo pehle se bhi zaroori tha.
+const RENDERER_RECOVERABLE_REASONS = ['crashed', 'oom', 'abnormal-exit', 'launch-failed', 'integrity-failure'];
+const RENDERER_RECOVERY_WINDOW_MS  = 60 * 1000;
+const MAX_RENDERER_RECOVERY_ATTEMPTS = 3;
+let rendererRecoveryWindowStart = 0;
+let rendererRecoveryAttempts    = 0;
+
 app.on('render-process-gone', (_e, _webContents, details) => {
   logger.logError('render-process-gone', JSON.stringify(details));
+
+  if (!RENDERER_RECOVERABLE_REASONS.includes(details.reason)) {
+    logger.logInfo('render-process-gone', `Reason "${details.reason}" recoverable list mein nahi — auto-recreate skip.`);
+    return;
+  }
+
+  const now = Date.now();
+  if (now - rendererRecoveryWindowStart > RENDERER_RECOVERY_WINDOW_MS) {
+    rendererRecoveryWindowStart = now;
+    rendererRecoveryAttempts = 0;
+  }
+  rendererRecoveryAttempts++;
+
+  if (rendererRecoveryAttempts > MAX_RENDERER_RECOVERY_ATTEMPTS) {
+    logger.logError('render-process-gone', `${MAX_RENDERER_RECOVERY_ATTEMPTS} auto-recovery attempts 1 minute ke andar ho chuke — crash-loop lag raha hai, ab ruk rahe hain. Manual restart chahiye hoga.`);
+    return;
+  }
+
+  logger.logInfo('render-process-gone', `Auto-recovery attempt ${rendererRecoveryAttempts}/${MAX_RENDERER_RECOVERY_ATTEMPTS} — window recreate ho raha hai.`);
+
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
+  } catch (e) {
+    logger.logError('render-process-gone', `Purana window destroy karte waqt error: ${e.message}`);
+  }
+  mainWindow = null;
+
+  try {
+    createWindow();
+  } catch (e) {
+    logger.logError('render-process-gone', `Recovery ke dauran createWindow() fail: ${e.message}`);
+  }
 });
 
 app.on('child-process-gone', (_e, details) => {
