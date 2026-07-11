@@ -133,6 +133,53 @@ function writeJSON(filePath, data) {
   }
 }
 
+// ─── SAFE BULK-TABLE BACKUP WRITE ──────────────────────────────────────────
+// 🚨 CRITICAL FIX (Phase 2): backup:writeSnapshot aur runDirectCloudBackup
+// dono full-table-replace writes hain — poori file ko naye data se overwrite
+// karte hain. Agar source (SQLite cache read, ya Supabase fetch) kisi bhi
+// wajah se khaali array [] laut de (transient read error, network glitch,
+// auth issue) — jo dono jagah pehle se hi silently "[]" ban jaata tha — to
+// ye function VAASTAV mein khaali data ko file mein likh deta, aur isse
+// asli safety-backup khud hi corrupt ho jaata (bilkul usi scenario mein
+// jab uski sabse zyada zaroorat padti — SQLite ya network problem ke waqt).
+// Ye helper sirf ek guard add karta hai: agar naya data khaali hai LEKIN
+// purani file mein pehle se real records hain, to overwrite skip kar dete
+// hain aur warning log karte hain — data kabhi silently zero nahi hota.
+// (Genuine empty state — jaise pehli baar app chalna — abhi bhi likhi jaati
+// hai, kyunki tab purani file khud khaali/missing hoti hai.)
+function writeJSONSafe(filePath, rows, sourceLabel) {
+  if (Array.isArray(rows) && rows.length === 0) {
+    const existing = readJSON(filePath, []);
+    if (Array.isArray(existing) && existing.length > 0) {
+      logger.logWarn(
+        'backup-safety',
+        `${sourceLabel}: naya data khaali (0 records) mila lekin ${filePath} mein pehle se ${existing.length} records hain — overwrite SKIP kiya, purana backup surakshit rakha.`
+      );
+      return { written: false, skipped: true, count: existing.length };
+    }
+  }
+  const ok = writeJSON(filePath, rows);
+  return { written: ok, skipped: false, count: Array.isArray(rows) ? rows.length : 0 };
+}
+
+// ─── GENERIC ATOMIC FILE WRITE (tmp + rename) ─────────────────────────────
+// 🚨 FIX (Phase 2.1): backup:writeJson/backup:writeBinary (Settings → Backup
+// tab ka "Backup Now" + daily/weekly auto-backup) pehle SEEDHA fullPath par
+// fs.writeFileSync karte the — koi tmp file, koi atomic rename nahi. Agar
+// app crash/power-cut beech mein ho jaaye (bade JSON/Excel export ke case
+// mein write ek hi syscall mein complete nahi bhi ho sakta), to exact
+// backup filename par ek PARTIAL/corrupt file reh jaati — aur Dr ko pata
+// bhi nahi chalta ki ye specific backup file corrupt hai, kyunki filename
+// bilkul normal dikhta hai. Ab writeJSON() jaisa hi tmp+rename pattern use
+// karte hain — crash ho to sirf ek orphan ".tmp" file rehti hai (jo kabhi
+// backup ki tarah treat nahi hoti), asli filename par ya to poori file hai
+// ya bilkul nahi hai — kabhi aadhi-likhi nahi.
+function atomicWriteFile(fullPath, data) {
+  const tmpPath = `${fullPath}.tmp`;
+  fs.writeFileSync(tmpPath, data);
+  fs.renameSync(tmpPath, fullPath);
+}
+
 // ─── INIT ALL JSON FILES ──────────────────────────────────────────────────────
 function initFiles() {
   if (!fs.existsSync(BILLS_FILE))    writeJSON(BILLS_FILE,    []);
@@ -349,8 +396,8 @@ async function runDirectCloudBackup() {
     for (const [table, file] of tableFilePairs) {
       const result = await supabaseFetchAll(settings.supabaseUrl, settings.supabaseKey, table);
       if (result.ok && Array.isArray(result.rows)) {
-        writeJSON(file, result.rows);
-        totalWritten += result.rows.length;
+        const res = writeJSONSafe(file, result.rows, `cloud-backup:${table}`);
+        totalWritten += res.count;
       } else {
         logger.logWarn('cloud-backup', `${table} fetch fail — ${result.reason || result.status}`);
       }
@@ -751,14 +798,27 @@ ipcMain.handle('backup:writeSnapshot', async (_e, tables) => {
   try {
     if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
     let written = 0;
+    const failedTables = [];
     for (const [tableName, rows] of Object.entries(tables || {})) {
       if (!Array.isArray(rows)) continue;
       const targetFile = TABLE_FILE_MAP[tableName]
         || path.join(BACKUP_DIR, `${tableName}.json`);
-      writeJSON(targetFile, rows);
-      written += rows.length;
+      const res = writeJSONSafe(targetFile, rows, `writeSnapshot:${tableName}`);
+      written += res.count;
+      // 🚨 FIX (Phase 2.1): res.written===false + res.skipped===false ka
+      // matlab genuine I/O failure hai (disk full, permission denied, drive
+      // removed) — writeJSON() ye already logError karta hai, lekin ye
+      // handler pehle iska result CHECK hi nahi karta tha, hamesha
+      // "success: true" bol deta tha chahe file likhna fail ho gaya ho.
+      // Isse disk-full jaisi situation mein app chupchaap "backup ho gaya"
+      // bol deta, jabki kuch bhi disk par nahi likha gaya tha.
+      if (!res.written && !res.skipped) failedTables.push(tableName);
     }
     logger.logInfo('backup', `Local safety snapshot disk pe likha gaya — ${written} total records`);
+    if (failedTables.length > 0) {
+      logger.logError('backup', `Snapshot write PARTIALLY FAILED — tables likhi nahi ja saki: ${failedTables.join(', ')} (disk full / permission / drive disconnect ho sakta hai)`);
+      return { success: false, written, failedTables, error: `Write failed for: ${failedTables.join(', ')}` };
+    }
     return { success: true, written };
   } catch (e) {
     logger.logError('backup', `Snapshot write fail: ${e.message}`);
@@ -872,7 +932,7 @@ ipcMain.handle('backup:writeJson', async (_e, { fileName, jsonString }) => {
     ensureAppBackupDir();
     const safeName = String(fileName || 'backup.json').replace(/[/\\]/g, '_');
     const fullPath = path.join(APP_BACKUP_DIR, safeName);
-    fs.writeFileSync(fullPath, jsonString, 'utf-8');
+    atomicWriteFile(fullPath, jsonString);
     return { success: true, path: fullPath };
   } catch (e) { return { success: false, error: e.message }; }
 });
@@ -882,7 +942,7 @@ ipcMain.handle('backup:writeBinary', async (_e, { fileName, base64Data }) => {
     ensureAppBackupDir();
     const safeName = String(fileName || 'backup.xlsx').replace(/[/\\]/g, '_');
     const fullPath = path.join(APP_BACKUP_DIR, safeName);
-    fs.writeFileSync(fullPath, Buffer.from(base64Data, 'base64'));
+    atomicWriteFile(fullPath, Buffer.from(base64Data, 'base64'));
     return { success: true, path: fullPath };
   } catch (e) { return { success: false, error: e.message }; }
 });
