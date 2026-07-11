@@ -7,6 +7,7 @@ import { isOnline, runSync } from "./offlineSync";
 import { cLog } from "@/lib/clientLogger";
 import {
   cacheGetAll,
+  cacheGetRow,
   cacheReplaceTable,
   cacheUpsertRow,
   cacheUpsertRowFromServer,
@@ -119,8 +120,12 @@ export async function offlineUpdate(
   const idField = opts.idField || "id";
 
   // ✅ HAMESHA local-first
-  const cached = await cacheGetAll(table);
-  const existing = cached.find((r: any) => r[idField] === rowId) || { [idField]: rowId };
+  // 🚀 PERF: pehle yahan cacheGetAll(table) + array.find() hota tha — matlab
+  // EK row update karne ke liye poori table (saare rows, JSON.parse sabka)
+  // IPC se main process se laate the. 50k+ patients pe ye har edit/save par
+  // dhीre ho jaata. cacheGetRow() seedha us ek row ko _key (table::rowId) se
+  // SQLite PRIMARY KEY lookup karta hai — O(1) index hit, poori table nahi.
+  const existing = (await cacheGetRow(table, rowId)) || { [idField]: rowId };
   const merged = { ...existing, ...updates, _pendingSync: true };
   await cacheUpsertRow(table, merged, idField);
   await queueAdd({ table, op: "update", payload: updates, rowId });
