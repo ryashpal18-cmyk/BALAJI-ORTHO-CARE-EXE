@@ -1,4 +1,5 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 import React from "react";
 
 class ErrorBoundary extends React.Component<
@@ -83,7 +84,9 @@ import BookingRequests from "./pages/BookingRequests";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
-const queryClient = new QueryClient();
+// ✅ queryClient ab "@/lib/queryClient" se import hota hai — offlineSync.ts
+// isi shared instance ko Background Sync ke baad invalidate karta hai
+// (taaki useSearchPatients/usePatients turant fresh SQLite data dikhayein).
 
 // QueryClientProvider ke ANDAR render hota hai, isliye useQuery yahan safe hai
 function AppointmentReminders() {
