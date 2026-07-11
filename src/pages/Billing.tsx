@@ -545,11 +545,19 @@ const filteredPatients = patients
     if (!patientSearch) return true;
 
     const q = patientSearch.toLowerCase();
+    const searchDigits = patientSearch.replace(/\D/g, "");
 
-    return (
-      p.name?.toLowerCase().includes(q) ||
-      p.mobile?.includes(patientSearch.replace(/\D/g, ""))
-    );
+    const nameMatch = p.name?.toLowerCase().includes(q);
+    // 🚨 FIX: pehle "p.mobile?.includes(patientSearch.replace(/\D/g, ""))" tha —
+    // jab search text mein koi digit nahi hota (jaise sirf naam type kiya),
+    // replace(/\D/g,"") khaali string "" return karta tha, aur
+    // "anyString".includes("") hamesha true hota hai. Isse naam-search karte
+    // waqt mobile-check hamesha pass ho jaata tha aur saare patients (jinke
+    // paas mobile number hai) match ho jaate the — asli naam-match wala
+    // patient list mein kahin dab jaata tha, isliye "nahi milta" jaisa lagta tha.
+    const mobileMatch = searchDigits.length > 0 && p.mobile?.includes(searchDigits);
+
+    return nameMatch || mobileMatch;
 })
 
 .sort(
