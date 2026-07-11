@@ -131,6 +131,26 @@ export async function cacheReplaceTable(table: string, rows: any[], idField = "i
   // server-refresh se overwrite nahi karenge — local change hi jeetega.
   try {
     const existing = await cacheGetAll(table);
+
+    // 🚨 PRODUCTION-AUDIT FIX: same class of bug already fixed in main.js
+    // (writeJSONSafe) — agar server se aaya naya data khaali [] hai LEKIN
+    // local cache mein pehle se real records hain, to ye silently poori
+    // table khaali kar deta tha. Ye khaali result ek genuine "no data"
+    // state ki wajah se nahi, balki transient RLS/auth glitch ki wajah se
+    // bhi ho sakta hai (Supabase aise mein error throw nahi karta, sirf
+    // empty array deta hai) — jo error-catch guard ko bypass kar deta hai.
+    // Fix: agar naya data khaali hai AUR local cache mein pehle se records
+    // hain, to overwrite skip karo (genuine empty state — jaise fresh
+    // install — abhi bhi sahi se likhi jaati hai, kyunki tab cache khud
+    // khaali hoti hai).
+    if (Array.isArray(rows) && rows.length === 0 && existing.length > 0) {
+      cLog.warn(
+        "sqlite",
+        `${table} cacheReplaceTable — server se 0 records aaye lekin local cache mein ${existing.length} records hain, overwrite SKIP kiya (data-loss guard)`
+      );
+      return;
+    }
+
     const pendingRows = existing.filter((r) => r && r._pendingSync);
     const pendingIds = new Set(pendingRows.map((r) => String(r[idField])));
 
