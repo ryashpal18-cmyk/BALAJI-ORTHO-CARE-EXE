@@ -13,6 +13,7 @@ import { supabase }  from "@/integrations/supabase/client";
 import { queueAdd }  from "@/lib/offlineDb";
 import { isOnline }  from "@/lib/offlineSync";
 import { cLog }      from "@/lib/clientLogger";
+import { isValidMobile } from "@/lib/utils";
 
 export type SendSmsResult = {
   ok:     boolean;   // SMS gaya ya queue mein gaya — dono ok:true
@@ -65,6 +66,16 @@ export async function sendSMS(
   if (!mobile) {
     cLog.warn("sms", `Mobile number nahi hai — patient: ${patientName}`);
     return { ok: false, queued: false, error: "Mobile number nahi hai" };
+  }
+
+  // 🚨 FIX: "0000000000", "1111111111" jaise dummy/invalid numbers pehle
+  // seedha queue mein chale jaate the, phir gateway se hamesha fail hote
+  // (aur offline hone par hamesha ke liye retry queue mein atke rehte —
+  // kabhi clear na hone waala infinite retry). Ab bhejne se pehle hi rok
+  // dete hain, taaki queue aur SMS logs fizul na bharen.
+  if (!isValidMobile(mobile)) {
+    cLog.warn("sms", `Invalid/dummy mobile number — SMS skip kiya, patient: ${patientName}, mobile: ${mobile}`);
+    return { ok: false, queued: false, error: "Mobile number invalid hai — SMS nahi bheja gaya" };
   }
 
   const num = normalizeMobile(mobile);
