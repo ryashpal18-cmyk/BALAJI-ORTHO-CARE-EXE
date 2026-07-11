@@ -234,7 +234,7 @@ export default function SettingsPage() {
 
   const handleNuclearReset = async () => {
     const confirmed = window.confirm(
-      "⚠️ IndexedDB Nuclear Reset\n\n" +
+      "⚠️ Offline Storage Nuclear Reset\n\n" +
       "Ye app ki local cache files delete karke restart karega.\n" +
       "Aapka asli data (patients, bills) SAFE rahega — Supabase aur C:\\Balaji_Health_Backup\\ mein hai.\n\n" +
       "App 2 second mein band hokar dobara khulega.\n\n" +
@@ -1375,7 +1375,7 @@ export default function SettingsPage() {
                 <CardHeader>
                   <CardTitle style={{ fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
                     <FileWarning style={{ width: "16px", height: "16px", color: "#dc2626" }} />
-                    🔴 IndexedDB Nuclear Reset
+                    🔴 Offline Storage Nuclear Reset
                   </CardTitle>
                 </CardHeader>
                 <CardContent style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -1416,7 +1416,7 @@ export default function SettingsPage() {
                   >
                     {nuclearRunning
                       ? <><Loader2 style={{ width: "14px", height: "14px", animation: "spin 1s linear infinite" }} />Reset ho raha hai... App band hoga</>
-                      : <><XCircle style={{ width: "14px", height: "14px" }} />IndexedDB Reset &amp; Restart</>
+                      : <><XCircle style={{ width: "14px", height: "14px" }} />Offline DB Reset &amp; Restart</>
                     }
                   </Button>
                 </CardContent>
