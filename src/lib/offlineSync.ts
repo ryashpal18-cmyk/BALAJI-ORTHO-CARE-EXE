@@ -4,6 +4,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { cLog } from "@/lib/clientLogger";
+import { isValidMobile } from "@/lib/utils";
 import { queueGetAll, queueRemove, queueUpdate, queueRemapRowId, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetAll, backupCacheToDisk, QueuedMutation } from "./offlineDb";
 
 
@@ -390,6 +391,17 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
 
   if (m.op === "sms") {
     const { mobile, message, patientName, smsType } = m.payload;
+
+    // 🚨 FIX: Agar mobile invalid/dummy hai (jaise 0000000000), to gateway
+    // ko baar-baar call karne ka koi fayda nahi — hamesha fail hi hoga.
+    // Isko ek normal "fail aur retry karo" jaisa treat na karke seedha
+    // permanently-skip maan lete hain (queue se hata dete hain), taaki
+    // MAX_RETRIES tak fizul retry cycles na ho.
+    if (!isValidMobile(mobile)) {
+      cLog.warn("sync", `Invalid/dummy mobile — SMS queue se hata diya (kabhi nahi jaayega): ${patientName}, mobile: ${mobile}`);
+      return;
+    }
+
     cLog.info("sync", `SMS bhej raha hai — patient: ${patientName}, type: ${smsType}`);
 
     // ✅ Electron IPC use karo — direct fetch() Electron mein CORS fail karta hai
@@ -456,6 +468,16 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
     if (queue.length > 0) console.info(`Sync shuru — ${queue.length} items pending`);
 
     for (const m of queue) {
+      // 🚨 FIX: MAX_RETRIES constant define tha lekin kabhi enforce nahi hota
+      // tha — ek permanently-failing mutation (jaise invalid mobile pe SMS,
+      // ya deleted parent row) har 30 second mein dobara try hota rehta,
+      // hamesha fail hota, aur queue kabhi khaali nahi hota tha (queue
+      // growth + fizul API calls + logs bharte rehna). Ab MAX_RETRIES cross
+      // karne ke baad us mutation ko skip kar dete hain — data queue mein
+      // surakshit rehta hai (delete nahi karte, taaki manual review/ silent
+      // data-loss na ho) lekin bar-bar try nahi hota.
+      if ((m.retries || 0) >= MAX_RETRIES) continue;
+
       try {
         await applyMutation(m);
         if (m.id !== undefined) await queueRemove(m.id);
@@ -467,7 +489,7 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
         if (m.id !== undefined) {
           const retries = (m.retries || 0) + 1;
           await queueUpdate(m.id, { retries, lastError: msg });
-          if (retries >= MAX_RETRIES) console.error(`MAX RETRIES — permanently failed! op: ${m.op}`);
+          if (retries >= MAX_RETRIES) console.error(`MAX RETRIES — permanently failed, ab retry nahi hoga! op: ${m.op}`);
         }
         lastError = msg;
       }
