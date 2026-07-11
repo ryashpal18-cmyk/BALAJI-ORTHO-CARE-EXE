@@ -4,7 +4,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { cLog } from "@/lib/clientLogger";
-import { queueGetAll, queueRemove, queueUpdate, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetAll, backupCacheToDisk, QueuedMutation } from "./offlineDb";
+import { queueGetAll, queueRemove, queueUpdate, queueRemapRowId, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetAll, backupCacheToDisk, QueuedMutation } from "./offlineDb";
 
 
 declare global {
@@ -345,7 +345,13 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     // ke baad), to same id pe dobara likhega, duplicate row nahi banega.
     const { data, error } = await supabase.from(table).upsert(payload, { onConflict: "id" }).select().single();
     if (error) { console.error(`Insert failed — table: ${table}`); throw error; }
-    if (m.tempId && data) await cacheReplaceRowKey(table, m.tempId, data, "id");
+    if (m.tempId && data) {
+      await cacheReplaceRowKey(table, m.tempId, data, "id");
+      // ✅ Isi row par pehle se pending koi update/delete mutation ho to
+      // uska rowId bhi purane temp id se naye asli id par shift kar do —
+      // warna wo mutation hamesha "PENDING_PARENT_INSERT" bol ke atka rahega.
+      await queueRemapRowId(table, m.tempId, (data as any).id);
+    }
     console.info(`Insert sync OK — table: ${table}`);
     return;
   }

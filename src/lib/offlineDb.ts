@@ -65,6 +65,53 @@ function createStores(db: IDBDatabase) {
     db.createObjectStore(META_STORE, { keyPath: "key" });
 }
 
+// ─── Startup disk-backup auto-restore ──────────────────────────────────────
+// 🚨 ROOT CAUSE FIX (Problem: "offline data save hota hai, app close-reopen
+// karne par gayab ho jaata hai"): openDb() ke andar agar IndexedDB 3 baar
+// khulne mein fail ho (slow disk / antivirus lock / roaming profile jaise
+// wajah se — genuinely corrupt na bhi ho), to niche wala fallback poori DB
+// DELETE karke FRESH khaali DB bana deta tha. backupCacheToDisk() har 3 min
+// mein patients/billing/etc. ko C:\Balaji_Health_Backup\*.json mein likhta
+// hai, aur main.js mein 'backup:readSnapshot' IPC handler bhi maujood hai —
+// lekin renderer side se ye kabhi call hi nahi hota tha, isliye fresh/khaali
+// DB milne par purana data disk pe hote hue bhi wapas load nahi hota tha.
+// Ab: jab bhi IndexedDB khulti hai aur cache khaali paayi jaati hai, disk
+// backup se turant restore kar dete hain (sirf ek baar per app session).
+let _diskRestoreAttempted = false;
+
+async function restoreFromDiskBackupIfEmpty(db: IDBDatabase): Promise<void> {
+  if (_diskRestoreAttempted) return;
+  _diskRestoreAttempted = true;
+  try {
+    const w = window as any;
+    if (!w?.electron?.readBackupSnapshot) return; // browser mode — skip, sirf Electron mein
+
+    const t = db.transaction([CACHE_STORE], "readonly");
+    const all: any[] = await reqToPromise(t.objectStore(CACHE_STORE).getAll());
+    const hasAnyData = all.some(
+      (r) => typeof r._key === "string" && BACKUP_TABLES.some((tbl) => r._key.startsWith(`${tbl}::`))
+    );
+    if (hasAnyData) return; // cache mein pehle se data hai — backup se overwrite mat karo
+
+    const res = await w.electron.readBackupSnapshot();
+    if (!res?.success || !res.data) return;
+
+    let restored = 0;
+    for (const table of BACKUP_TABLES) {
+      const rows = res.data[table];
+      if (Array.isArray(rows) && rows.length > 0) {
+        await cacheReplaceTable(table, rows);
+        restored += rows.length;
+      }
+    }
+    if (restored > 0) {
+      cLog.info("indexeddb", `IndexedDB khaali mili — disk backup se ${restored} records restore ho gaye`);
+    }
+  } catch (err) {
+    cLog.error("indexeddb", "Disk backup se auto-restore fail", err);
+  }
+}
+
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise(async (resolve, reject) => {
@@ -109,7 +156,7 @@ function openDb(): Promise<IDBDatabase> {
           }
         }
       }
-      if (db) { resolve(db); return; }
+      if (db) { await restoreFromDiskBackupIfEmpty(db); resolve(db); return; }
       throw lastErr;
     } catch (err) {
       cLog.error("indexeddb", "3 baar try karne ke baad bhi DB nahi khuli — ab corrupt maan ke delete + fresh banayenge", err);
@@ -118,6 +165,7 @@ function openDb(): Promise<IDBDatabase> {
         await deleteDb();
         const db2 = await tryOpen(true);
         dbPromise = Promise.resolve(db2);
+        await restoreFromDiskBackupIfEmpty(db2);
         resolve(db2);
       } catch (err2) {
         cLog.error("indexeddb", "Fresh DB bhi nahi khuli", err2);
@@ -342,6 +390,33 @@ export async function queueGetAll(): Promise<QueuedMutation[]> {
       _dbErrorLog("Fresh DB bhi fail — IndexedDB environment problem, empty return kar raha hai", err2);
       return []; // app crash mat karo — empty return karo
     }
+  }
+}
+
+// 🚨 FIX: Jab koi bill offline banaya jaaye (temp "local_xxx" id) aur turant
+// (uske insert-sync se pehle hi) edit bhi kar diya jaaye, to us edit ki
+// "update" mutation queue mein rowId: "local_xxx" ke saath ban jaati thi.
+// Jab baad mein insert sync hokar row ka asli Supabase id mil jaata tha,
+// sirf cache ki key rename hoti thi (cacheReplaceRowKey) — lekin queue mein
+// pada purana "update" mutation hamesha "local_xxx" rowId hi rakhta reh
+// jaata, jisse wo HAMESHA "PENDING_PARENT_INSERT" throw karta rehta aur us
+// edit ka data kabhi bhi Supabase (cloud) tak sync hi nahi ho paata — sirf
+// isi PC ki IndexedDB tak seemit reh jaata. Ab insert sync hote hi baaki
+// pending mutations ka rowId bhi naye id se update kar dete hain.
+export async function queueRemapRowId(table: string, oldRowId: string, newRowId: string) {
+  try {
+    const db = await openDb();
+    const t  = tx(db, [QUEUE_STORE], "readwrite");
+    const store = t.objectStore(QUEUE_STORE);
+    const all: QueuedMutation[] = await reqToPromise(store.getAll());
+    for (const m of all) {
+      if (m.table === table && m.rowId === oldRowId && m.id !== undefined) {
+        store.put({ ...m, rowId: newRowId });
+      }
+    }
+    await new Promise((res, rej) => { t.oncomplete = () => res(true); t.onerror = () => rej(t.error); });
+  } catch (err) {
+    cLog.error("queue", `queueRemapRowId fail — table: ${table}, old: ${oldRowId} → new: ${newRowId}`, err);
   }
 }
 
