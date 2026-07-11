@@ -18,6 +18,7 @@ files:
   - main.js
   - preload.js
   - logger.cjs
+  - sqlite-store.cjs
   - package.json
 
 win:

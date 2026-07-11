@@ -61,6 +61,25 @@ contextBridge.exposeInMainWorld('electron', {
   writeBackupSnapshot: (tables) => ipcRenderer.invoke('backup:writeSnapshot', tables),
   readBackupSnapshot:  ()       => ipcRenderer.invoke('backup:readSnapshot'),
 
+  // ── Offline Store (SQLite — IndexedDB replacement) ───────────
+  offline: {
+    cacheGetAll:       (table)                        => ipcRenderer.invoke('offline:cacheGetAll', table),
+    cacheGetRow:        (table, rowId)                 => ipcRenderer.invoke('offline:cacheGetRow', { table, rowId }),
+    cacheSetRows:       (table, rows, idField)         => ipcRenderer.invoke('offline:cacheSetRows', { table, rows, idField }),
+    cacheReplaceTable:  (table, rows, idField)         => ipcRenderer.invoke('offline:cacheReplaceTable', { table, rows, idField }),
+    cacheUpsertRow:     (table, row, idField)          => ipcRenderer.invoke('offline:cacheUpsertRow', { table, row, idField }),
+    cacheDeleteRow:     (table, rowId)                 => ipcRenderer.invoke('offline:cacheDeleteRow', { table, rowId }),
+    cacheReplaceRowKey: (table, oldId, newRow, idField)=> ipcRenderer.invoke('offline:cacheReplaceRowKey', { table, oldId, newRow, idField }),
+    queueAdd:           (mutation)                     => ipcRenderer.invoke('offline:queueAdd', mutation),
+    queueGetAll:        ()                             => ipcRenderer.invoke('offline:queueGetAll'),
+    queueRemove:        (id)                            => ipcRenderer.invoke('offline:queueRemove', id),
+    queueUpdate:        (id, patch)                     => ipcRenderer.invoke('offline:queueUpdate', { id, patch }),
+    metaGet:            (key)                           => ipcRenderer.invoke('offline:metaGet', key),
+    metaSet:            (key, value)                    => ipcRenderer.invoke('offline:metaSet', { key, value }),
+    isLegacyMigrated:   ()                              => ipcRenderer.invoke('offline:isLegacyMigrated'),
+    importLegacyDump:   (dump)                          => ipcRenderer.invoke('offline:importLegacyDump', dump),
+  },
+
   // ── Backup ─────────────────────────────────────────────────
   backupGetDir:       ()      => ipcRenderer.invoke('backup:getDir'),
   backupWriteJson:    (data)  => ipcRenderer.invoke('backup:writeJson', data),

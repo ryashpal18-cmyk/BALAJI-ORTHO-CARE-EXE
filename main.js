@@ -13,6 +13,7 @@ const fs    = require('fs');
 const https = require('https');
 const { autoUpdater } = require('electron-updater');
 const logger = require('./logger.cjs');
+const sqliteStore = require('./sqlite-store.cjs');
 
 // Process-level crash/error handlers jitni jaldi ho sake set kar do, taaki
 // startup ke dauran bhi koi exception silently na guzar jaaye.
@@ -762,6 +763,88 @@ ipcMain.handle('backup:writeSnapshot', async (_e, tables) => {
     logger.logError('backup', `Snapshot write fail: ${e.message}`);
     return { success: false, error: e.message };
   }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  IPC — OFFLINE STORE (SQLite — IndexedDB replacement)
+// ═══════════════════════════════════════════════════════════════
+// Renderer (src/lib/offlineDb.ts) IndexedDB ke bajaye ab in handlers
+// ke through main-process SQLite file se baat karta hai. Har handler
+// try/catch mein hai taaki kisi ek query fail hone se poora app na gire.
+
+ipcMain.handle('offline:cacheGetAll', async (_e, table) => {
+  try { return { success: true, data: sqliteStore.cacheGetAll(table) }; }
+  catch (e) { logger.logError('sqlite', `cacheGetAll(${table}) fail: ${e.message}`); return { success: false, data: [] }; }
+});
+
+ipcMain.handle('offline:cacheGetRow', async (_e, { table, rowId }) => {
+  try { return { success: true, data: sqliteStore.cacheGetRow(table, rowId) }; }
+  catch (e) { logger.logError('sqlite', `cacheGetRow(${table}) fail: ${e.message}`); return { success: false, data: undefined }; }
+});
+
+ipcMain.handle('offline:cacheSetRows', async (_e, { table, rows, idField }) => {
+  try { sqliteStore.cacheSetRows(table, rows, idField || 'id'); return { success: true }; }
+  catch (e) { logger.logError('sqlite', `cacheSetRows(${table}) fail: ${e.message}`); return { success: false }; }
+});
+
+ipcMain.handle('offline:cacheReplaceTable', async (_e, { table, rows, idField }) => {
+  try { sqliteStore.cacheReplaceTable(table, rows, idField || 'id'); return { success: true }; }
+  catch (e) { logger.logError('sqlite', `cacheReplaceTable(${table}) fail: ${e.message}`); return { success: false }; }
+});
+
+ipcMain.handle('offline:cacheUpsertRow', async (_e, { table, row, idField }) => {
+  try { sqliteStore.cacheUpsertRow(table, row, idField || 'id'); return { success: true }; }
+  catch (e) { logger.logError('sqlite', `cacheUpsertRow(${table}) fail: ${e.message}`); return { success: false }; }
+});
+
+ipcMain.handle('offline:cacheDeleteRow', async (_e, { table, rowId }) => {
+  try { sqliteStore.cacheDeleteRow(table, rowId); return { success: true }; }
+  catch (e) { logger.logError('sqlite', `cacheDeleteRow(${table}) fail: ${e.message}`); return { success: false }; }
+});
+
+ipcMain.handle('offline:cacheReplaceRowKey', async (_e, { table, oldId, newRow, idField }) => {
+  try { sqliteStore.cacheReplaceRowKey(table, oldId, newRow, idField || 'id'); return { success: true }; }
+  catch (e) { logger.logError('sqlite', `cacheReplaceRowKey(${table}) fail: ${e.message}`); return { success: false }; }
+});
+
+ipcMain.handle('offline:queueAdd', async (_e, mutation) => {
+  try { return { success: true, id: sqliteStore.queueAdd(mutation) }; }
+  catch (e) { logger.logError('sqlite', `queueAdd fail: ${e.message}`); return { success: false, id: -1 }; }
+});
+
+ipcMain.handle('offline:queueGetAll', async () => {
+  try { return { success: true, data: sqliteStore.queueGetAll() }; }
+  catch (e) { logger.logError('sqlite', `queueGetAll fail: ${e.message}`); return { success: false, data: [] }; }
+});
+
+ipcMain.handle('offline:queueRemove', async (_e, id) => {
+  try { sqliteStore.queueRemove(id); return { success: true }; }
+  catch (e) { logger.logError('sqlite', `queueRemove fail: ${e.message}`); return { success: false }; }
+});
+
+ipcMain.handle('offline:queueUpdate', async (_e, { id, patch }) => {
+  try { sqliteStore.queueUpdate(id, patch); return { success: true }; }
+  catch (e) { logger.logError('sqlite', `queueUpdate fail: ${e.message}`); return { success: false }; }
+});
+
+ipcMain.handle('offline:metaGet', async (_e, key) => {
+  try { return { success: true, value: sqliteStore.metaGet(key) }; }
+  catch (e) { logger.logError('sqlite', `metaGet(${key}) fail: ${e.message}`); return { success: false, value: undefined }; }
+});
+
+ipcMain.handle('offline:metaSet', async (_e, { key, value }) => {
+  try { sqliteStore.metaSet(key, value); return { success: true }; }
+  catch (e) { logger.logError('sqlite', `metaSet(${key}) fail: ${e.message}`); return { success: false }; }
+});
+
+ipcMain.handle('offline:isLegacyMigrated', async () => {
+  try { return { success: true, migrated: sqliteStore.isLegacyMigrated() }; }
+  catch (e) { return { success: false, migrated: true }; } // fail-safe: dobara migrate mat karo
+});
+
+ipcMain.handle('offline:importLegacyDump', async (_e, dump) => {
+  try { return { success: true, ...sqliteStore.importLegacyDump(dump) }; }
+  catch (e) { logger.logError('sqlite', `importLegacyDump fail: ${e.message}`); return { success: false }; }
 });
 
 // Restore ke liye — agar kabhi IndexedDB genuinely mar jaaye, is se data wapas mil sakta hai
@@ -1751,15 +1834,16 @@ ipcMain.handle('safety:openSnapshotFolder', async () => {
   return { success: true };
 });
 
-// ─── NUCLEAR INDEXEDDB RESET ─────────────────────────────────────────────────
-// Jab IndexedDB itni corrupt ho ki code se bhi fix na ho —
-// ye handler Windows pe physical IndexedDB files delete karta hai,
-// phir app restart karta hai — sab automatic, user kuch nahi karta.
+// ─── NUCLEAR OFFLINE-DB RESET ─────────────────────────────────────────────────
+// Jab offline storage itni corrupt ho ki code se bhi fix na ho —
+// ye handler purani IndexedDB files (agar kisi PC pe legacy se pade hain)
+// AUR ab wala SQLite offline_cache.db (naya main storage) — dono delete
+// karta hai, phir app restart karta hai — sab automatic, user kuch nahi karta.
 ipcMain.handle('app:nuclearIndexedDBReset', async () => {
   try {
-    logger.logInfo('nuclear-reset', 'Nuclear IndexedDB reset shuru...');
+    logger.logInfo('nuclear-reset', 'Nuclear offline-store reset shuru...');
 
-    // ── Step 1: IndexedDB folder path nikalo ──
+    // ── Step 1: legacy IndexedDB folder path nikalo (purane installs ke liye) ──
     const userDataPath  = app.getPath('userData');
     const idbPaths = [
       path.join(userDataPath, 'IndexedDB'),
@@ -1788,10 +1872,34 @@ ipcMain.handle('app:nuclearIndexedDBReset', async () => {
       }
     }
 
+    // ── Step 2: naya SQLite offline store (offline_cache.db + -wal/-shm) reset karo ──
+    try {
+      sqliteStore.close(); // pehle file handle release karo, warna delete lock error dega
+      const sqlitePaths = [
+        path.join(BACKUP_DIR, 'offline_cache.db'),
+        path.join(BACKUP_DIR, 'offline_cache.db-wal'),
+        path.join(BACKUP_DIR, 'offline_cache.db-shm'),
+      ];
+      for (const p of sqlitePaths) {
+        if (fs.existsSync(p)) {
+          try {
+            fs.rmSync(p, { force: true });
+            deleted.push(p);
+            logger.logInfo('nuclear-reset', `Deleted: ${p}`);
+          } catch (e) {
+            failed.push(`${p}: ${e.message}`);
+            logger.logWarn('nuclear-reset', `Delete fail: ${p} — ${e.message}`);
+          }
+        }
+      }
+    } catch (e) {
+      logger.logWarn('nuclear-reset', `SQLite reset step fail: ${e.message}`);
+    }
+
     logger.logInfo('nuclear-reset', `Reset complete — Deleted: ${deleted.length}, Failed: ${failed.length}`);
     logger.logInfo('nuclear-reset', 'App 2 second mein restart hoga...');
 
-    // ── Step 2: 2 second baad restart ──
+    // ── Step 3: 2 second baad restart ──
     setTimeout(() => {
       app.relaunch();
       app.exit(0);
@@ -1816,6 +1924,14 @@ ipcMain.handle('app:nuclearIndexedDBReset', async () => {
 app.whenReady().then(() => {
   ensureDirs();
   initFiles();
+  // ✅ IndexedDB replace — offline cache/queue ab isi C:\Balaji_Health_Backup
+  // disk pe ek real SQLite file (offline_cache.db) mein rehta hai. Isse
+  // Chromium ke corrupt-prone LevelDB storage ka dependency khatam ho gaya.
+  try {
+    sqliteStore.init(BACKUP_DIR);
+  } catch (e) {
+    logger.logError('app-lifecycle', `SQLite offline store init fail: ${e.message}`);
+  }
   seedPatientsOnFirstRun();
   ensureAppBackupDir();
   takeDailySafetySnapshot();
