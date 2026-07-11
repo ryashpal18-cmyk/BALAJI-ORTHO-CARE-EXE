@@ -49,7 +49,7 @@ import {
   useUpdateBill,
   useDeleteBill,
 } from "@/hooks/useDatabase";
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { isOnline } from "@/lib/offlineSync";
@@ -540,37 +540,42 @@ export default function Billing() {
   );
 
   
-const filteredPatients = patients
-?.filter((p) => {
-    if (!patientSearch) return true;
+// 🚀 PERF: ye filter+sort pehle HAR render par poore patients array (50k+ tak)
+// par dobara chalta tha — chahe patientSearch na badla ho (jaise amount/services
+// type karte waqt bhi, kyunki wo bhi isi component mein re-render trigger karte
+// hain). useMemo se ab ye sirf tab dobara chalega jab `patients` ya
+// `patientSearch` khud badlein — baaki fields (amount, services, etc.) type
+// karne par ye re-compute skip ho jaata hai. Filter/sort ka logic bilkul same hai.
+const filteredPatients = useMemo(() => {
+  return patients
+    ?.filter((p) => {
+      if (!patientSearch) return true;
 
-    const q = patientSearch.toLowerCase();
-    const searchDigits = patientSearch.replace(/\D/g, "");
+      const q = patientSearch.toLowerCase();
+      const searchDigits = patientSearch.replace(/\D/g, "");
 
-    const nameMatch = p.name?.toLowerCase().includes(q);
-    // 🚨 FIX: pehle "p.mobile?.includes(patientSearch.replace(/\D/g, ""))" tha —
-    // jab search text mein koi digit nahi hota (jaise sirf naam type kiya),
-    // replace(/\D/g,"") khaali string "" return karta tha, aur
-    // "anyString".includes("") hamesha true hota hai. Isse naam-search karte
-    // waqt mobile-check hamesha pass ho jaata tha aur saare patients (jinke
-    // paas mobile number hai) match ho jaate the — asli naam-match wala
-    // patient list mein kahin dab jaata tha, isliye "nahi milta" jaisa lagta tha.
-    const mobileMatch = searchDigits.length > 0 && p.mobile?.includes(searchDigits);
+      const nameMatch = p.name?.toLowerCase().includes(q);
+      // 🚨 FIX: pehle "p.mobile?.includes(patientSearch.replace(/\D/g, ""))" tha —
+      // jab search text mein koi digit nahi hota (jaise sirf naam type kiya),
+      // replace(/\D/g,"") khaali string "" return karta tha, aur
+      // "anyString".includes("") hamesha true hota hai. Isse naam-search karte
+      // waqt mobile-check hamesha pass ho jaata tha aur saare patients (jinke
+      // paas mobile number hai) match ho jaate the — asli naam-match wala
+      // patient list mein kahin dab jaata tha, isliye "nahi milta" jaisa lagta tha.
+      const mobileMatch = searchDigits.length > 0 && p.mobile?.includes(searchDigits);
 
-    return nameMatch || mobileMatch;
-})
-
-.sort(
- (a,b)=>{
-   // _pendingSync wale (naye offline patients) hamesha upar
-   if (a._pendingSync && !b._pendingSync) return -1;
-   if (!a._pendingSync && b._pendingSync) return 1;
-   // created_at missing ho to naye maano (upar rakho)
-   const ta = a.created_at && !isNaN(new Date(a.created_at).getTime()) ? new Date(a.created_at).getTime() : Date.now();
-   const tb = b.created_at && !isNaN(new Date(b.created_at).getTime()) ? new Date(b.created_at).getTime() : Date.now();
-   return tb - ta;
- }
-);
+      return nameMatch || mobileMatch;
+    })
+    .sort((a, b) => {
+      // _pendingSync wale (naye offline patients) hamesha upar
+      if (a._pendingSync && !b._pendingSync) return -1;
+      if (!a._pendingSync && b._pendingSync) return 1;
+      // created_at missing ho to naye maano (upar rakho)
+      const ta = a.created_at && !isNaN(new Date(a.created_at).getTime()) ? new Date(a.created_at).getTime() : Date.now();
+      const tb = b.created_at && !isNaN(new Date(b.created_at).getTime()) ? new Date(b.created_at).getTime() : Date.now();
+      return tb - ta;
+    });
+}, [patients, patientSearch]);
 
   const addServiceRow = () => setServices((prev) => [...prev, { name: "", amount: "" }]);
   const removeServiceRow = (idx: number) => setServices((prev) => prev.filter((_, i) => i !== idx));
