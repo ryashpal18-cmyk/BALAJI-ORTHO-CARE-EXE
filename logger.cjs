@@ -7,6 +7,7 @@ const path = require('path');
 const BACKUP_DIR     = 'C:\\Balaji_Health_Backup';
 const LOG_DIR        = path.join(BACKUP_DIR, 'logs');
 const MAX_LOG_DAYS   = 14;
+const MAX_LOG_BYTES   = 20 * 1024 * 1024; // 20MB — isse zyada ho to overflow file mein switch karo
 const SEPARATOR      = '─'.repeat(80);
 
 function ensureLogDir() {
@@ -26,7 +27,28 @@ function getLogDir() {
 function todayLogFile() {
   const d = new Date();
   const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  return path.join(LOG_DIR, `app-${stamp}.log`);
+  const base = path.join(LOG_DIR, `app-${stamp}.log`);
+
+  // 🚨 FIX: Pehle ek hi din ka log file bina kisi size limit ke bharta rehta
+  // tha — agar koi error loop (jaise pehle offline-sync ka infinite SMS
+  // retry) bar-bar chalta, to file GBs tak badh sakti thi 14-din-purani
+  // cleanup chalne se pehle hi. Ab 20MB cross hone par "-part2", "-part3"
+  // jaisi overflow file mein switch ho jaata hai — purana din ka data safe
+  // rehta hai, bas ek hi file itna bada nahi banta.
+  try {
+    if (!fs.existsSync(base)) return base;
+    if (fs.statSync(base).size < MAX_LOG_BYTES) return base;
+
+    let part = 2;
+    let candidate = path.join(LOG_DIR, `app-${stamp}-part${part}.log`);
+    while (fs.existsSync(candidate) && fs.statSync(candidate).size >= MAX_LOG_BYTES) {
+      part += 1;
+      candidate = path.join(LOG_DIR, `app-${stamp}-part${part}.log`);
+    }
+    return candidate;
+  } catch (_) {
+    return base;
+  }
 }
 
 // ── Full detail extract karna ─────────────────────────────────────────────
