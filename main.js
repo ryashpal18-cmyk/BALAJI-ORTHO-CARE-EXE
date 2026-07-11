@@ -19,6 +19,29 @@ const sqliteStore = require('./sqlite-store.cjs');
 // startup ke dauran bhi koi exception silently na guzar jaaye.
 logger.setupGlobalHandlers();
 
+// ─── SINGLE INSTANCE LOCK ───────────────────────────────────────────────
+// 🚨 PRODUCTION-AUDIT FIX: Pehle koi single-instance guard nahi tha — agar
+// app do baar khul jaaye (double-click, ya startup-shortcut + manual open
+// dono), to do alag Electron process ek hi C:\Balaji_Health_Backup ke
+// JSON files (patients.json, bills.json, etc.) aur offline_cache.db par
+// SAME WAQT likh sakte the — ek process ka save doosre ke write se
+// overwrite ho sakta tha (JSON tmp+rename dono process ek hi tmp filename
+// use karte). Ab dusra launch khud hi turant band ho jaata hai aur pehle
+// se chal rahi window ko front pe le aata hai — koi data-loss risk nahi.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    logger.logWarn('app-lifecycle', 'Doosra instance launch hua — usse band karke maujooda window front pe laaye.');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 // ─── FIX: IndexedDB "UnknownError: Internal error" (konicaminolta PC) ──────
 // Root cause: iss PC pe C:\Users\konicaminolta\AppData\Roaming\... waala
 // default userData folder shayad redirected/synced/locked hai (roaming profile
