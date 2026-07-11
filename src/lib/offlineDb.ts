@@ -1,15 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────
-// Offline-first data engine (IndexedDB cache + mutation sync queue)
+// Offline-first data engine (SQLite cache + mutation sync queue)
 // ─────────────────────────────────────────────────────────────────────────
+// ✅ IndexedDB HATA DIYA GAYA HAI. Ab saara offline data ek real SQLite file
+// (C:\Balaji_Health_Backup\offline_cache.db) mein rehta hai, jo Electron ke
+// MAIN process (Node.js, better-sqlite3) mein chalta hai — Chromium ke
+// IndexedDB/LevelDB engine ka yahan koi role nahi hai. Isi wajah se woh
+// "backing store corrupt" wali error ab structurally hi nahi aa sakti,
+// kyunki hum us engine ko use hi nahi kar rahe.
+//
+// Is file ke saare exported function naam/signature PEHLE JAISE HI hain
+// (cacheGetAll, cacheSetRows, queueAdd, etc.) — taaki baaki 25+ files jo
+// inhe import karte hain, unmein EK LINE bhi change na karni pade.
 
 import { cLog } from "@/lib/clientLogger";
-
-const DB_NAME    = "balaji_ortho_offline_db";
-const DB_VERSION = 3; // ✅ v3 bump — v2 corrupt DB wale PCs pe auto-delete + fresh start
-
-const CACHE_STORE = "table_cache";
-const QUEUE_STORE = "mutation_queue";
-const META_STORE  = "meta";
 
 export type QueuedMutation = {
   id?: number;
@@ -24,408 +27,241 @@ export type QueuedMutation = {
   lastError?: string;
 };
 
-let dbPromise: Promise<IDBDatabase> | null = null;
-
-// ── DB Error Rate Limiter ────────────────────────────────────────────────
-// IndexedDB UnknownError aane par ye counter track karta hai.
-// 3 se zyada baar fail ho to LOG band kar do (lekin [] return karte raho)
-// Warna ek corrupt DB ek din mein 9000+ errors flood kar deta hai.
-let _dbConsecutiveErrors = 0;
-let _dbSilenced = false;
-function _dbErrorLog(msg: string, err?: unknown) {
-  _dbConsecutiveErrors++;
-  if (_dbConsecutiveErrors <= 3) {
-    cLog.error("indexeddb", msg, err);
-  } else if (!_dbSilenced) {
-    cLog.warn("indexeddb", `IndexedDB baar baar fail ho rahi hai (${_dbConsecutiveErrors}x) — logs mute kar diye, app chal raha hai`);
-    _dbSilenced = true;
-  }
-}
-function _dbReset() {
-  _dbConsecutiveErrors = 0;
-  _dbSilenced = false;
-}
-
-// ✅ Corrupt DB ko delete karke fresh banata hai
-function deleteDb(): Promise<void> {
-  return new Promise((resolve) => {
-    const req = indexedDB.deleteDatabase(DB_NAME);
-    req.onsuccess = () => resolve();
-    req.onerror   = () => resolve();
-    req.onblocked = () => resolve();
-  });
-}
-
-function createStores(db: IDBDatabase) {
-  if (!db.objectStoreNames.contains(CACHE_STORE))
-    db.createObjectStore(CACHE_STORE, { keyPath: "_key" });
-  if (!db.objectStoreNames.contains(QUEUE_STORE))
-    db.createObjectStore(QUEUE_STORE, { keyPath: "id", autoIncrement: true });
-  if (!db.objectStoreNames.contains(META_STORE))
-    db.createObjectStore(META_STORE, { keyPath: "key" });
-}
-
-// ─── Startup disk-backup auto-restore ──────────────────────────────────────
-// 🚨 ROOT CAUSE FIX (Problem: "offline data save hota hai, app close-reopen
-// karne par gayab ho jaata hai"): openDb() ke andar agar IndexedDB 3 baar
-// khulne mein fail ho (slow disk / antivirus lock / roaming profile jaise
-// wajah se — genuinely corrupt na bhi ho), to niche wala fallback poori DB
-// DELETE karke FRESH khaali DB bana deta tha. backupCacheToDisk() har 3 min
-// mein patients/billing/etc. ko C:\Balaji_Health_Backup\*.json mein likhta
-// hai, aur main.js mein 'backup:readSnapshot' IPC handler bhi maujood hai —
-// lekin renderer side se ye kabhi call hi nahi hota tha, isliye fresh/khaali
-// DB milne par purana data disk pe hote hue bhi wapas load nahi hota tha.
-// Ab: jab bhi IndexedDB khulti hai aur cache khaali paayi jaati hai, disk
-// backup se turant restore kar dete hain (sirf ek baar per app session).
-let _diskRestoreAttempted = false;
-
-async function restoreFromDiskBackupIfEmpty(db: IDBDatabase): Promise<void> {
-  if (_diskRestoreAttempted) return;
-  _diskRestoreAttempted = true;
-  try {
-    const w = window as any;
-    if (!w?.electron?.readBackupSnapshot) return; // browser mode — skip, sirf Electron mein
-
-    const t = db.transaction([CACHE_STORE], "readonly");
-    const all: any[] = await reqToPromise(t.objectStore(CACHE_STORE).getAll());
-    const hasAnyData = all.some(
-      (r) => typeof r._key === "string" && BACKUP_TABLES.some((tbl) => r._key.startsWith(`${tbl}::`))
-    );
-    if (hasAnyData) return; // cache mein pehle se data hai — backup se overwrite mat karo
-
-    const res = await w.electron.readBackupSnapshot();
-    if (!res?.success || !res.data) return;
-
-    let restored = 0;
-    for (const table of BACKUP_TABLES) {
-      const rows = res.data[table];
-      if (Array.isArray(rows) && rows.length > 0) {
-        await cacheReplaceTable(table, rows);
-        restored += rows.length;
+function electronOffline() {
+  const w = window as any;
+  return w.electron?.offline as
+    | {
+        cacheGetAll: (table: string) => Promise<{ success: boolean; data: any[] }>;
+        cacheGetRow: (table: string, rowId: string) => Promise<{ success: boolean; data: any }>;
+        cacheSetRows: (table: string, rows: any[], idField?: string) => Promise<{ success: boolean }>;
+        cacheReplaceTable: (table: string, rows: any[], idField?: string) => Promise<{ success: boolean }>;
+        cacheUpsertRow: (table: string, row: any, idField?: string) => Promise<{ success: boolean }>;
+        cacheDeleteRow: (table: string, rowId: string) => Promise<{ success: boolean }>;
+        cacheReplaceRowKey: (table: string, oldId: string, newRow: any, idField?: string) => Promise<{ success: boolean }>;
+        queueAdd: (mutation: any) => Promise<{ success: boolean; id: number }>;
+        queueGetAll: () => Promise<{ success: boolean; data: QueuedMutation[] }>;
+        queueRemove: (id: number) => Promise<{ success: boolean }>;
+        queueUpdate: (id: number, patch: any) => Promise<{ success: boolean }>;
+        metaGet: (key: string) => Promise<{ success: boolean; value: any }>;
+        metaSet: (key: string, value: any) => Promise<{ success: boolean }>;
+        isLegacyMigrated: () => Promise<{ success: boolean; migrated: boolean }>;
+        importLegacyDump: (dump: any) => Promise<{ success: boolean }>;
       }
-    }
-    if (restored > 0) {
-      cLog.info("indexeddb", `IndexedDB khaali mili — disk backup se ${restored} records restore ho gaye`);
-    }
-  } catch (err) {
-    cLog.error("indexeddb", "Disk backup se auto-restore fail", err);
-  }
+    | undefined;
 }
 
-function openDb(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise(async (resolve, reject) => {
-    const tryOpen = (afterDelete = false): Promise<IDBDatabase> =>
-      new Promise((res, rej) => {
-        const req = indexedDB.open(DB_NAME, DB_VERSION);
-        req.onupgradeneeded = (e) => {
-          const db = req.result;
-          // Purane version ke stores clean karo
-          if ((e as any).oldVersion > 0) {
-            for (const s of [CACHE_STORE, QUEUE_STORE, META_STORE]) {
-              try { if (db.objectStoreNames.contains(s)) db.deleteObjectStore(s); } catch (_) {}
-            }
-          }
-          createStores(db);
-        };
-        req.onsuccess = () => {
-          const db = req.result;
-          db.onversionchange = () => { db.close(); dbPromise = null; };
-          cLog.info("indexeddb", afterDelete ? "Fresh DB banayi — corrupt thi" : "Database successfully khul gayi");
-          res(db);
-        };
-        req.onerror = () => rej(req.error);
-        req.onblocked = () => cLog.warn("indexeddb", "DB blocked");
-      });
-
-    try {
-      // ✅ Pehle 2 baar chhoti si delay ke saath retry karo — "backing store"
-      // wali error aksar temporary hoti hai (antivirus scan chal raha, ya
-      // pichli process ne file abhi release nahi ki). Delete/reset sirf tab
-      // karo jab genuinely 3 baar try karke bhi na khule.
-      let db: IDBDatabase | null = null;
-      let lastErr: unknown = null;
-      for (let attempt = 1; attempt <= 3 && !db; attempt++) {
-        try {
-          db = await tryOpen();
-        } catch (e) {
-          lastErr = e;
-          if (attempt < 3) {
-            cLog.warn("indexeddb", `DB open attempt ${attempt} fail — ${800 * attempt}ms baad retry`);
-            await new Promise((r) => setTimeout(r, 800 * attempt));
-          }
-        }
-      }
-      if (db) { await restoreFromDiskBackupIfEmpty(db); resolve(db); return; }
-      throw lastErr;
-    } catch (err) {
-      cLog.error("indexeddb", "3 baar try karne ke baad bhi DB nahi khuli — ab corrupt maan ke delete + fresh banayenge", err);
-      dbPromise = null;
-      try {
-        await deleteDb();
-        const db2 = await tryOpen(true);
-        dbPromise = Promise.resolve(db2);
-        await restoreFromDiskBackupIfEmpty(db2);
-        resolve(db2);
-      } catch (err2) {
-        cLog.error("indexeddb", "Fresh DB bhi nahi khuli", err2);
-        reject(err2);
-      }
-    }
-  });
-  return dbPromise;
-}
-
-function tx(db: IDBDatabase, stores: string[], mode: IDBTransactionMode) {
-  return db.transaction(stores, mode);
-}
-
-function reqToPromise<T = any>(req: IDBRequest): Promise<T> {
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result as T);
-    req.onerror  = () => reject(req.error);
-  });
+// ── In-memory fallback (sirf browser/dev-preview mode ke liye, jab Electron
+// bridge available nahi ho — jaise `vite preview` seedhe browser mein) ──
+// Production EXE mein hamesha window.electron.offline available rahega.
+const memCache = new Map<string, any>();
+const memQueue: QueuedMutation[] = [];
+let memQueueId = 1;
+const memMeta = new Map<string, any>();
+let _warnedNoBridge = false;
+function warnNoBridge() {
+  if (_warnedNoBridge) return;
+  _warnedNoBridge = true;
+  cLog.warn("sqlite", "Electron offline bridge nahi mila — in-memory fallback use ho raha hai (sirf browser preview mein expected)");
 }
 
 // ─── Cache ───────────────────────────────────────────────────────────────
 
 export async function cacheGetAll(table: string): Promise<any[]> {
-  try {
-    const db    = await openDb();
-    const t     = tx(db, [CACHE_STORE], "readonly");
-    const all: any[] = await reqToPromise(t.objectStore(CACHE_STORE).getAll());
+  const bridge = electronOffline();
+  if (!bridge) {
+    warnNoBridge();
     const prefix = `${table}::`;
-    _dbReset();
-    return all.filter((r) => typeof r._key === "string" && r._key.startsWith(prefix)).map((r) => r.data);
+    return Array.from(memCache.entries())
+      .filter(([k]) => k.startsWith(prefix))
+      .map(([, v]) => v);
+  }
+  try {
+    const res = await bridge.cacheGetAll(table);
+    return res?.data ?? [];
   } catch (err) {
-    // 🚨 CRITICAL FIX: pehle yahan poora DB delete kar diya jaata tha har read
-    // error par — isse har chhoti si glitch pe SAARA offline data (patients,
-    // bills, sab) permanently khatam ho jaata tha. Ab hum sirf DOBARA try
-    // karte hain (dbPromise reset karke), aur delete SIRF tab jab openDb()
-    // khud fail ho (wo already apni jagah handle karta hai). Read fail hone
-    // par purana cached data kabhi delete nahi hota.
-    _dbErrorLog(`${table} cache read fail — retry kar rahe hain (data delete nahi karenge)`, err);
-    dbPromise = null;
-    try {
-      const db2 = await openDb();
-      const t2  = tx(db2, [CACHE_STORE], "readonly");
-      const all2: any[] = await reqToPromise(t2.objectStore(CACHE_STORE).getAll());
-      const prefix = `${table}::`;
-      _dbReset();
-      return all2.filter((r) => typeof r._key === "string" && r._key.startsWith(prefix)).map((r) => r.data);
-    } catch (err2) {
-      _dbErrorLog(`${table} cache read dobara fail — is baar bhi data delete nahi kiya, khaali list de rahe hain`, err2);
-      return []; // ✅ data disk pe intact rehta hai, sirf is call ka result khaali hai
-    }
+    cLog.error("sqlite", `${table} cache read fail`, err);
+    return []; // ✅ data disk pe SQLite file mein intact rehta hai, sirf is call ka result khaali hai
+  }
+}
+
+export async function cacheGetRow(table: string, rowId: string): Promise<any> {
+  const bridge = electronOffline();
+  if (!bridge) {
+    warnNoBridge();
+    return memCache.get(`${table}::${rowId}`);
+  }
+  try {
+    const res = await bridge.cacheGetRow(table, rowId);
+    return res?.data;
+  } catch (err) {
+    cLog.error("sqlite", `${table} cacheGetRow fail — rowId: ${rowId}`, err);
+    return undefined;
   }
 }
 
 export async function cacheSetRows(table: string, rows: any[], idField = "id") {
   if (!rows || !rows.length) return;
-  try {
-    const db    = await openDb();
-    const t     = tx(db, [CACHE_STORE], "readwrite");
-    const store = t.objectStore(CACHE_STORE);
+  const bridge = electronOffline();
+  if (!bridge) {
+    warnNoBridge();
     for (const row of rows) {
       const rowId = row[idField];
       if (rowId === undefined || rowId === null) continue;
-      store.put({ _key: `${table}::${rowId}`, data: row });
+      memCache.set(`${table}::${rowId}`, row);
     }
-    await new Promise((res, rej) => { t.oncomplete = () => res(true); t.onerror = () => rej(t.error); });
+    return;
+  }
+  try {
+    await bridge.cacheSetRows(table, rows, idField);
   } catch (err) {
-    cLog.error("indexeddb", `${table} cacheSetRows fail`, err);
+    cLog.error("sqlite", `${table} cacheSetRows fail`, err);
   }
 }
 
 export async function cacheReplaceTable(table: string, rows: any[], idField = "id") {
+  // 🚨 FIX: "payment update karo, ek baar dikhe, phir wapas gayab" bug —
+  // jab bhi koi local change (payment update, waghera) hua, wo turant
+  // cache mein save hota hai (_pendingSync: true) aur background mein
+  // server ko sync bhejta hai. Lekin USI WAQT agar koi doosri query
+  // Supabase se STALE (purana) data background mein fetch kar rahi thi
+  // (sync poora hone se pehle), to ye function poori table ko us purane
+  // data se REPLACE kar deta tha — abhi-abhi kiya gaya change reset ho
+  // jaata tha. Ab jab tak local change server ko confirm-sync nahi ho
+  // jaata (_pendingSync saaf nahi hota), tab tak us row ko background
+  // server-refresh se overwrite nahi karenge — local change hi jeetega.
   try {
-    const db    = await openDb();
-    const t     = tx(db, [CACHE_STORE], "readwrite");
-    const store = t.objectStore(CACHE_STORE);
-    const all: any[] = await reqToPromise(store.getAll());
-    const prefix = `${table}::`;
-    const existing = all.filter((r) => r._key.startsWith(prefix));
+    const existing = await cacheGetAll(table);
+    const pendingRows = existing.filter((r) => r && r._pendingSync);
+    const pendingIds = new Set(pendingRows.map((r) => String(r[idField])));
 
-    // 🚨 FIX: "payment update karo, ek baar dikhe, phir wapas gayab" bug —
-    // jab bhi koi local change (payment update, waghera) hua, wo turant
-    // cache mein save hota hai (_pendingSync: true) aur background mein
-    // server ko sync bhejta hai. Lekin USI WAQT agar koi doosri query
-    // Supabase se STALE (purana) data background mein fetch kar rahi thi
-    // (sync poora hone se pehle), to ye function poori table ko us purane
-    // data se REPLACE kar deta tha — abhi-abhi kiya gaya change reset ho
-    // jaata tha. Ab jab tak local change server ko confirm-sync nahi ho
-    // jaata (_pendingSync saaf nahi hota), tab tak us row ko background
-    // server-refresh se overwrite nahi karenge — local change hi jeetega.
-    const pendingKeys = new Set(
-      existing.filter((r) => r.data && r.data._pendingSync).map((r) => r._key)
-    );
+    const finalRows = [
+      ...pendingRows,
+      ...rows.filter((row) => !pendingIds.has(String(row[idField]))),
+    ];
 
-    for (const r of existing) if (!pendingKeys.has(r._key)) store.delete(r._key);
-
-    for (const row of rows) {
-      const rowId = row[idField];
-      if (rowId === undefined || rowId === null) continue;
-      const key = `${table}::${rowId}`;
-      if (pendingKeys.has(key)) continue; // local (unsynced) change wins
-      store.put({ _key: key, data: row });
+    const bridge = electronOffline();
+    if (!bridge) {
+      warnNoBridge();
+      const prefix = `${table}::`;
+      for (const k of Array.from(memCache.keys())) {
+        if (k.startsWith(prefix)) memCache.delete(k);
+      }
+      await cacheSetRows(table, finalRows, idField);
+    } else {
+      await bridge.cacheReplaceTable(table, finalRows, idField);
     }
-    await new Promise((res, rej) => { t.oncomplete = () => res(true); t.onerror = () => rej(t.error); });
-    cLog.info("indexeddb", `${table} cache replace — ${rows.length} rows save ho gayi${pendingKeys.size ? ` (${pendingKeys.size} pending local rows preserved)` : ""}`);
+    cLog.info("sqlite", `${table} cache replace — ${rows.length} rows save ho gayi${pendingIds.size ? ` (${pendingIds.size} pending local rows preserved)` : ""}`);
   } catch (err) {
-    cLog.error("indexeddb", `${table} cacheReplaceTable fail`, err);
+    cLog.error("sqlite", `${table} cacheReplaceTable fail`, err);
   }
 }
 
 export async function cacheUpsertRowFromServer(table: string, row: any, idField = "id") {
   try {
-    const db = await openDb();
     const rowId = row[idField];
-    const t = tx(db, [CACHE_STORE], "readonly");
-    const existing = await reqToPromise(t.objectStore(CACHE_STORE).get(`${table}::${rowId}`));
+    const existing = await cacheGetRow(table, rowId);
     // Agar is row mein abhi unsynced local change hai, to server ki purani
     // copy se use overwrite mat karo (same wajah jo upar cacheReplaceTable mein hai).
-    if (existing && existing.data && existing.data._pendingSync) return;
+    if (existing && existing._pendingSync) return;
     await cacheUpsertRow(table, row, idField);
   } catch (err) {
-    cLog.error("indexeddb", `${table} cacheUpsertRowFromServer fail`, err);
+    cLog.error("sqlite", `${table} cacheUpsertRowFromServer fail`, err);
   }
 }
 
 export async function cacheUpsertRow(table: string, row: any, idField = "id") {
+  const bridge = electronOffline();
+  const rowId = row[idField];
+  if (!bridge) {
+    warnNoBridge();
+    memCache.set(`${table}::${rowId}`, row);
+    return;
+  }
   try {
-    const db    = await openDb();
-    const t     = tx(db, [CACHE_STORE], "readwrite");
-    const rowId = row[idField];
-    t.objectStore(CACHE_STORE).put({ _key: `${table}::${rowId}`, data: row });
-    await new Promise((res, rej) => { t.oncomplete = () => res(true); t.onerror = () => rej(t.error); });
+    await bridge.cacheUpsertRow(table, row, idField);
   } catch (err) {
-    cLog.error("indexeddb", `${table} cacheUpsertRow fail`, err);
+    cLog.error("sqlite", `${table} cacheUpsertRow fail`, err);
   }
 }
 
 export async function cacheDeleteRow(table: string, rowId: string) {
+  const bridge = electronOffline();
+  if (!bridge) {
+    warnNoBridge();
+    memCache.delete(`${table}::${rowId}`);
+    return;
+  }
   try {
-    const db = await openDb();
-    const t  = tx(db, [CACHE_STORE], "readwrite");
-    t.objectStore(CACHE_STORE).delete(`${table}::${rowId}`);
-    await new Promise((res, rej) => { t.oncomplete = () => res(true); t.onerror = () => rej(t.error); });
+    await bridge.cacheDeleteRow(table, rowId);
   } catch (err) {
-    cLog.error("indexeddb", `${table} cacheDeleteRow fail — rowId: ${rowId}`, err);
+    cLog.error("sqlite", `${table} cacheDeleteRow fail — rowId: ${rowId}`, err);
   }
 }
 
 export async function cacheReplaceRowKey(table: string, oldId: string, newRow: any, idField = "id") {
+  const bridge = electronOffline();
+  if (!bridge) {
+    warnNoBridge();
+    memCache.delete(`${table}::${oldId}`);
+    memCache.set(`${table}::${newRow[idField]}`, newRow);
+    return;
+  }
   try {
-    const db    = await openDb();
-    const t     = tx(db, [CACHE_STORE], "readwrite");
-    const store = t.objectStore(CACHE_STORE);
-    store.delete(`${table}::${oldId}`);
-    store.put({ _key: `${table}::${newRow[idField]}`, data: newRow });
-    await new Promise((res, rej) => { t.oncomplete = () => res(true); t.onerror = () => rej(t.error); });
-    cLog.info("indexeddb", `${table} temp key replace — ${oldId} → ${newRow[idField]}`);
+    await bridge.cacheReplaceRowKey(table, oldId, newRow, idField);
+    cLog.info("sqlite", `${table} temp key replace — ${oldId} → ${newRow[idField]}`);
   } catch (err) {
-    cLog.error("indexeddb", `${table} cacheReplaceRowKey fail`, err);
+    cLog.error("sqlite", `${table} cacheReplaceRowKey fail`, err);
   }
 }
 
 // ─── Mutation Queue ───────────────────────────────────────────────────────
 
 export async function queueAdd(mutation: Omit<QueuedMutation, "id" | "createdAt" | "retries">): Promise<number> {
-  try {
-    const db    = await openDb();
-    const t     = tx(db, [QUEUE_STORE], "readwrite");
-    const store = t.objectStore(QUEUE_STORE);
-    const full: QueuedMutation = { ...mutation, createdAt: new Date().toISOString(), retries: 0 };
-    const id    = await reqToPromise<number>(store.add(full));
-    await new Promise((res, rej) => { t.oncomplete = () => res(true); t.onerror = () => rej(t.error); });
-    cLog.info("queue", `Queue mein add hua — op: ${mutation.op}, table: ${mutation.table}`);
+  const bridge = electronOffline();
+  if (!bridge) {
+    warnNoBridge();
+    const id = memQueueId++;
+    memQueue.push({ ...mutation, id, createdAt: new Date().toISOString(), retries: 0 });
     notifyQueueChanged();
     return id;
+  }
+  try {
+    const res = await bridge.queueAdd(mutation);
+    cLog.info("queue", `Queue mein add hua — op: ${mutation.op}, table: ${mutation.table}`);
+    notifyQueueChanged();
+    return res?.id ?? -1;
   } catch (err) {
     cLog.error("queue", `queueAdd fail — op: ${mutation.op}, table: ${mutation.table}`, err);
     return -1;
   }
 }
 
-// ── queueGetAll fix: IndexedDB UnknownError pe infinite error loop hota tha ──
-// Problem: har 30s mein runSync -> queueGetAll fail -> deleteDb -> openDb -> loop
-// Result: 9000+ errors/day log flood
-// Fix: 
-//   1. Pehli baar fail hone par deleteDb + fresh open karo (original behavior)
-//   2. Agar fresh DB bhi fail ho to SIRF [] return karo — aur doosri baar deleteDb mat karo
-//   3. Rate limiter se repeated logging band karo
-let _queueDbResetDone = false; // Sirf ek baar nuclear reset allow karo per session
-
 export async function queueGetAll(): Promise<QueuedMutation[]> {
-  try {
-    const db = await openDb();
-    const t  = tx(db, [QUEUE_STORE], "readonly");
-    const result = await reqToPromise<QueuedMutation[]>(t.objectStore(QUEUE_STORE).getAll());
-    // Success hone par error counter reset karo
-    _dbReset();
-    return result;
-  } catch (err) {
-    _dbErrorLog("queueGetAll fail — DB problem", err);
-
-    // ── Sirf pehli baar nuclear reset karo ──
-    // Agar pehle se reset ho chuka hai to seedha [] return karo
-    // (Warna infinite delete+open+fail loop banta hai)
-    if (_queueDbResetDone) {
-      return []; // silent return — app chal raha hai
-    }
-
-    _queueDbResetDone = true;
-    dbPromise = null;
-    try {
-      await deleteDb();
-      cLog.info("queue", "Corrupt IndexedDB delete ho gayi — fresh DB ban rahi hai");
-      const db2 = await openDb();
-      const t2  = tx(db2, [QUEUE_STORE], "readonly");
-      const result = await reqToPromise<QueuedMutation[]>(t2.objectStore(QUEUE_STORE).getAll());
-      cLog.info("queue", "Fresh DB se queueGetAll success — queue empty se start");
-      _dbReset();
-      _queueDbResetDone = false; // Reset flag so next session can try again if needed
-      return result;
-    } catch (err2) {
-      _dbErrorLog("Fresh DB bhi fail — IndexedDB environment problem, empty return kar raha hai", err2);
-      return []; // app crash mat karo — empty return karo
-    }
+  const bridge = electronOffline();
+  if (!bridge) {
+    warnNoBridge();
+    return [...memQueue];
   }
-}
-
-// 🚨 FIX: Jab koi bill offline banaya jaaye (temp "local_xxx" id) aur turant
-// (uske insert-sync se pehle hi) edit bhi kar diya jaaye, to us edit ki
-// "update" mutation queue mein rowId: "local_xxx" ke saath ban jaati thi.
-// Jab baad mein insert sync hokar row ka asli Supabase id mil jaata tha,
-// sirf cache ki key rename hoti thi (cacheReplaceRowKey) — lekin queue mein
-// pada purana "update" mutation hamesha "local_xxx" rowId hi rakhta reh
-// jaata, jisse wo HAMESHA "PENDING_PARENT_INSERT" throw karta rehta aur us
-// edit ka data kabhi bhi Supabase (cloud) tak sync hi nahi ho paata — sirf
-// isi PC ki IndexedDB tak seemit reh jaata. Ab insert sync hote hi baaki
-// pending mutations ka rowId bhi naye id se update kar dete hain.
-export async function queueRemapRowId(table: string, oldRowId: string, newRowId: string) {
   try {
-    const db = await openDb();
-    const t  = tx(db, [QUEUE_STORE], "readwrite");
-    const store = t.objectStore(QUEUE_STORE);
-    const all: QueuedMutation[] = await reqToPromise(store.getAll());
-    for (const m of all) {
-      if (m.table === table && m.rowId === oldRowId && m.id !== undefined) {
-        store.put({ ...m, rowId: newRowId });
-      }
-    }
-    await new Promise((res, rej) => { t.oncomplete = () => res(true); t.onerror = () => rej(t.error); });
+    const res = await bridge.queueGetAll();
+    return res?.data ?? [];
   } catch (err) {
-    cLog.error("queue", `queueRemapRowId fail — table: ${table}, old: ${oldRowId} → new: ${newRowId}`, err);
+    cLog.error("queue", "queueGetAll fail — SQLite problem", err);
+    return []; // app crash mat karo — empty return karo
   }
 }
 
 export async function queueRemove(id: number) {
+  const bridge = electronOffline();
+  if (!bridge) {
+    warnNoBridge();
+    const idx = memQueue.findIndex((m) => m.id === id);
+    if (idx >= 0) memQueue.splice(idx, 1);
+    notifyQueueChanged();
+    return;
+  }
   try {
-    const db = await openDb();
-    const t  = tx(db, [QUEUE_STORE], "readwrite");
-    t.objectStore(QUEUE_STORE).delete(id);
-    await new Promise((res, rej) => { t.oncomplete = () => res(true); t.onerror = () => rej(t.error); });
+    await bridge.queueRemove(id);
     notifyQueueChanged();
   } catch (err) {
     cLog.error("queue", `queueRemove fail — id: ${id}`, err);
@@ -433,13 +269,15 @@ export async function queueRemove(id: number) {
 }
 
 export async function queueUpdate(id: number, patch: Partial<QueuedMutation>) {
+  const bridge = electronOffline();
+  if (!bridge) {
+    warnNoBridge();
+    const m = memQueue.find((x) => x.id === id);
+    if (m) Object.assign(m, patch);
+    return;
+  }
   try {
-    const db    = await openDb();
-    const t     = tx(db, [QUEUE_STORE], "readwrite");
-    const store = t.objectStore(QUEUE_STORE);
-    const existing = await reqToPromise<QueuedMutation>(store.get(id));
-    if (existing) store.put({ ...existing, ...patch });
-    await new Promise((res, rej) => { t.oncomplete = () => res(true); t.onerror = () => rej(t.error); });
+    await bridge.queueUpdate(id, patch);
     if (patch.lastError) {
       cLog.warn("queue", `Retry ${patch.retries}/${8} — id: ${id}, error: ${patch.lastError}`);
     }
@@ -456,25 +294,31 @@ export async function queueCount(): Promise<number> {
 // ─── Meta ─────────────────────────────────────────────────────────────────
 
 export async function metaGet(key: string): Promise<any> {
+  const bridge = electronOffline();
+  if (!bridge) {
+    warnNoBridge();
+    return memMeta.get(key);
+  }
   try {
-    const db = await openDb();
-    const t  = tx(db, [META_STORE], "readonly");
-    const r  = await reqToPromise<any>(t.objectStore(META_STORE).get(key));
-    return r ? r.value : undefined;
+    const res = await bridge.metaGet(key);
+    return res?.value;
   } catch (err) {
-    cLog.error("indexeddb", `metaGet fail — key: ${key}`, err);
+    cLog.error("sqlite", `metaGet fail — key: ${key}`, err);
     return undefined;
   }
 }
 
 export async function metaSet(key: string, value: any) {
+  const bridge = electronOffline();
+  if (!bridge) {
+    warnNoBridge();
+    memMeta.set(key, value);
+    return;
+  }
   try {
-    const db = await openDb();
-    const t  = tx(db, [META_STORE], "readwrite");
-    t.objectStore(META_STORE).put({ key, value });
-    await new Promise((res, rej) => { t.oncomplete = () => res(true); t.onerror = () => rej(t.error); });
+    await bridge.metaSet(key, value);
   } catch (err) {
-    cLog.error("indexeddb", `metaSet fail — key: ${key}`, err);
+    cLog.error("sqlite", `metaSet fail — key: ${key}`, err);
   }
 }
 
@@ -494,12 +338,8 @@ function notifyQueueChanged() {
 }
 
 // ─── Real disk safety-backup ──────────────────────────────────────────────
-// 🚨 Pehle koi real backup nahi thi — sirf IndexedDB pe bharosa tha, aur DB
-// corrupt hone par sab kuch chala jaata tha. Ab ye function IndexedDB ke
-// zaroori tables ko C:\Balaji_Health_Backup\*.json mein bhi likh deta hai
-// (Electron ke through), taaki IndexedDB fail ho bhi jaaye to data disk pe
-// surakshit rahe. Ye best-effort hai — Electron ke bahar (browser) mein
-// chup-chaap skip ho jaata hai.
+// SQLite khud ek disk file hai, lekin extra safety ke liye har critical table
+// ka JSON snapshot bhi C:\Balaji_Health_Backup\*.json mein likh dete hain.
 const BACKUP_TABLES = ["patients", "billing", "fracture_cases", "fracture_xrays"];
 
 export async function backupCacheToDisk(): Promise<void> {
@@ -512,7 +352,7 @@ export async function backupCacheToDisk(): Promise<void> {
     }
     await w.electron.writeBackupSnapshot(tables);
   } catch (err) {
-    cLog.error("indexeddb", "backupCacheToDisk fail", err);
+    cLog.error("sqlite", "backupCacheToDisk fail", err);
   }
 }
 
@@ -523,4 +363,107 @@ export function tempId() {
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${Math.random().toString(36).slice(2, 9)}`;
   return `local_${uuid}`;
+}
+
+// ─── One-time legacy IndexedDB → SQLite migration ─────────────────────────
+// Purane users ke PC pe abhi bhi purani IndexedDB mein data pada ho sakta hai
+// (patients, bills, pending queue). App upgrade ke baad ye function EK BAAR
+// chalti hai: purani IndexedDB se sab kuch padhti hai, SQLite mein bhej deti
+// hai, aur phir purani IndexedDB permanently delete kar deti hai — taaki
+// aage se app kabhi bhi IndexedDB ko touch na kare.
+const LEGACY_DB_NAME = "balaji_ortho_offline_db";
+
+function readLegacyIndexedDb(): Promise<{ cache: Record<string, any[]>; queue: any[] } | null> {
+  return new Promise((resolve) => {
+    try {
+      if (!("indexedDB" in window)) { resolve(null); return; }
+      const req = indexedDB.open(LEGACY_DB_NAME);
+      req.onerror = () => resolve(null);
+      req.onupgradeneeded = () => {
+        // Koi purani DB thi hi nahi (fresh install) — is upgrade ko turant abort
+        // karo taaki galti se khaali DB create na ho jaaye.
+        try { req.transaction?.abort(); } catch (_) {}
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        try {
+          const storeNames = Array.from(db.objectStoreNames);
+          if (!storeNames.includes("table_cache") && !storeNames.includes("mutation_queue")) {
+            db.close();
+            resolve(null);
+            return;
+          }
+          const cache: Record<string, any[]> = {};
+          const queue: any[] = [];
+          const tx = db.transaction(storeNames, "readonly");
+          let pending = storeNames.length;
+          const done = () => { pending--; if (pending <= 0) { db.close(); resolve({ cache, queue }); } };
+
+          if (storeNames.includes("table_cache")) {
+            const r = tx.objectStore("table_cache").getAll();
+            r.onsuccess = () => {
+              for (const rec of r.result || []) {
+                const key = rec?._key;
+                if (typeof key !== "string") continue;
+                const idx = key.indexOf("::");
+                if (idx < 0) continue;
+                const table = key.slice(0, idx);
+                if (!cache[table]) cache[table] = [];
+                cache[table].push(rec.data);
+              }
+              done();
+            };
+            r.onerror = done;
+          }
+          if (storeNames.includes("mutation_queue")) {
+            const r = tx.objectStore("mutation_queue").getAll();
+            r.onsuccess = () => { queue.push(...(r.result || [])); done(); };
+            r.onerror = done;
+          }
+          if (storeNames.length === 0) resolve({ cache, queue });
+        } catch (e) {
+          try { db.close(); } catch (_) {}
+          resolve(null);
+        }
+      };
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+function deleteLegacyIndexedDb(): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.deleteDatabase(LEGACY_DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    } catch (e) {
+      resolve();
+    }
+  });
+}
+
+export async function migrateLegacyIndexedDbIfNeeded(): Promise<void> {
+  const bridge = electronOffline();
+  if (!bridge) return; // browser/dev mode — kuch nahi karna
+  try {
+    const status = await bridge.isLegacyMigrated();
+    if (status?.migrated) return; // already migrate ho chuka hai
+
+    const dump = await readLegacyIndexedDb();
+    if (dump) {
+      await bridge.importLegacyDump(dump);
+      cLog.info("sqlite", "Purana IndexedDB data SQLite mein migrate ho gaya");
+    } else {
+      // Purani DB thi hi nahi (fresh install) — sirf flag set karne ke liye
+      // ek khaali dump bhej do taaki dobara har baar check na ho.
+      await bridge.importLegacyDump({ cache: {}, queue: [] });
+    }
+    // Migration ke baad purani IndexedDB permanently hata do — ab kabhi use nahi hogi.
+    await deleteLegacyIndexedDb();
+  } catch (err) {
+    cLog.error("sqlite", "Legacy IndexedDB migration fail — app SQLite ke saath fresh start karega", err);
+  }
 }
