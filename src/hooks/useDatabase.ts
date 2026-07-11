@@ -179,10 +179,13 @@ export function usePatients() {
 export function useUpdateBill() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (bill: { id: string; amount: number; amount_paid: number; status: string; service?: string; payment_mode?: string }) => {
+    mutationFn: async (bill: { id: string; amount: number; amount_paid: number; status: string; service?: string; payment_mode?: string; discount?: number | null }) => {
       const updateData: any = { amount: bill.amount, amount_paid: bill.amount_paid, status: bill.status };
       if (bill.service !== undefined) updateData.service = bill.service;
       if (bill.payment_mode !== undefined) updateData.payment_mode = bill.payment_mode;
+      // 🚨 FIX: "discount" field yahan missing tha — Edit Bill dialog mein discount
+      // badalne par woh save hi nahi hota tha (chupchaap drop ho jaata tha).
+      if (bill.discount !== undefined) updateData.discount = bill.discount;
       return offlineUpdate("billing", bill.id, updateData);
     },
     onSuccess: () => {
