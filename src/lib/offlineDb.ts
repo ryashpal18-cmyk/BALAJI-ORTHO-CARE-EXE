@@ -286,6 +286,26 @@ export async function queueUpdate(id: number, patch: Partial<QueuedMutation>) {
   }
 }
 
+// ✅ FIX: "queueRemapRowId is not exported" build error — ye function pehle
+// missing thi. Jab koi temp-ID (local_...) row insert hoke server pe sync ho
+// jaata hai, uske baad queue mein pading kisi bhi doosre mutation (update/
+// delete) ka rowId agar wahi purana temp-ID reference kar raha ho, to use
+// naye real server ID pe shift karna zaroori hai — warna wo baad wale
+// mutations "PENDING_PARENT_INSERT" ya wrong-id error dekar fail ho jaate.
+export async function queueRemapRowId(table: string, oldRowId: string, newRowId: string) {
+  try {
+    const all = await queueGetAll();
+    for (const m of all) {
+      if (m.table === table && m.rowId === oldRowId && m.id !== undefined) {
+        await queueUpdate(m.id, { rowId: newRowId });
+      }
+    }
+    cLog.info("queue", `${table} queue rowId remap — ${oldRowId} → ${newRowId}`);
+  } catch (err) {
+    cLog.error("queue", `queueRemapRowId fail — table: ${table}, old: ${oldRowId}, new: ${newRowId}`, err);
+  }
+}
+
 export async function queueCount(): Promise<number> {
   const all = await queueGetAll();
   return all.length;
