@@ -5,6 +5,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { cLog } from "@/lib/clientLogger";
 import { isValidMobile } from "@/lib/utils";
+import { queryClient } from "@/lib/queryClient";
 import { queueGetAll, queueRemove, queueUpdate, queueRemapRowId, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetAll, backupCacheToDisk, QueuedMutation } from "./offlineDb";
 
 
@@ -91,6 +92,14 @@ export async function downloadAllDataToCache(): Promise<void> {
     if (patients && patients.length > 0) {
       await cacheReplaceTable("patients", patients);
       cLog.info("sync", `${patients.length} patients PC mein save ho gaye`);
+      // 🔒 SQLite mein naya data aa gaya — ab React Query ko batao ki
+      // "patients" wale saare cached query results (usePatients, aur
+      // useSearchPatients ke ["patients","search",...] keys, kyunki
+      // invalidate prefix-match karta hai) purane ho chuke hain. Isse
+      // OPD/Ortho search box agar same text pe already result dikha raha
+      // tha, wo turant refresh ho jaata hai — retype/remount/window-focus
+      // ka wait nahi karna padta.
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
     }
 
     // 2. Billing — patient naam ke saath (joined)
