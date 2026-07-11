@@ -180,6 +180,14 @@ export default function OPD() {
       toast({ title: "Error", description: "Name is required", variant: "destructive" });
       return;
     }
+    // 🚨 FIX: agar existing-patient mobile lookup abhi bhi chal raha hai
+    // (async search complete nahi hua), to submit ko yahin rok do — warna
+    // "existingPatient" abhi null hi hai aur ek duplicate naya patient ban
+    // jaata hai jabki wahi mobile number pehle se registered hai.
+    if (mobileSearchStatus === "searching") {
+      toast({ title: "Please wait", description: "Checking if this patient already exists..." });
+      return;
+    }
 
     try {
       let patientId = existingPatient?.id;
@@ -492,8 +500,8 @@ export default function OPD() {
                     </div>
                   </div>
                   <div>
-                    <Button type="submit" disabled={addPatient.isPending} className="w-full sm:w-auto">
-                      {addPatient.isPending ? "Saving..." : existingPatient ? "✅ Update & Continue" : "🆕 Register New Patient"}
+                    <Button type="submit" disabled={addPatient.isPending || mobileSearchStatus === "searching"} className="w-full sm:w-auto">
+                      {addPatient.isPending ? "Saving..." : mobileSearchStatus === "searching" ? "Checking..." : existingPatient ? "✅ Update & Continue" : "🆕 Register New Patient"}
                     </Button>
                   </div>
                 </form>

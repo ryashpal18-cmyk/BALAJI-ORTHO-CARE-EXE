@@ -1040,7 +1040,15 @@ export default function Ortho() {
     if(!name||!mobile) return toast.error("Naam aur Mobile zaroori hai");
     if(!bodySelection?.body_part||!fractureType) return toast.error("Body Map pe click karo aur Fracture Type select karo");
     let patient = selPt;
-    if(!patient) patient = await addPatient.mutateAsync({ name, mobile, age: age?Number(age):null } as any);
+    if(!patient) {
+      // 🚨 FIX: agar list se explicitly patient select nahi kiya gaya (list
+      // pe click nahi kiya), to bhi ek final safety check — isi mobile number
+      // wala patient agar already search results (hits) mein maujood hai,
+      // usi ko use karo, naya duplicate patient na banao.
+      const cleanMobile = mobile.replace(/\D/g, "");
+      const exactMatch = cleanMobile.length > 0 ? (hits as any[]).find((p: any) => (p.mobile || "").replace(/\D/g, "") === cleanMobile) : null;
+      patient = exactMatch || await addPatient.mutateAsync({ name, mobile, age: age?Number(age):null } as any);
+    }
     try {
       await addCase.mutateAsync({ patient_id: patient.id, patient_type: "fracture", body_part: bodySelection.body_part, side: bodySelection.side, fracture_type: fractureType, cause: cause||null, plaster_type: plasterType, plaster_date: plasterDate, followup_days: Number(followupDays)||21, next_followup_date: nextFU, plaster_status: "Active", doctor_notes: notes||null } as any);
       toast.success("✅ Case save ho gaya!");
