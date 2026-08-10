@@ -653,6 +653,10 @@ const filteredPatients = useMemo(() => {
         amount_paid: paidNum,
         payment_mode: paymentMode || null,
         discount: discountNum || null,
+        // 🔒 FIX: created_at yahin lock karo — offline din/din-raat use hone
+        // par bill agle din sync ho to bhi Supabase apna "now()" laga ke
+        // aaj ki date na de de, isliye asli banaye jaane ka time bhejte hain.
+        created_at: new Date().toISOString(),
       } as any);
 
       toast({ title: "✅ Bill Saved", description: "Bill successfully save ho gaya" });
