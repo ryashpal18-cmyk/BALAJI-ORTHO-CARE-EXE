@@ -1,6 +1,6 @@
 {
   "name": "balaji-ortho-connect",
-  "version": "2.0.30",
+  "version": "2.0.31",
   "private": true,
   "main": "main.js",
   "scripts": {
