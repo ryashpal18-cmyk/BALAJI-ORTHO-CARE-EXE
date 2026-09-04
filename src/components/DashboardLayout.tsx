@@ -250,7 +250,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               {/* ── Global Quick Action: New Patient Admission (har page se accessible) ── */}
               <button
                 onClick={() => navigate("/opd")}
-                className="gap-2"
+                className="gap-2 zoom-hover"
                 style={{
                   display: "flex", alignItems: "center", gap: "6px",
                   height: "36px", padding: "0 14px",
@@ -290,7 +290,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               {/* Bell */}
               <Popover>
                 <PopoverTrigger asChild>
-                  <button style={{
+                  <button className="zoom-hover" style={{
                     position: "relative", width: "36px", height: "36px",
                     borderRadius: "10px", border: "1.5px solid #e4ecfa",
                     background: "rgba(255,255,255,0.14)", display: "flex", alignItems: "center", justifyContent: "center",
