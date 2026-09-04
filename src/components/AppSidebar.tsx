@@ -145,7 +145,7 @@ export function AppSidebar() {
                           textDecoration: "none",
                         }}
                         activeClassName=""
-                        className="sidebar-link"
+                        className="sidebar-link zoom-hover"
                       >
                         <item.icon style={{
                           width: "16px", height: "16px", flexShrink: 0,
@@ -183,6 +183,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={handleLogout}
+              className="zoom-hover"
               style={{
                 display: "flex", alignItems: "center", gap: "10px",
                 padding: "9px 10px", borderRadius: "10px",
