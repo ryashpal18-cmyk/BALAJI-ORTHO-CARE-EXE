@@ -118,6 +118,22 @@
   .emergency-btn {
     @apply bg-destructive text-destructive-foreground font-bold rounded-lg px-6 py-3 shadow-lg hover:opacity-90 transition-all animate-pulse;
   }
+
+  /* ── Sabhi clickable/nav options par hover pe halka "zoom-out" (shrink) effect ── */
+  .sidebar-link,
+  .zoom-hover {
+    transition: transform 0.15s ease, filter 0.15s ease !important;
+    transform-origin: center;
+  }
+  .sidebar-link:hover,
+  .zoom-hover:hover {
+    transform: scale(0.94);
+    filter: brightness(1.08);
+  }
+  .sidebar-link:active,
+  .zoom-hover:active {
+    transform: scale(0.90);
+  }
 }
 
 @media print {
