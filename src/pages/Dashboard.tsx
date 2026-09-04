@@ -148,11 +148,11 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button className="emergency-btn gap-2 w-fit" onClick={() => navigate("/opd")}>
+            <Button className="emergency-btn gap-2 w-fit zoom-hover" onClick={() => navigate("/opd")}>
               <UserPlus className="h-4 w-4" />
               New Patient Admission
             </Button>
-            <Button variant="outline" className="gap-2 w-fit" onClick={() => navigate("/daily-cash-book")}>
+            <Button variant="outline" className="gap-2 w-fit zoom-hover" onClick={() => navigate("/daily-cash-book")}>
               <Wallet className="h-4 w-4" />
               Daily Cash Book
             </Button>
