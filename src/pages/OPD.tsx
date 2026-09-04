@@ -90,6 +90,7 @@ export default function OPD() {
   const [searchQuery, setSearchQuery] = useState("");
   const [regForm, setRegForm] = useState({ name: "", mobile: "", age: "", gender: "", address: "" });
   const [showVillageOptions, setShowVillageOptions] = useState(false);
+  const [villageHighlight, setVillageHighlight] = useState(-1);
   const [existingPatient, setExistingPatient] = useState<any>(null);
   const [mobileSearchStatus, setMobileSearchStatus] = useState<"idle" | "searching" | "found" | "new">("idle");
   const [rxForm, setRxForm] = useState({ patient_id: "", diagnosis: "", medicines: "", followup_date: "" });
@@ -485,13 +486,39 @@ export default function OPD() {
                         placeholder="Village / Address"
                         value={regForm.address}
                         onFocus={() => setShowVillageOptions(true)}
-                        onBlur={() => setTimeout(() => setShowVillageOptions(false), 150)}
-                        onChange={e => { setRegForm(p => ({ ...p, address: e.target.value })); setShowVillageOptions(true); }}
+                        onBlur={() => setTimeout(() => { setShowVillageOptions(false); setVillageHighlight(-1); }, 150)}
+                        onChange={e => { setRegForm(p => ({ ...p, address: e.target.value })); setShowVillageOptions(true); setVillageHighlight(-1); }}
+                        onKeyDown={e => {
+                          if (!showVillageOptions || filteredVillages.length === 0) return;
+                          if (e.key === "ArrowDown") {
+                            e.preventDefault();
+                            setVillageHighlight(i => (i + 1) % filteredVillages.length);
+                          } else if (e.key === "ArrowUp") {
+                            e.preventDefault();
+                            setVillageHighlight(i => (i <= 0 ? filteredVillages.length - 1 : i - 1));
+                          } else if (e.key === "Enter") {
+                            if (villageHighlight >= 0 && villageHighlight < filteredVillages.length) {
+                              e.preventDefault();
+                              setRegForm(p => ({ ...p, address: filteredVillages[villageHighlight] }));
+                              setShowVillageOptions(false);
+                              setVillageHighlight(-1);
+                            }
+                          } else if (e.key === "Escape") {
+                            setShowVillageOptions(false);
+                            setVillageHighlight(-1);
+                          }
+                        }}
                       />
                       {showVillageOptions && filteredVillages.length > 0 && (
                         <div className="absolute z-20 w-full rounded-md border bg-card shadow-lg max-h-52 overflow-auto">
-                          {filteredVillages.map((village) => (
-                            <button key={village} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-muted" onMouseDown={() => setRegForm(p => ({ ...p, address: village }))}>
+                          {filteredVillages.map((village, idx) => (
+                            <button
+                              key={village}
+                              type="button"
+                              className={`w-full text-left px-3 py-2 text-sm hover:bg-muted ${idx === villageHighlight ? "bg-muted" : ""}`}
+                              onMouseEnter={() => setVillageHighlight(idx)}
+                              onMouseDown={() => { setRegForm(p => ({ ...p, address: village })); setVillageHighlight(-1); }}
+                            >
                               {village}
                             </button>
                           ))}
