@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
-import { Bell, Search, X, Bone, CalendarClock } from "lucide-react";
+import { Bell, Search, X, Bone, CalendarClock, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -247,6 +247,25 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
             {/* Right */}
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              {/* ── Global Quick Action: New Patient Admission (har page se accessible) ── */}
+              <button
+                onClick={() => navigate("/opd")}
+                className="gap-2"
+                style={{
+                  display: "flex", alignItems: "center", gap: "6px",
+                  height: "36px", padding: "0 14px",
+                  borderRadius: "10px", border: "none",
+                  background: "linear-gradient(135deg, #e03e3e, #c62828)",
+                  color: "#fff", fontSize: "12.5px", fontWeight: 700,
+                  cursor: "pointer", whiteSpace: "nowrap",
+                  boxShadow: "0 2px 10px rgba(224,62,62,0.35)",
+                }}
+                title="New Patient Admission"
+              >
+                <UserPlus style={{ width: "15px", height: "15px" }} />
+                <span className="hidden md:inline">New Patient Admission</span>
+              </button>
+
               {/* Slide dots */}
               <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
                 {BG_IMAGES.map((_, i) => (
