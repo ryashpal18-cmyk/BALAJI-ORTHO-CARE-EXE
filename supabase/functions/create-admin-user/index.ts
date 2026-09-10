@@ -11,14 +11,47 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { email, password } = await req.json();
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const callerClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user: caller } } = await callerClient.auth.getUser();
+    if (!caller) throw new Error("Unauthorized");
 
     const supabaseAdmin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
+      supabaseUrl,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
+    const { data: callerRole } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", caller.id)
+      .eq("role", "admin")
+      .maybeSingle();
+    if (!callerRole) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    // Check if user already exists
+    const { email, password } = await req.json();
+    if (typeof email !== "string" || !email.includes("@") || typeof password !== "string" || password.length < 8) {
+      return new Response(JSON.stringify({ error: "Invalid email or password" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { data: existing } = await supabaseAdmin.auth.admin.listUsers();
     const userExists = existing?.users?.find((u: any) => u.email === email);
 
@@ -28,7 +61,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Create user
     const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
@@ -37,7 +69,6 @@ Deno.serve(async (req) => {
 
     if (error) throw error;
 
-    // Assign admin role
     await supabaseAdmin.from("user_roles").insert({
       user_id: data.user.id,
       role: "admin",
