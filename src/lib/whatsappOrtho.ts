@@ -85,18 +85,15 @@ export function buildFractureMessage(
   return lines.join("\n");
 }
 
-// ✅ FIXED: ipcRenderer use karo — persistent window mein khulega
 export function openWhatsApp(mobile: string | null | undefined, message: string) {
   const clean  = (mobile || "").replace(/\D/g, "");
   const number = clean.length === 10 ? `91${clean}` : clean;
   const url    = `https://web.whatsapp.com/send?phone=${number}&text=${encodeURIComponent(message)}`;
 
-  // Electron app mein — persistent window ke through
-  if (typeof window !== "undefined" && (window as any).ipcRenderer) {
-    (window as any).ipcRenderer.send("open-whatsapp", { url });
+  if (typeof window !== "undefined" && (window as any).electron?.openWhatsApp) {
+    (window as any).electron.openWhatsApp(url);
     return;
   }
 
-  // Browser fallback
   window.open(url, "whatsapp_window", "width=1000,height=700");
 }
