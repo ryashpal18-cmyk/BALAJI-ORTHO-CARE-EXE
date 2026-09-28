@@ -30,15 +30,23 @@ logger.setupGlobalHandlers();
 // se chal rahi window ko front pe le aata hai — koi data-loss risk nahi.
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
-  app.quit();
+  // 🚨 FIX: Pehle sirf app.quit() tha — lekin usse baaki script (whenReady,
+  // SQLite init, snapshot, sab) phir bhi chalti rehti thi. Ab turant process
+  // khatam karte hain taaki dusra instance kuch bhi na chhue.
+  app.exit(0);
+  process.exit(0);
 } else {
   app.on('second-instance', () => {
-    logger.logWarn('app-lifecycle', 'Doosra instance launch hua — usse band karke maujooda window front pe laaye.');
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
+    logger.logWarn('app-lifecycle', 'Doosra instance launch hua — maujooda window front pe laa rahe hain.');
+    // 🚨 FIX: Agar main window band ho chuki hai (lekin process background mein
+    // zinda tha), to pehle nayi window banao — warna user ko kuch dikhta hi nahi.
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      app.whenReady().then(() => createWindow());
+      return;
     }
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
   });
 }
 
@@ -93,6 +101,7 @@ const SNAPSHOT_KEEP_DAYS   = 30;
 
 let mainWindow;
 let whatsappWindow = null;
+let isQuitting = false; // true hote hi WhatsApp window 'hide' nahi hogi, sach mein band hogi
 
 // ─── ENSURE DIRECTORIES ───────────────────────────────────────────────────────
 function ensureDirs() {
@@ -524,7 +533,21 @@ function createWindow() {
     mainWindow.loadURL('data:text/html,<h1 style="color:red;font-family:sans-serif;padding:40px">Please run npm run build first</h1>');
   }
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+    // 🚨 ROOT-CAUSE FIX: WhatsApp window "close" pe sirf hide hoti hai, to woh
+    // hidden window Electron ko "abhi window baaki hai" batati rehti thi aur
+    // window-all-closed kabhi fire nahi hota tha — app invisible background
+    // process bankar zinda rehti thi. Agla launch "second instance" ban ke
+    // turant marta tha (screen pe bas ek blink). Ab main window band hote hi
+    // poori app band hoti hai.
+    isQuitting = true;
+    if (whatsappWindow && !whatsappWindow.isDestroyed()) {
+      whatsappWindow.removeAllListeners('close');
+      whatsappWindow.destroy();
+    }
+    app.quit();
+  });
 }
 
 // ─── WHATSAPP WINDOW ─────────────────────────────────────────────────────────
@@ -582,6 +605,7 @@ function openWhatsAppWindow(url) {
 
   // Hide on close — login session bacha rahega
   whatsappWindow.on('close', (e) => {
+    if (isQuitting) return; // app band ho rahi hai — window ko sach mein band hone do
     e.preventDefault();
     whatsappWindow.hide();
   });
@@ -2040,6 +2064,10 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 
 app.on('before-quit', () => {
+  isQuitting = true;
+  // Failsafe: agar kisi wajah se quit atak jaaye (hung handler, file lock) to
+  // 3 second baad process zabardasti khatam — taaki background mein zinda na rahe.
+  setTimeout(() => { try { app.exit(0); } catch (_) { process.exit(0); } }, 3000).unref();
   if (whatsappWindow && !whatsappWindow.isDestroyed()) {
     whatsappWindow.removeAllListeners('close');
     whatsappWindow.close();
