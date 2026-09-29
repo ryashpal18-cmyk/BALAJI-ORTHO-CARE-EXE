@@ -186,6 +186,11 @@ export function useUpdateBill() {
       // 🚨 FIX: "discount" field yahan missing tha — Edit Bill dialog mein discount
       // badalne par woh save hi nahi hota tha (chupchaap drop ho jaata tha).
       if (bill.discount !== undefined) updateData.discount = bill.discount;
+      // 🆕 FIX: online sync hone tak "Edited" date UI me nahi dikhti thi
+      // (Supabase trigger updated_at sirf real DB update par set karta hai).
+      // Ab offline save hote hi bhi local updated_at turant set ho jaata hai,
+      // list/dialog me "Edited: <date>" turant dikhega, sync baad me ho jaaye.
+      updateData.updated_at = new Date().toISOString();
       return offlineUpdate("billing", bill.id, updateData);
     },
     onSuccess: () => {
@@ -463,7 +468,13 @@ export function useUpdateBed() {
 export function useAddPatient() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (p: any) => offlineInsert("patients", p),
+    // 🚨 FIX: naye patient ko created_at kabhi set nahi hota tha (sirf
+    // Supabase pe sync hone ke baad, server side, milta tha). Tab tak
+    // Billing.tsx ki patient-list "kaun sabse naya hai" ye pata karne ke
+    // liye Date.now() par bharosa karti thi — jo har render me thoda alag
+    // aata hai, isliye list ke naam upar-niche hote rehte the. Ab created_at
+    // yahin, save karte hi, lock kar denge.
+    mutationFn: async (p: any) => offlineInsert("patients", { ...p, created_at: p.created_at || new Date().toISOString() }),
     onSuccess: (newPatient: any) => {
       // Cache mein seedha inject karo — invalidate + refetch ka wait nahi karna
       // Billing page navigate hote hi naya patient list mein dikh jaayega

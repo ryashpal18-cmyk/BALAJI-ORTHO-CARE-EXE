@@ -1041,12 +1041,40 @@ export default function Ortho() {
     if(!bodySelection?.body_part||!fractureType) return toast.error("Body Map pe click karo aur Fracture Type select karo");
     let patient = selPt;
     if(!patient) {
-      // 🚨 FIX: agar list se explicitly patient select nahi kiya gaya (list
-      // pe click nahi kiya), to bhi ek final safety check — isi mobile number
-      // wala patient agar already search results (hits) mein maujood hai,
-      // usi ko use karo, naya duplicate patient na banao.
+      // 🚨 FIX (duplicate patient bug): pehle sirf `hits` (jo user ke abhi
+      // type kiye hue text se reactive search hote hain, limited results)
+      // ke andar exact match dhoondte the. Agar dropdown se click nahi kiya
+      // aur `hits` mein — kisi bhi wajah se (search debounce, formatting,
+      // ya list load hone se pehle hi Save daba diya) — wo patient nahi
+      // aaya, to naya DUPLICATE patient ban jaata tha usi mobile number se.
+      // Ab OPD registration jaisa hi poora, normalized check karte hain:
+      // pehle Supabase (agar online), phir local cache — mobile ke last 10
+      // digits se match, +91 wagera prefix ki parwah kiye bina.
       const cleanMobile = mobile.replace(/\D/g, "");
-      const exactMatch = cleanMobile.length > 0 ? (hits as any[]).find((p: any) => (p.mobile || "").replace(/\D/g, "") === cleanMobile) : null;
+      let exactMatch: any = (hits as any[]).find((p: any) => (p.mobile || "").replace(/\D/g, "") === cleanMobile) || null;
+
+      if (!exactMatch && cleanMobile.length >= 10) {
+        const last10 = cleanMobile.slice(-10);
+        try {
+          if (await isOnline()) {
+            const { data } = await supabase
+              .from("patients")
+              .select("*")
+              .or(`mobile.eq.${cleanMobile},mobile.eq.+91${cleanMobile},mobile.ilike.%${last10}%`)
+              .limit(1);
+            if (data && data.length > 0) exactMatch = data[0];
+          }
+        } catch (e) { /* online check fail — neeche cache se try karenge */ }
+
+        if (!exactMatch) {
+          const cached = await cacheGetAll("patients");
+          exactMatch = (cached as any[]).find((p: any) => {
+            const m = (p.mobile || "").replace(/\D/g, "");
+            return m === cleanMobile || m === last10 || m.endsWith(last10);
+          }) || null;
+        }
+      }
+
       patient = exactMatch || await addPatient.mutateAsync({ name, mobile, age: age?Number(age):null } as any);
     }
     try {

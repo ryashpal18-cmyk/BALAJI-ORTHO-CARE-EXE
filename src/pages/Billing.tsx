@@ -546,7 +546,15 @@ export default function Billing() {
 // hain). useMemo se ab ye sirf tab dobara chalega jab `patients` ya
 // `patientSearch` khud badlein — baaki fields (amount, services, etc.) type
 // karne par ye re-compute skip ho jaata hai. Filter/sort ka logic bilkul same hai.
+// 🚨 FIX: pehle neeche comparator ke andar, jab created_at missing hota tha,
+// har baar Date.now() call hota tha — matlab EK HI patient pair ke liye
+// alag-alag call mein result alag aa sakta tha. Sort function ko "consistent"
+// hona chahiye (same input = hamesha same result), warna JS engine ka sort
+// order unpredictable ho jaata hai — yahi wajah thi ki naam list mein
+// upar-niche "flicker" karte the. Ab ek hi "abhi" ka time ek baar snapshot
+// lekar sabke liye reuse karte hain — poora sort ek hi run mein stable rehta hai.
 const filteredPatients = useMemo(() => {
+  const now = Date.now();
   return patients
     ?.filter((p) => {
       if (!patientSearch) return true;
@@ -570,9 +578,11 @@ const filteredPatients = useMemo(() => {
       // _pendingSync wale (naye offline patients) hamesha upar
       if (a._pendingSync && !b._pendingSync) return -1;
       if (!a._pendingSync && b._pendingSync) return 1;
-      // created_at missing ho to naye maano (upar rakho)
-      const ta = a.created_at && !isNaN(new Date(a.created_at).getTime()) ? new Date(a.created_at).getTime() : Date.now();
-      const tb = b.created_at && !isNaN(new Date(b.created_at).getTime()) ? new Date(b.created_at).getTime() : Date.now();
+      // created_at missing ho to naye maano (upar rakho) — `now` ek hi baar
+      // upar snapshot liya gaya hai, isliye ye value poore sort ke dauraan
+      // kisi bhi patient ke liye kabhi nahi badalti (stable sort).
+      const ta = a.created_at && !isNaN(new Date(a.created_at).getTime()) ? new Date(a.created_at).getTime() : now;
+      const tb = b.created_at && !isNaN(new Date(b.created_at).getTime()) ? new Date(b.created_at).getTime() : now;
       return tb - ta;
     });
 }, [patients, patientSearch]);
@@ -1295,6 +1305,14 @@ const filteredPatients = useMemo(() => {
           <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle className="font-heading">Edit Bill</DialogTitle>
+              {/* 🆕 FIX: pehle edit hone ka pata hi nahi chalta tha. billing
+                  table me updated_at column pehle se hai (DB trigger khud
+                  update karta hai) — bas UI me dikha nahi rahe the. */}
+              {editingBill && (editingBill as any).updated_at && (editingBill as any).updated_at !== editingBill.created_at && (
+                <p className="text-xs text-muted-foreground -mt-1">
+                  Last edited: {safeDate((editingBill as any).updated_at)}
+                </p>
+              )}
             </DialogHeader>
             <form ref={billFormRef} onSubmit={handleEditSave} className="space-y-4">
               <div className="p-3 bg-muted/50 rounded-lg">
@@ -1360,7 +1378,15 @@ const filteredPatients = useMemo(() => {
                       const due = Number(bill.amount) - paid;
                       return (
                         <tr key={bill.id} className="border-b last:border-0 hover:bg-muted/30">
-                          <td className="py-3 font-medium">{patient?.name}</td>
+                          <td className="py-3 font-medium">
+                            {patient?.name}
+                            {/* 🆕 FIX: list me bhi pata chale ki bill edit hua hai ya nahi — */}
+                            {(bill as any).updated_at && (bill as any).updated_at !== bill.created_at && (
+                              <span className="block text-[10px] font-normal text-muted-foreground">
+                                Edited: {safeDate((bill as any).updated_at)}
+                              </span>
+                            )}
+                          </td>
                           <td className="py-3 hidden sm:table-cell text-muted-foreground text-xs">
                             {displayService}
                           </td>

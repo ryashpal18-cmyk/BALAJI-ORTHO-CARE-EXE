@@ -326,9 +326,29 @@ export async function queueRemapRowId(table: string, oldRowId: string, newRowId:
   }
 }
 
+// 🚨 FIX (12 patients "pending" hamesha dikhna): jo mutation MAX retries
+// (offlineSync.ts) tak fail ho chuki hoti hai, usko runSync() dobara try
+// nahi karta — lekin wo queue mein hamesha ke liye padi rehti thi (data
+// suraksha ke liye delete nahi karte). Pehle queueCount() in atki hui
+// entries ko bhi "pending" mein gin leta tha, isliye badge hamesha
+// "X pending" dikhata rehta tha chahe internet kitna bhi acha ho —
+// woh entries kabhi sync hi nahi hongi jab tak koi unhe dekhe.
+// Ab "pending" sirf un items ko maante hain jo abhi bhi retry ho sakte hain;
+// atki hui entries ko alag se ginte hain (queueStuckCount) taaki UI mein
+// dono ko sahi tarah dikhaya ja sake, koi bhi silently delete kiye bina.
+export const MAX_SYNC_RETRIES = 8;
+
 export async function queueCount(): Promise<number> {
   const all = await queueGetAll();
-  return all.length;
+  return all.filter((m) => (m.retries || 0) < MAX_SYNC_RETRIES).length;
+}
+
+// Atki hui entries — jo MAX_SYNC_RETRIES tak fail ho chuki hain aur ab
+// khud-ba-khud retry nahi hongi. Data safe hai (delete nahi hota), bas
+// review/manual-retry ka wait kar raha hai.
+export async function queueStuckCount(): Promise<number> {
+  const all = await queueGetAll();
+  return all.filter((m) => (m.retries || 0) >= MAX_SYNC_RETRIES).length;
 }
 
 // ─── Meta ─────────────────────────────────────────────────────────────────

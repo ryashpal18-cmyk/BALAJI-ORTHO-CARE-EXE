@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
 import { CloudOff, RefreshCw, CheckCircle2 } from "lucide-react";
-import { queueGetAll, queueRemove, onQueueChange } from "@/lib/offlineDb";
+import { queueStuckCount, onQueueChange } from "@/lib/offlineDb";
 import { onSyncStatus, runSync } from "@/lib/offlineSync";
 
 export function SyncStatusBadge() {
   const [online, setOnline]     = useState(navigator.onLine);
   const [pending, setPending]   = useState(0);
+  // 🚨 FIX: pehle "stuck" (MAX retries tak fail ho chuki) entries ko chupke
+  // se delete kar diya jaata tha app start hote hi ya sync tap karte hi —
+  // bina bataye patient/bill data gum ho sakta tha. Ab unhe delete nahi
+  // karte, sirf alag se count karke dikhate hain taaki pata chale kuch
+  // atka hua hai aur review kiya ja sake.
+  const [stuck, setStuck]       = useState(0);
   const [syncing, setSyncing]   = useState(false);
   const [justSynced, setJustSynced] = useState(false);
 
@@ -15,8 +21,8 @@ export function SyncStatusBadge() {
     window.addEventListener("online",  handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    // App start hone par stuck items (5+ retries) drop kar do
-    autoDropStuckItems();
+    refreshStuckCount();
+    const stuckInterval = setInterval(refreshStuckCount, 60000);
 
     const offQueue = onQueueChange((count) => setPending(count));
     const offSync  = onSyncStatus((s) => {
@@ -31,8 +37,13 @@ export function SyncStatusBadge() {
       window.removeEventListener("online",  handleOnline);
       window.removeEventListener("offline", handleOffline);
       offQueue(); offSync();
+      clearInterval(stuckInterval);
     };
   }, []);
+
+  async function refreshStuckCount() {
+    try { setStuck(await queueStuckCount()); } catch { /* silent */ }
+  }
 
   // Online + kuch pending nahi + sync nahi chal raha = badge dikhao hi mat
   if (online && pending === 0 && !syncing && !justSynced) return null;
@@ -77,36 +88,42 @@ export function SyncStatusBadge() {
     </div>
   );
 
-  // Online + pending stuck items — tap to clear + retry
+  // Online + pending items — tap to retry
   return (
-    <button
-      onClick={handleManualSync}
-      title="Tap karke sync karo"
-      style={{
-        display: "flex", alignItems: "center", gap: "6px",
-        height: "32px", padding: "0 10px", borderRadius: "8px",
-        border: "1.5px solid #bfdbfe", background: "rgba(219,234,254,0.9)",
-        color: "#1e57b0", fontSize: "12px", fontWeight: 600, cursor: "pointer",
-      }}
-    >
-      <RefreshCw style={{ width: "14px", height: "14px" }} />
-      {pending} pending · Tap
-    </button>
+    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+      <button
+        onClick={handleManualSync}
+        title="Tap karke sync karo"
+        style={{
+          display: "flex", alignItems: "center", gap: "6px",
+          height: "32px", padding: "0 10px", borderRadius: "8px",
+          border: "1.5px solid #bfdbfe", background: "rgba(219,234,254,0.9)",
+          color: "#1e57b0", fontSize: "12px", fontWeight: 600, cursor: "pointer",
+        }}
+      >
+        <RefreshCw style={{ width: "14px", height: "14px" }} />
+        {pending} pending · Tap
+      </button>
+      {/* 🆕 FIX: ye entries khud retry nahi hongi (bahut baar fail ho chuki
+          hain — shayad data problem hai, jaise duplicate ya galat field).
+          Pehle inhe chupke se delete kar diya jaata tha; ab bas dikha rahe
+          hain taaki data safe rahe aur dekh ke faisla liya ja sake. */}
+      {stuck > 0 && (
+        <span
+          title="Ye entries bahut baar fail ho chuki hain, khud retry nahi hongi. Support ko app ke logs bhejo."
+          style={{
+            display: "flex", alignItems: "center", height: "32px", padding: "0 8px",
+            borderRadius: "8px", border: "1.5px solid #fca5a5", background: "rgba(254,226,226,0.9)",
+            color: "#b91c1c", fontSize: "11px", fontWeight: 600,
+          }}
+        >
+          ⚠ {stuck} atki hui
+        </span>
+      )}
+    </div>
   );
 }
 
-async function autoDropStuckItems() {
-  try {
-    const all = await queueGetAll();
-    for (const m of all) {
-      if ((m.retries || 0) >= 5 && m.id !== undefined) {
-        await queueRemove(m.id);
-      }
-    }
-  } catch { /* silent */ }
-}
-
 async function handleManualSync() {
-  await autoDropStuckItems();
   await runSync();
 }

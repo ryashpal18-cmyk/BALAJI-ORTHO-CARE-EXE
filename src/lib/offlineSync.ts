@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { cLog } from "@/lib/clientLogger";
 import { isValidMobile } from "@/lib/utils";
 import { queryClient } from "@/lib/queryClient";
-import { queueGetAll, queueRemove, queueUpdate, queueRemapRowId, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetAll, backupCacheToDisk, QueuedMutation } from "./offlineDb";
+import { queueGetAll, queueRemove, queueUpdate, queueRemapRowId, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetAll, backupCacheToDisk, QueuedMutation, MAX_SYNC_RETRIES } from "./offlineDb";
 
 
 declare global {
@@ -295,7 +295,10 @@ function emitSyncStatus(pending: number, lastError?: string) {
   syncListeners.forEach((fn) => fn({ syncing, pending, lastError }));
 }
 
-const MAX_RETRIES = 8;
+// 🚨 FIX: MAX_RETRIES ab offlineDb.ts se aata hai (MAX_SYNC_RETRIES) taaki
+// "pending" count aur "sync stop karo" ki limit hamesha SAME number use
+// karein — pehle dono jagah alag-alag hardcoded the, mismatch ka risk tha.
+const MAX_RETRIES = MAX_SYNC_RETRIES;
 
 // 🚨 FIX: pehle sirf row ki apni "id" se "local_" prefix hataya jaata tha.
 // Lekin agar offline mein naya patient banao aur turant uski billing bhi
