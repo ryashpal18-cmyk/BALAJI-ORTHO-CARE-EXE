@@ -611,18 +611,8 @@ const filteredPatients = useMemo(() => {
   const handleDeleteBill = useCallback(
     async (bill: any) => {
       try {
-        // Delete PDF from storage only if online (offline me skip karo)
-        const pdfUrl = (bill as any).invoice_pdf_url;
-        if (pdfUrl) {
-          const online = await isOnline();
-          if (online) {
-            try {
-              const urlParts = pdfUrl.split("/invoices/");
-              if (urlParts[1]) await supabase.storage.from("invoices").remove([urlParts[1]]);
-            } catch (e) { cLog.warn('billing', 'PDF storage delete fail', e); }
-          }
-        }
-
+        // Persist the delete locally first. Keep existing PDFs for audit/recovery;
+        // network/storage cleanup must never precede the durable local commit.
         await deleteBill.mutateAsync({ id: bill.id, logData: bill });
 
         const { dismiss } = toast({

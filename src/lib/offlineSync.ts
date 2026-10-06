@@ -240,15 +240,8 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
   if (m.op === "sms") {
     const { mobile, message, patientName, smsType } = m.payload;
 
-    // 🚨 FIX: Agar mobile invalid/dummy hai (jaise 0000000000), to gateway
-    // ko baar-baar call karne ka koi fayda nahi — hamesha fail hi hoga.
-    // Isko ek normal "fail aur retry karo" jaisa treat na karke seedha
-    // permanently-skip maan lete hain (queue se hata dete hain), taaki
-    // MAX_RETRIES tak fizul retry cycles na ho.
-    if (!isValidMobile(mobile)) {
-      cLog.warn("sync", `Invalid/dummy mobile — SMS queue se hata diya (kabhi nahi jaayega): ${patientName}, mobile: ${mobile}`);
-      return;
-    }
+    // Invalid legacy entries must stay reviewable, never be acknowledged as sent.
+    if (!isValidMobile(mobile)) throw new Error("Invalid SMS recipient; correct or cancel this queued message");
 
     cLog.info("sync", `SMS bhej raha hai — patient: ${patientName}, type: ${smsType}`);
 

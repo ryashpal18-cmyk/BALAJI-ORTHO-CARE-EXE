@@ -933,14 +933,15 @@ ipcMain.handle('offline:refreshCashDays', async () => {
   const token = verifiedCloudToken;
   if (!token || !userId) throw new Error('Verified cloud session required');
   const rows = [];
-  for (let offset=0; ; offset+=500) {
+  for (let offset=0; ; ) {
     const response = await net.fetch(`${authPublicConfig.url}/rest/v1/cash_book_days?select=*&order=id&limit=500&offset=${offset}`, {
       headers: { Authorization: `Bearer ${token}`, apikey: authPublicConfig.key }, signal: AbortSignal.timeout(20000),
     });
     if (!response.ok) throw new Error('Cash-day refresh unavailable');
     const batch = await response.json();
     if (!Array.isArray(batch)) throw new Error('Invalid cash-day response');
-    rows.push(...batch); if (batch.length < 500) break;
+    if (batch.length === 0) break;
+    rows.push(...batch); offset += batch.length;
   }
   if (access.getPrincipal()?.userId !== userId || verifiedCloudToken !== token) throw new Error('Session changed during refresh');
   sqliteStore.cacheReplaceTable('cash_book_days',rows,'id');
@@ -1066,7 +1067,7 @@ ipcMain.handle('backup:openFolder', async () => {
 });
 
 ipcMain.on('open-external-url', (_e, url) => {
-  if (url && typeof url === 'string') shell.openExternal(url).catch(() => {});
+  if (typeof url === 'string' && /^https:\/\//.test(url)) shell.openExternal(url).catch(() => {});
 });
 
 ipcMain.on('open-whatsapp', (_e, payload) => {

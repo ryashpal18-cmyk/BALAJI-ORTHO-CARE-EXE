@@ -1,7 +1,7 @@
 import { businessDate } from "@/lib/businessDate";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { offlineFetch, offlineInsert, offlineUpdate } from "@/lib/offlineQuery";
+import { offlineFetch, offlineFetchScoped, offlineInsert, offlineUpdate } from "@/lib/offlineQuery";
 import { cacheGetAll, queueAdd, cacheUpsertRow } from "@/lib/offlineDb";
 import { isOnline } from "@/lib/offlineSync";
 
@@ -93,23 +93,12 @@ export function useFollowupsAround() {
       const startStr = businessDate(start);
       const endStr = businessDate(end);
 
-      const online = await isOnline();
-      if (online) {
-        try {
-          const { data, error } = await supabase
-            .from("fracture_cases" as any)
-            .select("*")
-            .gte("next_followup_date", startStr)
-            .lte("next_followup_date", endStr)
-            .order("next_followup_date", { ascending: true });
-          if (error) throw error;
-          return attachPatientsToCases((data || []) as any[]);
-        } catch {
-          // fall through to offline cache filter below
-        }
-      }
-
-      const cached = await cacheGetAll("fracture_cases");
+      const cached = await offlineFetch("fracture_cases", async () => {
+        const { data, error } = await supabase.from("fracture_cases" as any).select("*")
+          .gte("next_followup_date", startStr).lte("next_followup_date", endStr);
+        if (error) throw error;
+        return data || [];
+      });
       const filtered = cached
         .filter((c: any) => c.next_followup_date && c.next_followup_date >= startStr && c.next_followup_date <= endStr)
         .sort((a: any, b: any) => (a.next_followup_date || "").localeCompare(b.next_followup_date || ""));
@@ -152,24 +141,14 @@ export function useFractureXrays(caseId?: string) {
     refetchOnMount: "always",
     queryFn: async () => {
       if (!caseId) return [];
-      const online = await isOnline();
-      if (online) {
-        try {
-          const { data, error } = await supabase
-            .from("fracture_xrays" as any)
-            .select("*")
-            .eq("fracture_case_id", caseId)
-            .order("image_date", { ascending: false });
-          if (error) throw error;
-          return (data || []) as any[];
-        } catch {
-          // fall through to offline cache below
-        }
-      }
-      const cached = await cacheGetAll("fracture_xrays");
-      return cached
-        .filter((x: any) => x.fracture_case_id === caseId)
-        .sort((a: any, b: any) => (b.image_date || "").localeCompare(a.image_date || ""));
+      return offlineFetchScoped("fracture_xrays", async () => {
+        const { data, error } = await supabase.from("fracture_xrays" as any).select("*")
+          .eq("fracture_case_id", caseId).order("image_date", { ascending: false });
+        if (error) throw error;
+        return data || [];
+      }, cached => cached.filter(x => x.fracture_case_id === caseId)
+        .sort((a, b) => (b.image_date || "").localeCompare(a.image_date || "")));
+
     },
     enabled: !!caseId,
   });

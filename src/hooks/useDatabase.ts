@@ -192,22 +192,6 @@ export function useDeleteBill() {
   return useMutation({
     mutationFn: async (arg: string | { id: string; logData?: any }) => {
       const id = typeof arg === "string" ? arg : arg.id;
-      const logData = typeof arg === "string" ? null : arg.logData;
-      const online = await isOnline();
-      if (logData && online) {
-        try {
-          const { data: { user } } = await supabase.auth.getUser();
-          await supabase.from("deleted_records_log" as any).insert({
-            table_name: "billing",
-            record_id: id,
-            record_data: logData,
-            deleted_by: user?.id,
-          } as any);
-        } catch { /* logging failure shouldn't block the delete */ }
-      }
-      if (online && !id.startsWith("local_")) {
-        try { await supabase.from("payments").delete().eq("billing_id", id); } catch { /* best effort */ }
-      }
       await offlineDelete("billing", id);
     },
     onSuccess: () => {
@@ -397,34 +381,6 @@ export function useDeletePatient() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, logData }: { id: string; logData?: any }) => {
-      const online = await isOnline();
-      if (online) {
-        try {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (logData) {
-            await supabase.from("deleted_records_log" as any).insert({
-              table_name: "patients",
-              record_id: id,
-              record_data: logData,
-              deleted_by: user?.id,
-            } as any);
-          }
-          await supabase.from("appointments").delete().eq("patient_id", id);
-          await supabase.from("prescriptions").delete().eq("patient_id", id);
-          await supabase.from("billing").delete().eq("patient_id", id);
-          await supabase.from("physiotherapy_sessions").delete().eq("patient_id", id);
-          await supabase.from("xray_reports").delete().eq("patient_id", id);
-          await supabase.from("medical_history").delete().eq("patient_id", id);
-          const { error } = await supabase.from("patients").delete().eq("id", id);
-          if (error) throw error;
-          await offlineDelete("patients", id); // also clears local cache copy
-          return;
-        } catch {
-          // fall through to offline-only delete below
-        }
-      }
-      // Offline: queue the patient delete; related-table cleanup will run
-      // once connectivity is back (admin can re-run delete then if needed).
       await offlineDelete("patients", id);
     },
     onSuccess: () => {

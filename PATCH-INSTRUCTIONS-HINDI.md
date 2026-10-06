@@ -212,3 +212,19 @@ Windows EXE और live Supabase का end-to-end परीक्षण यह�
 - `node tests/offline-cashbook.cjs`: test-only `@electric-sql/pglite` चाहिए (या `PGLITE_MODULE_PATH`); N01–N07 और conflicting corrections के tests। Live clinic data इस्तेमाल नहीं किया गया।
 - पुराने regression/login tests, TypeScript और production React build पास हैं। Windows/live Supabase deployment की पुष्टि अलग से करनी होगी।
 - `PATCH-FILES.sha256` में workflow द्वारा बदलने वाली package version files शामिल नहीं हैं।
+
+
+## अगली जाँच: delete / Ortho / cash refresh / SMS / external link
+
+इस update में पाँच और flow सुधारे गए:
+1. Patient/bill delete पहले local transaction और queue में जाता है; server/attachment requests उसका रास्ता नहीं रोकते। Server पर delete और deleted_records_log एक transaction में हैं, duplicate retry पर audit दोबारा नहीं बनता। Existing foreign keys से संबंधित rows cascade होती हैं। किसी constraint/closed-day रोक पर पूरा transaction rollback होता है।
+2. Ortho follow-up और fracture X-ray list भी पहले cached rows लौटाती हैं; network refresh background में होता है। Image file डाउनलोड/AI जैसी online सुविधाएँ अलग हैं।
+3. Cash-day server pagination अब वास्तविक मिले rows के आधार पर आगे बढ़ती है और खाली page तक चलती है; कम configured server limit पर बाकी days गायब नहीं होते।
+4. पुराने invalid SMS को sent/acknowledged मानकर queue से हटाने की जगह pending error के साथ review के लिए रखा जाता है।
+5. पुराने external-URL IPC alias पर भी केवल HTTPS links खुलते हैं; file/custom-protocol requests reject हैं।
+
+Deploy: पहले पिछली तीन migrations लागू रखें, फिर `supabase/migrations/20261006200000_atomic_delete_audit.sql` लागू करें और नया EXE लगाएँ। GitHub push live Supabase SQL execute नहीं करता।
+
+Bill delete पर पहले से uploaded PDF को audit/recovery के लिए रखा जाता है; नया flow उसे local commit से पहले नहीं मिटाता। Local delete की queue server acknowledgement तक सुरक्षित रहती है। Offline delete की final server validation इंटरनेट लौटने पर होगी; rejection होने पर review जरूरी है।
+
+जाँच: `tests/offline-cashbook.cjs` में cascade/delete audit rollback, duplicate delete और low-row-cap cash refresh; `tests/offline-first.cjs` में local-only delete, invalid SMS retention और external protocol guard; पुराने regression, typecheck व React build भी जाँचे गए।
