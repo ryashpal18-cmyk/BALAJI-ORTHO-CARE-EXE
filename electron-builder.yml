@@ -19,6 +19,8 @@ files:
   - preload.js
   - logger.cjs
   - sqlite-store.cjs
+  - access-control.cjs
+  - auth-public-config.json
   - package.json
 
 win:

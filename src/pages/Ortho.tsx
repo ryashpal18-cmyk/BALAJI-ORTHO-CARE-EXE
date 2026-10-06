@@ -1,3 +1,6 @@
+import { isOnline } from "@/lib/offlineSync";
+import { cacheGetAll } from "@/lib/offlineDb";
+import { businessDate } from "@/lib/businessDate";
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -39,8 +42,8 @@ const EXERCISE_BY_PART: Record<string, string> = {
 };
 
 // ─── Helpers ──────────────────────────────────
-const todayIso  = () => new Date().toISOString().slice(0,10);
-const addDays   = (base: string, n: number) => { const d = new Date(base); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
+const todayIso  = () => businessDate();
+const addDays   = (base: string, n: number) => { const d = new Date(base); d.setDate(d.getDate()+n); return businessDate(d); };
 const diffDays  = (a: string, b: string)    => Math.round((new Date(b).getTime()-new Date(a).getTime())/86400000);
 const fmtDate   = (iso?: string|null)       => { if(!iso) return "—"; try { return new Date(iso).toLocaleDateString("hi-IN",{day:"2-digit",month:"short",year:"numeric"}); } catch { return iso; }};
 const fmtShort  = (iso?: string|null)       => { if(!iso) return "—"; try { return new Date(iso).toLocaleDateString("hi-IN",{day:"2-digit",month:"short",weekday:"short"}); } catch { return iso; }};

@@ -1,3 +1,5 @@
+import { withPaymentHistory } from "./paymentLedger";
+import { commitMutation } from "./offlineDb";
 // ─────────────────────────────────────────────────────────────────────────
 // Offline-aware query/mutation helpers
 // ─────────────────────────────────────────────────────────────────────────
@@ -18,17 +20,15 @@ import {
   tempId,
 } from "./offlineDb";
 
-// ── Per-row persistence chain ──────────────────────────────────────────
-// Insert/Update ab UI ko turant return karte hain. Ye chain sirf isliye
-// hai taaki agar user insert ke turant baad (milliseconds me) edit kare,
-// to background writes sahi order me hi hon — race condition na ho.
-const _rowPersistChain = new Map<string, Promise<any>>();
-function chainPersist(key: string, fn: () => Promise<any>) {
-  const prev = _rowPersistChain.get(key) || Promise.resolve();
-  const next = prev.then(fn, fn).catch((err) => cLog.error("offline", `persist chain fail — ${key}`, err));
-  _rowPersistChain.set(key, next);
+// Read/merge/write belongs to the same chain; errors reach the Save caller.
+const chains = new Map<string, Promise<any>>();
+function serialize<T>(key: string, action: () => Promise<T>): Promise<T> {
+  const next = (chains.get(key) || Promise.resolve()).then(action, action);
+  chains.set(key, next);
+  next.then(() => { if (chains.get(key) === next) chains.delete(key); }, () => { if (chains.get(key) === next) chains.delete(key); });
   return next;
 }
+function syncLater() { void isOnline().then(online => { if (online) return runSync(); }).catch(e => cLog.warn("sync", "Background sync failed", e)); }
 
 export async function offlineFetch<T = any>(
   table: string,
@@ -46,7 +46,7 @@ export async function offlineFetch<T = any>(
   if (cached.length === 0 && online) {
     try {
       const rows = await fetcher();
-      await cacheReplaceTable(table, rows as any[], idField);
+      for (const row of rows as any[]) await cacheUpsertRowFromServer(table, row, idField);
       return rows;
     } catch (err) {
       cLog.warn("offline", `${table} — cache khaali thi aur online fetch bhi fail — khaali return kar rahe hain`, err);
@@ -58,7 +58,7 @@ export async function offlineFetch<T = any>(
   // background mein silently fresh data le aao (is call ka wait nahi karna).
   if (online) {
     fetcher()
-      .then((rows) => cacheReplaceTable(table, rows as any[], idField))
+      .then(async (rows) => { for (const row of rows as any[]) await cacheUpsertRowFromServer(table, row, idField); })
       .catch((err) => cLog.warn("offline", `${table} background refresh fail — cache use ho raha hai`, err));
   }
 
@@ -104,100 +104,33 @@ export async function offlineFetchScoped<T = any>(
   return scoped;
 }
 
-export async function offlineInsert(
-  table: string,
-  payload: any,
-  opts: { idField?: string } = {}
-): Promise<any> {
+export async function offlineInsert(table: string, payload: any, opts: { idField?: string } = {}) {
   const idField = opts.idField || "id";
-  const localRow = { ...payload, [idField]: payload[idField] || tempId(), _pendingSync: true };
-  const key = `${table}::${localRow[idField]}`;
-
-  // 🚀 Fire-and-forget: caller ko turant localRow milta hai, kabhi network
-  // ka wait nahi. Asli SQLite/queue write background chain me hoti hai
-  // (chainPersist se — taaki insert ke turant baad edit aaye to order sahi rahe).
-  chainPersist(key, async () => {
-    await cacheUpsertRow(table, localRow, idField);
-    await queueAdd({ table, op: "insert", payload: localRow, tempId: localRow[idField] });
-    if (table === "patients") await _updatePatientNameInBillingCache(localRow);
-    cLog.info("offline", `${table} local save hua (background) — sync trigger`);
-    if (await isOnline()) runSync();
-  });
-
-  return localRow;
-}
-
-export async function offlineUpdate(
-  table: string,
-  rowId: string,
-  updates: any,
-  opts: { idField?: string; select?: string } = {}
-): Promise<any> {
-  const idField = opts.idField || "id";
-  const key = `${table}::${rowId}`;
-
-  // 🚀 PERF: cacheGetRow() seedha us ek row ko SQLite PRIMARY KEY lookup se
-  // laata hai — O(1) index hit, poori table nahi.
-  const existing = (await cacheGetRow(table, rowId)) || { [idField]: rowId };
-  const merged = { ...existing, ...updates, _pendingSync: true };
-
-  // 🚀 Fire-and-forget: turant merged row return, background me persist.
-  chainPersist(key, async () => {
-    await cacheUpsertRow(table, merged, idField);
-
-    // 🚨 FIX: row abhi bhi "local_" hai = queue me iska ek pending "insert"
-    // already baitha hai. Alag "update" queue karne ke bajaye us insert ke
-    // payload ME HI naya data merge karo — sync ke time Supabase ko sirf EK
-    // final insert jaayega, koi blank duplicate row nahi banegi.
-    if (rowId.startsWith("local_")) {
-      const queue = await queueGetAll();
-      const pendingInsert = queue.find((m) => m.table === table && m.op === "insert" && m.tempId === rowId);
-      if (pendingInsert && pendingInsert.id !== undefined) {
-        await queueUpdate(pendingInsert.id, { payload: { ...pendingInsert.payload, ...updates } });
-        cLog.info("offline", `${table} pending insert (${rowId}) me update merge ho gaya`);
-      } else {
-        // pending insert nahi mila (rare case) — fallback normal update,
-        // jise applyMutation() ka PENDING_PARENT_INSERT retry ab bhi handle karega
-        await queueAdd({ table, op: "update", payload: updates, rowId });
-      }
-    } else {
-      await queueAdd({ table, op: "update", payload: updates, rowId });
+  const rowId = payload[idField] || tempId();
+  return serialize(`${table}::${rowId}`, async () => {
+    let row = { created_at: new Date().toISOString(), ...payload, [idField]: rowId, _pendingSync: true };
+    if (["patients", "billing", "appointments"].includes(table) && !row.branch_id) {
+      const parent = row.patient_id ? await cacheGetRow("patients", row.patient_id) : null;
+      const branches = (await cacheGetAll("branches")).filter(b => b.is_active);
+      row.branch_id = parent?.branch_id || localStorage.getItem("bocc_selected_branch") || (branches.length === 1 ? branches[0].id : null);
+      if (!row.branch_id) throw new Error("Select a branch before saving this record");
     }
-    cLog.info("offline", `${table} local update hua (background) — rowId: ${rowId}`);
-    if (await isOnline()) runSync();
+    if (table === "billing") row = withPaymentHistory({ id: rowId, amount_paid: 0 }, row, tempId().slice(6), row.created_at);
+    const saved = await commitMutation({ table, op: "insert", payload: row, tempId: rowId }, row, idField);
+    syncLater(); return saved;
   });
-
-  return merged;
 }
-
-export async function offlineDelete(table: string, rowId: string): Promise<void> {
-  // ✅ HAMESHA local-first
-  await cacheDeleteRow(table, rowId);
-  await queueAdd({ table, op: "delete", rowId });
-  cLog.info("offline", `${table} local delete hua (instant) — background sync trigger — rowId: ${rowId}`);
-
-  isOnline().then((online) => { if (online) runSync(); });
+export async function offlineUpdate(table: string, rowId: string, updates: any, opts: { idField?: string; select?: string } = {}) {
+  return serialize(`${table}::${rowId}`, async () => {
+    const existing = await cacheGetRow(table, rowId);
+    if (!existing) throw new Error("Record not available locally; refresh before editing");
+    let changes = { ...updates };
+    if (table === "billing") changes = withPaymentHistory(existing, changes, tempId().slice(6), new Date().toISOString());
+    const saved = await commitMutation({ table, op: "update", rowId, payload: changes }, changes, opts.idField || "id");
+    syncLater(); return saved;
+  });
 }
-
-// ── Billing cache mein patient naam inject karo ──────────────────────────
-async function _updatePatientNameInBillingCache(patient: any) {
-  try {
-    const patientId = patient?.id;
-    if (!patientId) return;
-    const billingRows = await cacheGetAll("billing");
-    for (const bill of billingRows) {
-      if (bill.patient_id === patientId) {
-        await cacheUpsertRow("billing", {
-          ...bill,
-          patients: {
-            name: patient.name || "",
-            mobile: patient.mobile || "",
-            address: patient.address || "",
-          },
-        }, "id");
-      }
-    }
-  } catch (err) {
-    cLog.warn("cache", "Billing cache mein patient naam update fail", err);
-  }
+export async function offlineDelete(table: string, rowId: string) {
+  await serialize(`${table}::${rowId}`, () => commitMutation({ table, op: "delete", rowId }, null));
+  syncLater();
 }

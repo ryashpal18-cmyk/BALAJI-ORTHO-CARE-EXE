@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/businessDate";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -88,7 +89,7 @@ export function useBrowserPushPermission() {
 function pushOnceToday(key: string, title: string, body: string) {
   if (typeof window === "undefined" || !("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
-  const flagKey = `bocc_push_${key}_${new Date().toISOString().slice(0, 10)}`;
+  const flagKey = `bocc_push_${key}_${businessDate()}`;
   if (localStorage.getItem(flagKey)) return;
   try {
     new Notification(title, { body, icon: "/icon.png" });

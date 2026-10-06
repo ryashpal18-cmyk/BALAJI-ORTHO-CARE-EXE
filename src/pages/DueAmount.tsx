@@ -1,3 +1,5 @@
+import { businessDate } from "@/lib/businessDate";
+import { normalizeIndianMobile } from "@/lib/mobile";
 import { useState, useMemo } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,7 +22,8 @@ import { sendSMS } from "@/services/smsService";
 function openWhatsAppDue(mobile: string, message: string) {
   const cleanMobile = (mobile || "").replace(/\D/g, "");
   if (!cleanMobile) return;
-  const num = cleanMobile.startsWith("91") ? cleanMobile : `91${cleanMobile}`;
+  let num: string;
+  try { num = normalizeIndianMobile(cleanMobile); } catch { toast({ title: "Invalid mobile number", variant: "destructive" }); return; }
   const url = `https://wa.me/${num}?text=${encodeURIComponent(message)}`;
   if ((window as any).ipcRenderer) {
     (window as any).ipcRenderer.send("open-whatsapp", { url });
@@ -59,14 +62,15 @@ export default function DueAmount() {
     const name = b.patients?.name?.toLowerCase() || "";
     const mobile = b.patients?.mobile || "";
     const q = search.toLowerCase();
-    return name.includes(q) || mobile.includes(search.replace(/\D/g, ""));
+    const digits = search.replace(/\D/g, "");
+    return name.includes(q) || (digits.length > 0 && mobile.replace(/\D/g, "").includes(digits));
   });
 
   // ── Date-wise grouping (bill ki date ke hisaab se) ──
   const grouped = useMemo(() => {
     const map = new Map<string, any[]>();
     for (const b of filtered) {
-      const dateKey = b.date || b.created_at?.slice(0, 10) || "Unknown";
+      const dateKey = b.date || businessDate(b.created_at || "") || "Unknown";
       if (!map.has(dateKey)) map.set(dateKey, []);
       map.get(dateKey)!.push(b);
     }

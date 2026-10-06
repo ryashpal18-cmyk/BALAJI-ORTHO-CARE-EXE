@@ -35,7 +35,7 @@ function init(dbDir) {
     // Agar file kisi aur process (antivirus scan) dwara momentarily locked hai,
     // to turant fail hone ke bajaye 5 second tak retry karo.
     db.pragma('busy_timeout = 5000');
-    db.pragma('synchronous = NORMAL');
+    db.pragma('synchronous = FULL');
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS table_cache (
@@ -108,8 +108,12 @@ function cacheSetRows(table, rows, idField) {
 function cacheReplaceTable(table, rows, idField) {
   const del = getDb().prepare(`DELETE FROM table_cache WHERE table_name = ?`);
   const runAll = getDb().transaction(() => {
+    const pending = cacheGetAll(table).filter(row => row._pendingSync);
+    const pendingIds = new Set(pending.flatMap(row => [String(row[idField]), String(row[idField]).replace(/^local_/, '')]));
+    const deleted = new Set(queueGetAll().filter(m => m.table === table && m.op === 'delete').flatMap(m => [m.rowId, m.rowId?.replace(/^local_/, '')]));
+    const combined = [...pending, ...rows.filter(row => !pendingIds.has(String(row[idField])))].filter(row => !deleted.has(row[idField]));
     del.run(table);
-    cacheSetRows(table, rows, idField);
+    cacheSetRows(table, combined, idField);
   });
   runAll();
 }
@@ -225,7 +229,7 @@ function importLegacyDump(dump) {
   const runAll = getDb().transaction(() => {
     if (dump.cache) {
       for (const [table, rows] of Object.entries(dump.cache)) {
-        if (Array.isArray(rows) && rows.length) cacheSetRows(table, rows, 'id');
+        if (Array.isArray(rows) && rows.length) cacheSetRows(table, rows.filter(row => !cacheGetRow(table, row.id)), 'id');
       }
     }
     if (Array.isArray(dump.queue)) {
@@ -254,7 +258,58 @@ function close() {
   }
 }
 
+function commitMutation(mutation, row, idField = 'id') {
+  return getDb().transaction(() => {
+    let saved = row;
+    if (mutation.op === 'update') {
+      const existing = cacheGetRow(mutation.table, mutation.rowId);
+      if (!existing) throw new Error('Record not available locally; refresh before editing');
+      saved = { ...existing, ...row, [idField]: mutation.rowId, _pendingSync: true };
+    }
+    if (mutation.op === 'delete') cacheDeleteRow(mutation.table, mutation.rowId);
+    else cacheUpsertRow(mutation.table, saved, idField);
+    queueAdd(mutation);
+    return saved;
+  })();
+}
+function snapshot() {
+  return getDb().transaction(() => {
+    const cache = {};
+    for (const { table_name } of getDb().prepare('SELECT DISTINCT table_name FROM table_cache').all())
+      cache[table_name] = cacheGetAll(table_name);
+    return { cache, queue: queueGetAll(), meta: getDb().prepare('SELECT * FROM meta').all() };
+  })();
+}
+function restoreSnapshot(dump) {
+  if (!dump || !dump.cache || !Array.isArray(dump.queue)) throw new Error('Invalid backup');
+  return getDb().transaction(() => {
+    if (queueGetAll().length || getDb().prepare('SELECT count(*) AS n FROM table_cache').get().n)
+      throw new Error('Restore requires an empty test/new database; existing data was not changed');
+    for (const [table, rows] of Object.entries(dump.cache)) cacheSetRows(table, rows, 'id');
+    for (const m of dump.queue) { const id = queueAdd(m); queueUpdate(id, { ...m, id }); }
+    for (const m of dump.meta || []) getDb().prepare('INSERT OR REPLACE INTO meta VALUES (?, ?)').run(m.key,m.value);
+    metaSet("_legacy_migrated", true);
+    return true;
+  })();
+}
+function adjustStock(args) {
+  return getDb().transaction(() => {
+    const medicine = cacheGetRow('medicines', args.medicineId);
+    if (!medicine) throw new Error('Medicine not found; refresh inventory');
+    const qty = Number(args.changeQty);
+    const next = Number(medicine.stock_quantity || 0) + qty;
+    if (!Number.isFinite(qty) || qty === 0 || next < 0) throw new Error('Insufficient stock or invalid quantity');
+    const movement = { id: args.id, medicine_id: args.medicineId, medicine_name: medicine.name,
+      change_qty: qty, reason: args.reason || 'manual', note: args.note || null,
+      created_by: args.actorName || 'Unknown', created_at: new Date().toISOString(), _pendingSync: true };
+    cacheUpsertRow('medicines', { ...medicine, stock_quantity: next, _pendingSync: true }, 'id');
+    cacheUpsertRow('stock_movements', movement, 'id');
+    queueAdd({ table: 'stock_movements', op: 'stock_adjust', payload: movement, tempId: movement.id });
+    return { ...medicine, stock_quantity: next, _pendingSync: true };
+  })();
+}
 module.exports = {
+  commitMutation, snapshot, restoreSnapshot, adjustStock,
   init, close,
   cacheGetAll, cacheGetRow, cacheSetRows, cacheReplaceTable, cacheUpsertRow, cacheDeleteRow, cacheReplaceRowKey,
   queueAdd, queueGetAll, queueRemove, queueUpdate,

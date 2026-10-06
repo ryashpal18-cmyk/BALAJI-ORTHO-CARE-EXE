@@ -1,3 +1,7 @@
+import { queryClient } from "@/lib/queryClient";
+import { migrateLegacyIndexedDbIfNeeded } from "@/lib/offlineDb";
+import { startAutoSync } from "@/lib/offlineSync";
+import { startAutoBackupScheduler } from "@/lib/backup";
 import { useState, useEffect } from "react";
 import { Eye, EyeOff, User, Lock, Shield, Phone, LogIn } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -7,27 +11,16 @@ import logoImg from "@/assets/logo.png";
 import bg1 from "@/assets/dash-bg1.png";
 import bg2 from "@/assets/dash-bg2.png";
 import bg3 from "@/assets/dash-bg3.png";
-import { getStaffUsers, STORAGE_KEYS } from "@/lib/appConfig";
-
-const ADMIN_EMAIL    = "yashpal18@balajiclinic.local";
-const ADMIN_PASSWORD = "Aarya@2019";
-const LOCAL_USERNAME = "Yashpal18";
-const LOCAL_PASSWORD = "Aarya@2019";
+import { STORAGE_KEYS } from "@/lib/appConfig";
 
 const BG_IMAGES = [bg1, bg2, bg3];
 
-const QUICK_USERS = [
-  { label: "Admin",   username: LOCAL_USERNAME, password: LOCAL_PASSWORD, color: "#1e57b0", bg: "linear-gradient(135deg,#1a3a6b,#1e57b0)" },
-  { label: "Staff 1", username: "",             password: "",             color: "#0e7c4a", bg: "linear-gradient(135deg,#0a5c36,#0e7c4a)" },
-  { label: "Staff 2", username: "",             password: "",             color: "#7c3a0e", bg: "linear-gradient(135deg,#5c2a0a,#7c3a0e)" },
-];
 
 export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
-  const [username, setUsername] = useState(LOCAL_USERNAME);
-  const [password, setPassword] = useState(LOCAL_PASSWORD);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading]   = useState(false);
-  const [activePreset, setActivePreset] = useState(0);
   const [bgIdx, setBgIdx]   = useState(0);
   const [bgFade, setBgFade] = useState(true);
   const navigate  = useNavigate();
@@ -45,50 +38,49 @@ export default function Login() {
     return () => clearInterval(timer);
   }, []);
 
-  const pickPreset = (idx: number) => {
-    setActivePreset(idx);
-    setUsername(QUICK_USERS[idx].username);
-    setPassword(QUICK_USERS[idx].password);
-  };
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
-
-    if (username === LOCAL_USERNAME && password === LOCAL_PASSWORD) {
-      localStorage.setItem("isLoggedIn", "true");
-      localStorage.setItem("userName", username);
-      localStorage.setItem(STORAGE_KEYS.USER_ROLE, "admin");
-      localStorage.removeItem(STORAGE_KEYS.USER_PERMS);
-      try {
-        await supabase.functions.invoke("create-admin-user", {
-          body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
-        });
-        await supabase.auth.signInWithPassword({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
-      } catch (_) {}
+    queryClient.clear();
+    const bridge = (window as any).electron;
+    const clearLogin = () => {
+      [STORAGE_KEYS.IS_LOGGED_IN, STORAGE_KEYS.USER_NAME, STORAGE_KEYS.USER_ROLE, STORAGE_KEYS.USER_PERMS]
+        .forEach(key => localStorage.removeItem(key));
+    };
+    try {
+      clearLogin();
+      await bridge?.logout?.();
+      await supabase.auth.signOut();
+      const email = username.includes("@") ? username.trim().toLowerCase() : `${username.trim().toLowerCase()}@staff.balajiclinic.local`;
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error || !data.session) throw error || new Error("Session missing");
+      const { data: profile, error: profileError } = await supabase.functions.invoke("session-access");
+      if (profileError || !profile || !["admin", "staff"].includes(profile.role) || !Array.isArray(profile.pages)) {
+        throw profileError || new Error("Account access missing; administrator se sampark karein");
+      }
+      if (bridge) {
+        if (!bridge.establishSession) throw new Error("Desktop app update required");
+        const verified = await bridge.establishSession(data.session.access_token);
+        if (!verified?.success) throw new Error("Desktop session verification failed");
+      }
+      if (profile.role === "admin") await migrateLegacyIndexedDbIfNeeded();
+      localStorage.setItem(STORAGE_KEYS.IS_LOGGED_IN, "true");
+      localStorage.setItem(STORAGE_KEYS.USER_NAME, profile.displayName || username.trim());
+      localStorage.setItem(STORAGE_KEYS.USER_ROLE, profile.role);
+      localStorage.setItem(STORAGE_KEYS.USER_PERMS, JSON.stringify(profile.pages));
+      startAutoSync();
+      if (profile.role === "admin") startAutoBackupScheduler();
+      setPassword("");
+      navigate(profile.role === "admin" ? "/dashboard" : profile.pages[0] || "/dashboard");
+    } catch (error: any) {
+      clearLogin();
+      await bridge?.logout?.().catch(() => {});
+      await supabase.auth.signOut().catch(() => {});
+      toast({ title: "Login failed", description: error?.message || "Login ke liye internet aur valid account zaroori hai", variant: "destructive" });
+    } finally {
       setLoading(false);
-      navigate("/dashboard");
-      return;
     }
-
-    const staffUsers = getStaffUsers();
-    const staffUser  = staffUsers.find(
-      u => u.username.toLowerCase() === username.toLowerCase() && u.password === password
-    );
-    if (staffUser) {
-      localStorage.setItem("isLoggedIn", "true");
-      localStorage.setItem("userName", staffUser.displayName);
-      localStorage.setItem(STORAGE_KEYS.USER_ROLE, "staff");
-      localStorage.setItem(STORAGE_KEYS.USER_PERMS, JSON.stringify(staffUser.allowedPages));
-      setLoading(false);
-      const firstPage = staffUser.allowedPages.includes("/dashboard")
-        ? "/dashboard" : staffUser.allowedPages[0] || "/dashboard";
-      navigate(firstPage);
-      return;
-    }
-
-    toast({ title: "Login Failed", description: "Username ya password galat hai", variant: "destructive" });
-    setLoading(false);
   };
 
   return (
@@ -237,51 +229,22 @@ export default function Login() {
           {/* Card Body */}
           <div style={{ background: "rgba(255,255,255,0.97)", padding: "24px 32px 28px" }}>
 
-            {/* Quick login */}
-            <div style={{ marginBottom: "18px" }}>
-              <p style={{
-                fontSize: "11px", fontWeight: 600, color: "#8a9ab0",
-                textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: "8px",
-              }}>
-                Quick Login
-              </p>
-              <div style={{ display: "flex", gap: "8px" }}>
-                {QUICK_USERS.map((u, i) => (
-                  <button key={i} type="button" onClick={() => pickPreset(i)}
-                    style={{
-                      flex: 1, height: "36px",
-                      background: activePreset === i ? u.bg : "#f0f4f8",
-                      color: activePreset === i ? "#fff" : "#5a6a84",
-                      border: activePreset === i ? `2px solid ${u.color}` : "2px solid transparent",
-                      borderRadius: "9px", fontSize: "12px", fontWeight: 600,
-                      cursor: "pointer", transition: "all 0.18s ease",
-                      boxShadow: activePreset === i ? `0 4px 12px ${u.color}55` : "none",
-                    }}>
-                    {u.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Divider */}
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}>
-              <div style={{ flex: 1, height: "1px", background: "#e8edf3" }} />
-              <span style={{ fontSize: "11px", color: "#b0bcc8" }}>ya manually bharein</span>
-              <div style={{ flex: 1, height: "1px", background: "#e8edf3" }} />
-            </div>
+            <p style={{ fontSize: "12px", color: "#5a6a84", marginBottom: "16px" }}>
+              Admin: apna registered email bharein. Staff: username ya email bharein. Login ke liye internet zaroori hai.
+            </p>
 
             <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
               {/* Username */}
               <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-                <label style={{ fontSize: "12px", fontWeight: 600, color: "#2a3a5a" }}>Username</label>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#2a3a5a" }}>Email / Staff username</label>
                 <div style={{ position: "relative" }}>
                   <User style={{
                     position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)",
                     width: "15px", height: "15px", color: "#8a9ab0",
                   }} />
-                  <input type="text" placeholder="Enter username"
+                  <input type="text" placeholder="Email or staff username" autoComplete="username"
                     value={username}
-                    onChange={e => { setUsername(e.target.value); setActivePreset(-1); }}
+                    onChange={e => { setUsername(e.target.value); }}
                     required
                     style={{
                       width: "100%", height: "44px", paddingLeft: "36px", paddingRight: "14px",
@@ -305,9 +268,9 @@ export default function Login() {
                   }} />
                   <input
                     type={showPassword ? "text" : "password"}
-                    placeholder="Enter password"
+                    placeholder="Enter password" autoComplete="current-password"
                     value={password}
-                    onChange={e => { setPassword(e.target.value); setActivePreset(-1); }}
+                    onChange={e => { setPassword(e.target.value); }}
                     required
                     style={{
                       width: "100%", height: "44px", paddingLeft: "36px", paddingRight: "42px",

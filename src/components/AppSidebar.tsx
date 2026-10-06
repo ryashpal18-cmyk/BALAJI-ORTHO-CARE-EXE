@@ -1,3 +1,4 @@
+import { queryClient } from "@/lib/queryClient";
 import {
   LayoutDashboard, BedDouble, Calendar, Receipt, Activity,
   FileText, BarChart3, Settings, Stethoscope, LogOut,
@@ -62,6 +63,8 @@ export function AppSidebar() {
   });
 
   const handleLogout = async () => {
+    queryClient.clear();
+    await (window as any).electron?.logout?.();
     await supabase.auth.signOut();
     localStorage.removeItem("isLoggedIn");
     localStorage.removeItem("userName");

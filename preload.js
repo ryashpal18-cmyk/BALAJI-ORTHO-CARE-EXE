@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // ── Auth ────────────────────────────────────────────────────
   login:     (data)   => ipcRenderer.invoke('auth:login',  data),
+  establishSession: (token) => ipcRenderer.invoke('auth:establish', token),
   checkAuth: ()       => ipcRenderer.invoke('auth:check'),
   logout:    ()       => ipcRenderer.invoke('auth:logout'),
 
@@ -63,6 +64,10 @@ contextBridge.exposeInMainWorld('electron', {
 
   // ── Offline Store (SQLite — IndexedDB replacement) ───────────
   offline: {
+    commitMutation: (mutation, row, idField) => ipcRenderer.invoke('offline:commitMutation', { mutation, row, idField }),
+    snapshot: () => ipcRenderer.invoke('offline:snapshot'),
+    restoreSnapshot: (dump) => ipcRenderer.invoke('offline:restoreSnapshot', dump),
+    adjustStock: (args) => ipcRenderer.invoke('offline:adjustStock', args),
     cacheGetAll:       (table)                        => ipcRenderer.invoke('offline:cacheGetAll', table),
     cacheGetRow:        (table, rowId)                 => ipcRenderer.invoke('offline:cacheGetRow', { table, rowId }),
     cacheSetRows:       (table, rows, idField)         => ipcRenderer.invoke('offline:cacheSetRows', { table, rows, idField }),

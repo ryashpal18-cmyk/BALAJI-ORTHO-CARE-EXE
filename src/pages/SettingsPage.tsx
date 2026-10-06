@@ -1,3 +1,4 @@
+import { supabase } from "@/integrations/supabase/client";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -19,7 +20,7 @@ import {
   StaffUser, DashModules, AppTheme,
 } from "@/lib/appConfig";
 import {
-  runBackupNow, listBackupFiles, openBackupFolder, getBackupFolderPath,
+  restoreBackup, runBackupNow, listBackupFiles, openBackupFolder, getBackupFolderPath,
   getLastBackupAt, isDailyBackupEnabled, isWeeklyBackupEnabled,
   setDailyBackupEnabled, setWeeklyBackupEnabled,
 } from "@/lib/backup";
@@ -260,14 +261,15 @@ export default function SettingsPage() {
 
   const handleBackupNow = async () => {
     setBackupRunning(true);
-    const res = await runBackupNow("manual");
+    const res = await runBackupNow("manual").catch((error: any) => ({ ok: false, error: error.message, recordCounts: {}, warnings: [] } as any));
     setBackupRunning(false);
+    if (res.ok && res.warnings?.length) toast({ title: "Backup saved with coverage notes", description: `${res.warnings.length} tables used local cache. See JSON warnings; copy image folders separately.` });
     if (res.ok) {
       setLastBackupAt(getLastBackupAt());
       await refreshBackupInfo();
-      const totalRecords = Object.values(res.recordCounts).reduce((a, b) => a + b, 0);
+      const totalRecords = Object.values(res.recordCounts as Record<string, number>).reduce((a, b) => a + b, 0);
       toast({
-        title: "✅ Backup complete",
+        title: res.warnings?.length ? "Backup saved — coverage limited" : "✅ Backup complete",
         description: res.mode === "electron"
           ? `${totalRecords} records backup ho gaye - Documents/Balaji_Ortho_Backups folder mein`
           : `${totalRecords} records backup ho gaye - download folder check karein`,
@@ -339,25 +341,27 @@ export default function SettingsPage() {
   };
 
   // ── Create Staff User ──
-  const handleCreateUser = () => {
+  const handleCreateUser = async () => {
     if (!newUsername.trim() || !newPassword.trim()) {
       toast({ title: "Error", description: "Username aur password dono zaroori hain", variant: "destructive" });
       return;
     }
     const existing = staffUsers.find(u => u.username.toLowerCase() === newUsername.toLowerCase());
-    if (existing) {
+    if (existing && /^[0-9a-f]{8}-/i.test(existing.id)) {
       toast({ title: "Error", description: "Ye username already exist karta hai", variant: "destructive" });
       return;
     }
+    const { data, error } = await supabase.functions.invoke("create-admin-user", { body: { role: "staff", username: newUsername.trim(), password: newPassword, displayName: newDisplay.trim(), allowedPages: selPages } });
+    if (error || data?.error) { toast({ title: "Staff create failed", description: data?.error || error?.message, variant: "destructive" }); return; }
     const newUser: StaffUser = {
-      id:          Date.now().toString(),
+      id:          data.user_id,
       username:    newUsername.trim(),
-      password:    newPassword.trim(),
+
       displayName: newDisplay.trim() || newUsername.trim(),
       allowedPages: selPages,
       createdAt:   new Date().toISOString(),
     };
-    const updated = [...staffUsers, newUser];
+    const updated = [...staffUsers.filter(u => u.username.toLowerCase() !== newUser.username.toLowerCase()), newUser];
     setStaffUsers(updated);
     saveStaffUsers(updated);
     setNewUsername(""); setNewPassword(""); setNewDisplay(""); setSelPages(["/dashboard"]);
@@ -365,7 +369,9 @@ export default function SettingsPage() {
   };
 
   // ── Delete User ──
-  const handleDeleteUser = (id: string) => {
+  const handleDeleteUser = async (id: string) => {
+    const { data, error } = await supabase.functions.invoke("create-admin-user", { body: { action: "delete", id } });
+    if (error || data?.error) { toast({ title: "Delete failed", description: data?.error || error?.message, variant: "destructive" }); return; }
     const updated = staffUsers.filter(u => u.id !== id);
     setStaffUsers(updated);
     saveStaffUsers(updated);
@@ -373,7 +379,9 @@ export default function SettingsPage() {
   };
 
   // ── Update User Permissions ──
-  const handleUpdateUser = (user: StaffUser, pages: string[]) => {
+  const handleUpdateUser = async (user: StaffUser, pages: string[]) => {
+    const { data, error } = await supabase.functions.invoke("create-admin-user", { body: { action: "permissions", id: user.id, allowedPages: pages } });
+    if (error || data?.error) { toast({ title: "Permissions save failed", description: data?.error || error?.message, variant: "destructive" }); return; }
     const updated = staffUsers.map(u => u.id === user.id ? { ...u, allowedPages: pages } : u);
     setStaffUsers(updated);
     saveStaffUsers(updated);
@@ -950,6 +958,15 @@ export default function SettingsPage() {
                   {backupRunning ? "Backup ho raha hai..." : "Backup Now"}
                 </Button>
 
+                <div className="my-4 border rounded p-3">
+                  <p>Restore JSON (केवल खाली नए/test database पर; existing data overwrite नहीं होगा)</p>
+                  <Input type="file" accept=".json" onChange={async e => {
+                    const file = e.target.files?.[0]; if (!file) return;
+                    try { await restoreBackup(await file.text()); toast({ title: "Backup restored. Restart app." }); }
+                    catch (error: any) { toast({ title: "Restore failed", description: error.message, variant: "destructive" }); }
+                    e.target.value = "";
+                  }} />
+                </div>
                 {/* Auto backup toggles */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>
                   <p style={{ fontSize: "12px", fontWeight: 700, color: "#1a2a4a", textTransform: "uppercase", letterSpacing: "0.4px" }}>

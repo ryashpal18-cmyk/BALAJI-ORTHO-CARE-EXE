@@ -58,7 +58,10 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     else localStorage.removeItem(SELECTED_BRANCH_KEY);
   }, [selectedBranchId]);
 
-  const setSelectedBranchId = (id: string | null) => setSelectedBranchIdState(id);
+  const setSelectedBranchId = (id: string | null) => {
+    if (id) localStorage.setItem(SELECTED_BRANCH_KEY, id); else localStorage.removeItem(SELECTED_BRANCH_KEY);
+    setSelectedBranchIdState(id);
+  };
 
   return (
     <BranchContext.Provider value={{ branches, selectedBranchId, setSelectedBranchId, isLoading }}>

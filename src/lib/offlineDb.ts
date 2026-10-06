@@ -17,7 +17,7 @@ import { cLog } from "@/lib/clientLogger";
 export type QueuedMutation = {
   id?: number;
   table: string;
-  op: "insert" | "update" | "delete" | "sms" | "xray_upload";
+  op: "insert" | "update" | "delete" | "sms" | "xray_upload" | "stock_adjust";
   payload?: any;
   rowId?: string;
   tempId?: string;
@@ -31,6 +31,10 @@ function electronOffline() {
   const w = window as any;
   return w.electron?.offline as
     | {
+        commitMutation: (mutation: any, row: any, idField: string) => Promise<any>;
+        snapshot: () => Promise<any>;
+        restoreSnapshot: (dump: any) => Promise<any>;
+        adjustStock: (args: any) => Promise<any>;
         cacheGetAll: (table: string) => Promise<{ success: boolean; data: any[] }>;
         cacheGetRow: (table: string, rowId: string) => Promise<{ success: boolean; data: any }>;
         cacheSetRows: (table: string, rows: any[], idField?: string) => Promise<{ success: boolean }>;
@@ -77,10 +81,11 @@ export async function cacheGetAll(table: string): Promise<any[]> {
   }
   try {
     const res = await bridge.cacheGetAll(table);
-    return res?.data ?? [];
+    assertSuccess(res);
+    return res.data;
   } catch (err) {
     cLog.error("sqlite", `${table} cache read fail`, err);
-    return []; // ✅ data disk pe SQLite file mein intact rehta hai, sirf is call ka result khaali hai
+    throw err;
   }
 }
 
@@ -92,10 +97,11 @@ export async function cacheGetRow(table: string, rowId: string): Promise<any> {
   }
   try {
     const res = await bridge.cacheGetRow(table, rowId);
-    return res?.data;
+    assertSuccess(res);
+    return res.data;
   } catch (err) {
     cLog.error("sqlite", `${table} cacheGetRow fail — rowId: ${rowId}`, err);
-    return undefined;
+    throw err;
   }
 }
 
@@ -112,9 +118,10 @@ export async function cacheSetRows(table: string, rows: any[], idField = "id") {
     return;
   }
   try {
-    await bridge.cacheSetRows(table, rows, idField);
+    assertSuccess(await bridge.cacheSetRows(table, rows, idField));
   } catch (err) {
     cLog.error("sqlite", `${table} cacheSetRows fail`, err);
+    throw err;
   }
 }
 
@@ -132,32 +139,14 @@ export async function cacheReplaceTable(table: string, rows: any[], idField = "i
   try {
     const existing = await cacheGetAll(table);
 
-    // 🚨 PRODUCTION-AUDIT FIX: same class of bug already fixed in main.js
-    // (writeJSONSafe) — agar server se aaya naya data khaali [] hai LEKIN
-    // local cache mein pehle se real records hain, to ye silently poori
-    // table khaali kar deta tha. Ye khaali result ek genuine "no data"
-    // state ki wajah se nahi, balki transient RLS/auth glitch ki wajah se
-    // bhi ho sakta hai (Supabase aise mein error throw nahi karta, sirf
-    // empty array deta hai) — jo error-catch guard ko bypass kar deta hai.
-    // Fix: agar naya data khaali hai AUR local cache mein pehle se records
-    // hain, to overwrite skip karo (genuine empty state — jaise fresh
-    // install — abhi bhi sahi se likhi jaati hai, kyunki tab cache khud
-    // khaali hoti hai).
-    if (Array.isArray(rows) && rows.length === 0 && existing.length > 0) {
-      cLog.warn(
-        "sqlite",
-        `${table} cacheReplaceTable — server se 0 records aaye lekin local cache mein ${existing.length} records hain, overwrite SKIP kiya (data-loss guard)`
-      );
-      return;
-    }
-
     const pendingRows = existing.filter((r) => r && r._pendingSync);
-    const pendingIds = new Set(pendingRows.map((r) => String(r[idField])));
+    const pendingIds = new Set(pendingRows.flatMap((r) => [String(r[idField]), String(r[idField]).replace(/^local_/, "")]));
 
+    const deleted = new Set((await queueGetAll()).filter(m => m.table === table && m.op === "delete").flatMap(m => [m.rowId, m.rowId?.replace(/^local_/, "")]));
     const finalRows = [
       ...pendingRows,
       ...rows.filter((row) => !pendingIds.has(String(row[idField]))),
-    ];
+    ].filter(row => !deleted.has(row[idField]));
 
     const bridge = electronOffline();
     if (!bridge) {
@@ -168,11 +157,12 @@ export async function cacheReplaceTable(table: string, rows: any[], idField = "i
       }
       await cacheSetRows(table, finalRows, idField);
     } else {
-      await bridge.cacheReplaceTable(table, finalRows, idField);
+      assertSuccess(await bridge.cacheReplaceTable(table, finalRows, idField));
     }
     cLog.info("sqlite", `${table} cache replace — ${rows.length} rows save ho gayi${pendingIds.size ? ` (${pendingIds.size} pending local rows preserved)` : ""}`);
   } catch (err) {
     cLog.error("sqlite", `${table} cacheReplaceTable fail`, err);
+    throw err;
   }
 }
 
@@ -186,6 +176,7 @@ export async function cacheUpsertRowFromServer(table: string, row: any, idField 
     await cacheUpsertRow(table, row, idField);
   } catch (err) {
     cLog.error("sqlite", `${table} cacheUpsertRowFromServer fail`, err);
+    throw err;
   }
 }
 
@@ -198,9 +189,10 @@ export async function cacheUpsertRow(table: string, row: any, idField = "id") {
     return;
   }
   try {
-    await bridge.cacheUpsertRow(table, row, idField);
+    assertSuccess(await bridge.cacheUpsertRow(table, row, idField));
   } catch (err) {
     cLog.error("sqlite", `${table} cacheUpsertRow fail`, err);
+    throw err;
   }
 }
 
@@ -212,9 +204,10 @@ export async function cacheDeleteRow(table: string, rowId: string) {
     return;
   }
   try {
-    await bridge.cacheDeleteRow(table, rowId);
+    assertSuccess(await bridge.cacheDeleteRow(table, rowId));
   } catch (err) {
     cLog.error("sqlite", `${table} cacheDeleteRow fail — rowId: ${rowId}`, err);
+    throw err;
   }
 }
 
@@ -227,10 +220,11 @@ export async function cacheReplaceRowKey(table: string, oldId: string, newRow: a
     return;
   }
   try {
-    await bridge.cacheReplaceRowKey(table, oldId, newRow, idField);
+    assertSuccess(await bridge.cacheReplaceRowKey(table, oldId, newRow, idField));
     cLog.info("sqlite", `${table} temp key replace — ${oldId} → ${newRow[idField]}`);
   } catch (err) {
     cLog.error("sqlite", `${table} cacheReplaceRowKey fail`, err);
+    throw err;
   }
 }
 
@@ -249,10 +243,12 @@ export async function queueAdd(mutation: Omit<QueuedMutation, "id" | "createdAt"
     const res = await bridge.queueAdd(mutation);
     cLog.info("queue", `Queue mein add hua — op: ${mutation.op}, table: ${mutation.table}`);
     notifyQueueChanged();
-    return res?.id ?? -1;
+    assertSuccess(res);
+    if (res.id < 0) throw new Error("Queue write failed");
+    return res.id;
   } catch (err) {
     cLog.error("queue", `queueAdd fail — op: ${mutation.op}, table: ${mutation.table}`, err);
-    return -1;
+    throw err;
   }
 }
 
@@ -264,10 +260,11 @@ export async function queueGetAll(): Promise<QueuedMutation[]> {
   }
   try {
     const res = await bridge.queueGetAll();
-    return res?.data ?? [];
+    assertSuccess(res);
+    return res.data;
   } catch (err) {
     cLog.error("queue", "queueGetAll fail — SQLite problem", err);
-    return []; // app crash mat karo — empty return karo
+    throw err;
   }
 }
 
@@ -281,10 +278,11 @@ export async function queueRemove(id: number) {
     return;
   }
   try {
-    await bridge.queueRemove(id);
+    assertSuccess(await bridge.queueRemove(id));
     notifyQueueChanged();
   } catch (err) {
     cLog.error("queue", `queueRemove fail — id: ${id}`, err);
+    throw err;
   }
 }
 
@@ -297,12 +295,13 @@ export async function queueUpdate(id: number, patch: Partial<QueuedMutation>) {
     return;
   }
   try {
-    await bridge.queueUpdate(id, patch);
+    assertSuccess(await bridge.queueUpdate(id, patch));
     if (patch.lastError) {
       cLog.warn("queue", `Retry ${patch.retries}/${8} — id: ${id}, error: ${patch.lastError}`);
     }
   } catch (err) {
     cLog.error("queue", `queueUpdate fail — id: ${id}`, err);
+    throw err;
   }
 }
 
@@ -323,6 +322,7 @@ export async function queueRemapRowId(table: string, oldRowId: string, newRowId:
     cLog.info("queue", `${table} queue rowId remap — ${oldRowId} → ${newRowId}`);
   } catch (err) {
     cLog.error("queue", `queueRemapRowId fail — table: ${table}, old: ${oldRowId}, new: ${newRowId}`, err);
+    throw err;
   }
 }
 
@@ -364,7 +364,7 @@ export async function metaGet(key: string): Promise<any> {
     return res?.value;
   } catch (err) {
     cLog.error("sqlite", `metaGet fail — key: ${key}`, err);
-    return undefined;
+    throw err;
   }
 }
 
@@ -376,9 +376,10 @@ export async function metaSet(key: string, value: any) {
     return;
   }
   try {
-    await bridge.metaSet(key, value);
+    assertSuccess(await bridge.metaSet(key, value));
   } catch (err) {
     cLog.error("sqlite", `metaSet fail — key: ${key}`, err);
+    throw err;
   }
 }
 
@@ -389,12 +390,12 @@ const listeners = new Set<Listener>();
 
 export function onQueueChange(fn: Listener) {
   listeners.add(fn);
-  queueCount().then(fn);
+  queueCount().then(fn).catch(err => cLog.error("queue", "Queue read failed", err));
   return () => listeners.delete(fn);
 }
 
 function notifyQueueChanged() {
-  queueCount().then((c) => listeners.forEach((fn) => fn(c)));
+  queueCount().then((c) => listeners.forEach((fn) => fn(c))).catch(err => cLog.error("queue", "Queue read failed", err));
 }
 
 // ─── Real disk safety-backup ──────────────────────────────────────────────
@@ -434,12 +435,14 @@ export function tempId() {
 const LEGACY_DB_NAME = "balaji_ortho_offline_db";
 
 function readLegacyIndexedDb(): Promise<{ cache: Record<string, any[]>; queue: any[] } | null> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     try {
       if (!("indexedDB" in window)) { resolve(null); return; }
       const req = indexedDB.open(LEGACY_DB_NAME);
-      req.onerror = () => resolve(null);
+      let fresh = false;
+      req.onerror = () => fresh ? resolve(null) : reject(req.error || new Error("Legacy database read failed"));
       req.onupgradeneeded = () => {
+        fresh = true;
         // Koi purani DB thi hi nahi (fresh install) — is upgrade ko turant abort
         // karo taaki galti se khaali DB create na ho jaaye.
         try { req.transaction?.abort(); } catch (_) {}
@@ -456,7 +459,7 @@ function readLegacyIndexedDb(): Promise<{ cache: Record<string, any[]>; queue: a
           const cache: Record<string, any[]> = {};
           const queue: any[] = [];
           const tx = db.transaction(storeNames, "readonly");
-          let pending = storeNames.length;
+          let pending = storeNames.filter(n => n === "table_cache" || n === "mutation_queue").length;
           const done = () => { pending--; if (pending <= 0) { db.close(); resolve({ cache, queue }); } };
 
           if (storeNames.includes("table_cache")) {
@@ -473,21 +476,21 @@ function readLegacyIndexedDb(): Promise<{ cache: Record<string, any[]>; queue: a
               }
               done();
             };
-            r.onerror = done;
+            r.onerror = () => { try { tx.abort(); } catch {} db.close(); reject(r.error || new Error("Legacy store read failed")); };
           }
           if (storeNames.includes("mutation_queue")) {
             const r = tx.objectStore("mutation_queue").getAll();
             r.onsuccess = () => { queue.push(...(r.result || [])); done(); };
-            r.onerror = done;
+            r.onerror = () => { try { tx.abort(); } catch {} db.close(); reject(r.error || new Error("Legacy store read failed")); };
           }
           if (storeNames.length === 0) resolve({ cache, queue });
         } catch (e) {
           try { db.close(); } catch (_) {}
-          resolve(null);
+          reject(e);
         }
       };
     } catch (e) {
-      resolve(null);
+      reject(e);
     }
   });
 }
@@ -510,20 +513,48 @@ export async function migrateLegacyIndexedDbIfNeeded(): Promise<void> {
   if (!bridge) return; // browser/dev mode — kuch nahi karna
   try {
     const status = await bridge.isLegacyMigrated();
+    assertSuccess(status);
     if (status?.migrated) return; // already migrate ho chuka hai
 
     const dump = await readLegacyIndexedDb();
     if (dump) {
-      await bridge.importLegacyDump(dump);
+      assertSuccess(await bridge.importLegacyDump(dump));
       cLog.info("sqlite", "Purana IndexedDB data SQLite mein migrate ho gaya");
     } else {
       // Purani DB thi hi nahi (fresh install) — sirf flag set karne ke liye
       // ek khaali dump bhej do taaki dobara har baar check na ho.
-      await bridge.importLegacyDump({ cache: {}, queue: [] });
+      assertSuccess(await bridge.importLegacyDump({ cache: {}, queue: [] }));
     }
-    // Migration ke baad purani IndexedDB permanently hata do — ab kabhi use nahi hogi.
-    await deleteLegacyIndexedDb();
+    // Keep the original legacy source for recovery; never delete it automatically.
+    // Retain the legacy database as a recoverable safety copy after committed import.
   } catch (err) {
-    cLog.error("sqlite", "Legacy IndexedDB migration fail — app SQLite ke saath fresh start karega", err);
+    cLog.error("sqlite", "Legacy migration failed; original database retained; retry after resolving error", err);
+    throw err;
   }
+}
+
+function assertSuccess(res: any) {
+  if (!res || res.success !== true) throw new Error(res?.error || "Local database operation failed; data was not confirmed saved");
+}
+export async function commitMutation(mutation: any, row: any, idField = "id") {
+  const bridge = electronOffline();
+  if (!bridge) throw new Error("Durable offline save requires the desktop app");
+  const res = await bridge.commitMutation(mutation, row, idField);
+  assertSuccess(res); notifyQueueChanged(); return res.data;
+}
+export async function getLocalSnapshot() {
+  const bridge = electronOffline();
+  if (!bridge) return { cache: Object.fromEntries(await Promise.all([...new Set([...memCache.keys()].map(k => k.split("::")[0]))].map(async t => [t, await cacheGetAll(t)]))), queue: await queueGetAll(), meta: [] };
+  const res = await bridge.snapshot(); assertSuccess(res); return res.data;
+}
+export async function restoreLocalSnapshot(dump: any) {
+  const bridge = electronOffline();
+  if (!bridge) throw new Error("Restore requires the desktop app");
+  const res = await bridge.restoreSnapshot(dump); assertSuccess(res); notifyQueueChanged();
+}
+export async function atomicStockAdjustment(args: any) {
+  const bridge = electronOffline();
+  if (!bridge) throw new Error("Stock adjustment requires the desktop app");
+  const res = await bridge.adjustStock({ ...args, id: tempId() });
+  assertSuccess(res); notifyQueueChanged(); return res.data;
 }
