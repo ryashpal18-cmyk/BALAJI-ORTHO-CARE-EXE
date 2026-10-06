@@ -185,3 +185,30 @@ TypeScript की 22 errors हटाई गईं और EXE workflow में
 PGlite में migrations, RLS, audit, stock, payment और cash-day protection जाँचता है।
 Browser में invoice XSS payload inert रहा और 9 screens/permission/offline prescription checks पास हुए।
 Windows EXE और live Supabase का end-to-end परीक्षण यहाँ नहीं किया गया है।
+
+
+## 6 अक्टूबर 2026 शाम: PC-first sync और N01–N07
+
+- Patient/billing आदि के local commit में row और queue एक SQLite transaction में रहते हैं। Save सफलता तभी लौटती है जब PC का commit सफल हो।
+- Ortho edit भी अब हमेशा पहले PC पर save होता है। Shared local table/branch reads internet response का इंतजार नहीं करते; refresh background में होता है।
+- Network request 30 सेकंड में timeout होगी। Failed sync PC की entry नहीं मिटाता; retry अंतराल 30 सेकंड से बढ़कर अधिकतम 5 मिनट है। आठ failures के बाद भी auto-retry बंद नहीं होता।
+- Background sync का छोटा status दिखता है; सामान्य network failure पर popup नहीं है। Permission/data conflict को दबाकर सफल नहीं दिखाया जाता; entry review के लिए सुरक्षित pending रहती है।
+- Closed cash day में नई/बदली/deleted खर्च entry SQL और local mutation guard रोकते हैं। Day closing/entry transactions एक database lock साझा करते हैं।
+- दो PCs की identical closing entry_date से एक server row में जाती है। अलग amounts वाली conflicting closing reject होती है; automatic overwrite नहीं होता।
+- एक ही baseline का Cash→UPI correction दो PCs से आने पर receipt IDs समान हैं। अलग-अलग target modes के conflicting corrections server रोकता है।
+- Staff का admin-reopened day refresh Electron main process के verified cloud request से होता है; renderer अपनी तरफ से fake reopened row नहीं दे सकता।
+- Branch-limited staff अपने branch के cached patient number पर offline SMS queue कर सकता है। अनजान/दूसरे branch का number denied है।
+- Billing message/export/reminder में discount घटता है; desktop message का report link public website का है।
+
+### इस update को लागू करने का क्रम
+1. Database backup लें और पहले दोनों migrations `20261005150000_fix_report_02_20.sql` तथा `20261006120000_fix_deep_audit_f01_f16.sql` लागू रखें।
+2. नई `supabase/migrations/20261006180000_offline_cashbook_followup.sql` Supabase SQL Editor में लागू करें। GitHub push इसे deploy नहीं करता।
+3. नया EXE सभी PCs पर लगाएँ; दो-PC correction में दोनों clients नया version इस्तेमाल करें। पुराने pending corrections अपने पुराने IDs रखते हैं और जरूरत पर review करें।
+4. Local काम के लिए verified login session जरूरी है; इस patch में login policy नहीं बदली। नया login/expired session की verification के लिए internet चाहिए।
+5. SMS delivery, PDF sharing/upload और AI की online services इंटरनेट लौटने पर ही उपलब्ध होती हैं। SQLite file में saved records और sync queue रहते हैं; software पूरा बंद हो तो background worker नहीं चलता, अगली बार app खुलने पर शुरू होता है।
+
+### जाँच
+- `node tests/offline-first.cjs`: असली अस्थायी SQLite file बंद/खोलकर row, queue और retry deadline; stalled network पर local reads; 8 से अधिक failures के बाद retry; Ortho local edit; request timeout।
+- `node tests/offline-cashbook.cjs`: test-only `@electric-sql/pglite` चाहिए (या `PGLITE_MODULE_PATH`); N01–N07 और conflicting corrections के tests। Live clinic data इस्तेमाल नहीं किया गया।
+- पुराने regression/login tests, TypeScript और production React build पास हैं। Windows/live Supabase deployment की पुष्टि अलग से करनी होगी।
+- `PATCH-FILES.sha256` में workflow द्वारा बदलने वाली package version files शामिल नहीं हैं।

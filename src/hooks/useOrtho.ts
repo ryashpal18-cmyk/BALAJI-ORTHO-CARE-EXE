@@ -30,21 +30,6 @@ async function attachPatientsToCases(cases: any[]) {
   const patientIds = [...new Set(cases.map((c) => c.patient_id).filter(Boolean))];
   if (!patientIds.length) return cases;
 
-  const online = await isOnline();
-  if (online) {
-    try {
-      const { data: patients, error } = await supabase
-        .from("patients")
-        .select("id, name, mobile")
-        .in("id", patientIds);
-      if (error) throw error;
-      const patientMap = new Map((patients || []).map((p: any) => [p.id, p]));
-      return cases.map((c) => ({ ...c, patients: patientMap.get(c.patient_id) || null }));
-    } catch {
-      // fall through to offline cache lookup below
-    }
-  }
-
   const cachedPatients = await cacheGetAll("patients");
   const patientMap = new Map(cachedPatients.map((p: any) => [p.id, p]));
   return cases.map((c) => ({ ...c, patients: patientMap.get(c.patient_id) || null }));
@@ -85,30 +70,7 @@ export function useUpdateFractureCase() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, ...updates }: { id: string } & Partial<FractureCase>) => {
-      const online = await isOnline();
-
-      if (online && !id.startsWith("local_")) {
-        // Step 1: Update karo (no .select().single() — RLS issue avoid karne ke liye)
-        const { error } = await supabase
-          .from("fracture_cases" as any)
-          .update({ ...updates, updated_at: new Date().toISOString() })
-          .eq("id", id);
-
-        if (error) throw new Error(error.message || "Update fail hua. Please dobara try karo.");
-
-        // Step 2: Updated row fetch karo cache ke liye
-        const { data: updated } = await supabase
-          .from("fracture_cases" as any)
-          .select("*")
-          .eq("id", id)
-          .single();
-
-        if (updated) await cacheUpsertRow("fracture_cases", updated, "id");
-        return updated || { id, ...updates };
-      }
-
-      // Offline path
-      return offlineUpdate("fracture_cases", id, updates);
+      return offlineUpdate("fracture_cases", id, { ...updates, updated_at: new Date().toISOString() });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["fracture_cases"] });

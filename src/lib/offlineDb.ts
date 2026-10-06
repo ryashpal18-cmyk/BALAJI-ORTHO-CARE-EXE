@@ -25,12 +25,14 @@ export type QueuedMutation = {
   createdAt: string;
   retries: number;
   lastError?: string;
+  lastAttemptAt?: number;
 };
 
 function electronOffline() {
   const w = window as any;
   return w.electron?.offline as
     | {
+        refreshCashDays?: () => Promise<any>;
         commitMutation: (mutation: any, row: any, idField: string) => Promise<any>;
         snapshot: () => Promise<any>;
         restoreSnapshot: (dump: any) => Promise<any>;
@@ -126,6 +128,9 @@ export async function cacheSetRows(table: string, rows: any[], idField = "id") {
 }
 
 export async function cacheReplaceTable(table: string, rows: any[], idField = "id") {
+  const trustedBridge = electronOffline();
+  if (table === "cash_book_days" && trustedBridge?.refreshCashDays) { assertSuccess(await trustedBridge.refreshCashDays()); return; }
+
   // 🚨 FIX: "payment update karo, ek baar dikhe, phir wapas gayab" bug —
   // jab bhi koi local change (payment update, waghera) hua, wo turant
   // cache mein save hota hai (_pendingSync: true) aur background mein
@@ -168,6 +173,7 @@ export async function cacheReplaceTable(table: string, rows: any[], idField = "i
 
 export async function cacheUpsertRowFromServer(table: string, row: any, idField = "id") {
   const bridge = electronOffline() as any;
+  if (table === "cash_book_days" && bridge?.refreshCashDays) { assertSuccess(await bridge.refreshCashDays()); return; }
   if (bridge) {
     if (!bridge.cacheMergeServer) throw new Error("Desktop app update required");
     assertSuccess(await bridge.cacheMergeServer(table, row, idField));
@@ -327,28 +333,12 @@ export async function queueRemapRowId(table: string, oldRowId: string, newRowId:
 }
 
 // 🚨 FIX (12 patients "pending" hamesha dikhna): jo mutation MAX retries
-// (offlineSync.ts) tak fail ho chuki hoti hai, usko runSync() dobara try
-// nahi karta — lekin wo queue mein hamesha ke liye padi rehti thi (data
-// suraksha ke liye delete nahi karte). Pehle queueCount() in atki hui
-// entries ko bhi "pending" mein gin leta tha, isliye badge hamesha
-// "X pending" dikhata rehta tha chahe internet kitna bhi acha ho —
-// woh entries kabhi sync hi nahi hongi jab tak koi unhe dekhe.
-// Ab "pending" sirf un items ko maante hain jo abhi bhi retry ho sakte hain;
-// atki hui entries ko alag se ginte hain (queueStuckCount) taaki UI mein
-// dono ko sahi tarah dikhaya ja sake, koi bhi silently delete kiye bina.
+// Repeated failures remain durable and retry automatically with capped backoff.
+// The separate attention count is informational; it never deletes or disables work.
 export const MAX_SYNC_RETRIES = 8;
-
-export async function queueCount(): Promise<number> {
-  const all = await queueGetAll();
-  return all.filter((m) => (m.retries || 0) < MAX_SYNC_RETRIES).length;
-}
-
-// Atki hui entries — jo MAX_SYNC_RETRIES tak fail ho chuki hain aur ab
-// khud-ba-khud retry nahi hongi. Data safe hai (delete nahi hota), bas
-// review/manual-retry ka wait kar raha hai.
+export async function queueCount(): Promise<number> { return (await queueGetAll()).length; }
 export async function queueStuckCount(): Promise<number> {
-  const all = await queueGetAll();
-  return all.filter((m) => (m.retries || 0) >= MAX_SYNC_RETRIES).length;
+  return (await queueGetAll()).filter(m => (m.retries || 0) >= MAX_SYNC_RETRIES).length;
 }
 
 // ─── Meta ─────────────────────────────────────────────────────────────────

@@ -66,6 +66,8 @@ function init(dbDir) {
 
     if (!db.prepare('PRAGMA table_info(mutation_queue)').all().some(c => c.name === 'ownerUserId')) db.exec('ALTER TABLE mutation_queue ADD COLUMN ownerUserId TEXT');
 
+    if (!db.prepare('PRAGMA table_info(mutation_queue)').all().some(c => c.name === 'lastAttemptAt')) db.exec('ALTER TABLE mutation_queue ADD COLUMN lastAttemptAt INTEGER');
+
     logger.logInfo('sqlite', `Offline SQLite DB ready — ${dbPath}`);
     return db;
   } catch (e) {
@@ -183,6 +185,7 @@ function rowToMutation(r) {
     createdAt: r.createdAt,
     retries: r.retries,
     lastError: r.lastError ?? undefined,
+    lastAttemptAt: r.lastAttemptAt ?? undefined,
   };
 }
 
@@ -206,7 +209,7 @@ function queueUpdate(id, patch) {
   const merged = { ...rowToMutation(existing), ...patch };
   getDb().prepare(
     `UPDATE mutation_queue SET table_name=@table, op=@op, payload=@payload, rowId=@rowId,
-     tempId=@tempId, selectAfter=@selectAfter, createdAt=@createdAt, retries=@retries, lastError=@lastError
+     tempId=@tempId, selectAfter=@selectAfter, createdAt=@createdAt, retries=@retries, lastError=@lastError, lastAttemptAt=@lastAttemptAt
      WHERE id=@id`
   ).run({
     id,
@@ -219,6 +222,7 @@ function queueUpdate(id, patch) {
     createdAt: merged.createdAt,
     retries: merged.retries ?? 0,
     lastError: merged.lastError ?? null,
+    lastAttemptAt: merged.lastAttemptAt ?? null,
   });
 }
 

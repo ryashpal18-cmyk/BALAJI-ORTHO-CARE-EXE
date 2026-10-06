@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CloudOff, RefreshCw, CheckCircle2 } from "lucide-react";
-import { queueStuckCount, onQueueChange } from "@/lib/offlineDb";
+import { queueCount, queueStuckCount, onQueueChange } from "@/lib/offlineDb";
 import { onSyncStatus, runSync } from "@/lib/offlineSync";
 
 export function SyncStatusBadge() {
@@ -16,7 +16,7 @@ export function SyncStatusBadge() {
   const [justSynced, setJustSynced] = useState(false);
 
   useEffect(() => {
-    const handleOnline  = () => { setOnline(true); runSync(); };
+    const handleOnline  = () => { setOnline(true); void runSync().catch(() => {}); };
     const handleOffline = () => setOnline(false);
     window.addEventListener("online",  handleOnline);
     window.addEventListener("offline", handleOffline);
@@ -27,6 +27,7 @@ export function SyncStatusBadge() {
     const offQueue = onQueueChange((count) => setPending(count));
     const offSync  = onSyncStatus((s) => {
       setSyncing(s.syncing);
+      setPending(s.pending);
       if (!s.syncing && s.pending === 0) {
         setJustSynced(true);
         setTimeout(() => setJustSynced(false), 3000);
@@ -42,7 +43,7 @@ export function SyncStatusBadge() {
   }, []);
 
   async function refreshStuckCount() {
-    try { setStuck(await queueStuckCount()); } catch { /* silent */ }
+    try { setStuck(await queueStuckCount()); setPending(await queueCount()); } catch { /* silent */ }
   }
 
   // Online + kuch pending nahi + sync nahi chal raha = badge dikhao hi mat
@@ -110,7 +111,7 @@ export function SyncStatusBadge() {
           hain taaki data safe rahe aur dekh ke faisla liya ja sake. */}
       {stuck > 0 && (
         <span
-          title="Ye entries bahut baar fail ho chuki hain, khud retry nahi hongi. Support ko app ke logs bhejo."
+          title="Data PC par safe hai. Background retry chalti rahegi; baar-baar fail ho to support ko logs bhejein."
           style={{
             display: "flex", alignItems: "center", height: "32px", padding: "0 8px",
             borderRadius: "8px", border: "1.5px solid #fca5a5", background: "rgba(254,226,226,0.9)",
@@ -125,5 +126,5 @@ export function SyncStatusBadge() {
 }
 
 async function handleManualSync() {
-  await runSync();
+  await runSync().catch(() => {});
 }

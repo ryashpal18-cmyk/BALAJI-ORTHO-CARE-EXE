@@ -1,3 +1,4 @@
+import { queryClient } from "./queryClient";
 import { withPaymentHistory } from "./paymentLedger";
 import { commitMutation } from "./offlineDb";
 // ─────────────────────────────────────────────────────────────────────────
@@ -30,78 +31,31 @@ function serialize<T>(key: string, action: () => Promise<T>): Promise<T> {
 }
 function syncLater() { void isOnline().then(online => { if (online) return runSync(); }).catch(e => cLog.warn("sync", "Background sync failed", e)); }
 
-export async function offlineFetch<T = any>(
-  table: string,
-  fetcher: () => Promise<T[]>,
-  opts: { idField?: string } = {}
-): Promise<T[]> {
-  const idField = opts.idField || "id";
-  const cached = (await cacheGetAll(table)) as T[];
-  const online = typeof navigator !== "undefined" ? navigator.onLine : false;
-
-  // 🚨 FIX: Agar local cache khaali hai (naya build/fresh install/IndexedDB
-  // reset hui), to sirf khaali cache dikhate rehna galat hai jab net available
-  // hai aur asli data Supabase pe maujood hai. Aise mein turant online se le
-  // aao (thoda wait sahi hai, kyunki dikhane ke liye kuch hai hi nahi abhi).
-  if (cached.length === 0 && online) {
+const refreshes = new Set<string>();
+const refreshedAt = new Map<string, number>();
+function refreshLocalTable(table: string, fetcher: () => Promise<any[]>, idField: string) {
+  if (typeof navigator === "undefined" || !navigator.onLine || refreshes.has(table) || Date.now() - (refreshedAt.get(table) || 0) < 3000) return;
+  refreshes.add(table);
+  void (async () => {
     try {
+      const before = JSON.stringify(await cacheGetAll(table));
       const rows = await fetcher();
-      for (const row of rows as any[]) await cacheUpsertRowFromServer(table, row, idField);
-      return (await cacheGetAll(table)) as T[];
-    } catch (err) {
-      cLog.warn("offline", `${table} — cache khaali thi aur online fetch bhi fail — khaali return kar rahe hain`, err);
-      return cached;
-    }
-  }
-
-  // ✅ Cache mein pehle se data hai — turant wahi do (fast), aur online ho to
-  // background mein silently fresh data le aao (is call ka wait nahi karna).
-  if (online) {
-    fetcher()
-      .then(async (rows) => { for (const row of rows as any[]) await cacheUpsertRowFromServer(table, row, idField); })
-      .catch((err) => cLog.warn("offline", `${table} background refresh fail — cache use ho raha hai`, err));
-  }
-
-  return cached;
+      for (const row of rows) if (row?.[idField] !== undefined) await cacheUpsertRowFromServer(table, row, idField);
+      refreshedAt.set(table, Date.now());
+      if (before !== JSON.stringify(await cacheGetAll(table))) void queryClient.invalidateQueries();
+    } catch (error) { cLog.warn("offline", `${table}: background refresh delayed; local data retained`, error); }
+    finally { refreshes.delete(table); }
+  })();
 }
-
-export async function offlineFetchScoped<T = any>(
-  table: string,
-  fetcher: () => Promise<T[]>,
-  fallbackFilter: (cachedRows: any[]) => any[],
-  opts: { idField?: string } = {}
-): Promise<T[]> {
-  const idField = opts.idField || "id";
+export async function offlineFetch<T = any>(table: string, fetcher: () => Promise<T[]>, opts: { idField?: string } = {}): Promise<T[]> {
   const cached = await cacheGetAll(table);
-  const online = typeof navigator !== "undefined" ? navigator.onLine : false;
-
-  // 🚨 FIX: khaali cache + online = seedha fetch karo, khaali mat dikhao
-  if (cached.length === 0 && online) {
-    try {
-      const rows = await fetcher();
-      for (const row of rows as any[]) {
-        if (row && row[idField] !== undefined) await cacheUpsertRowFromServer(table, row, idField);
-      }
-      return fallbackFilter(await cacheGetAll(table)) as T[];
-    } catch (err) {
-      cLog.warn("offline", `${table} scoped — cache khaali thi aur online fetch bhi fail`, err);
-      return fallbackFilter(cached) as T[];
-    }
-  }
-
-  const scoped = fallbackFilter(cached) as T[];
-
-  if (online) {
-    fetcher()
-      .then(async (rows) => {
-        for (const row of rows as any[]) {
-          if (row && row[idField] !== undefined) await cacheUpsertRowFromServer(table, row, idField);
-        }
-      })
-      .catch((err) => cLog.warn("offline", `${table} scoped background refresh fail`, err));
-  }
-
-  return scoped;
+  refreshLocalTable(table, fetcher, opts.idField || "id");
+  return cached as T[];
+}
+export async function offlineFetchScoped<T = any>(table: string, fetcher: () => Promise<T[]>, fallbackFilter: (rows: any[]) => any[], opts: { idField?: string } = {}): Promise<T[]> {
+  const cached = await cacheGetAll(table);
+  refreshLocalTable(table, fetcher, opts.idField || "id");
+  return fallbackFilter(cached) as T[];
 }
 
 export async function offlineInsert(table: string, payload: any, opts: { idField?: string } = {}) {

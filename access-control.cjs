@@ -44,6 +44,10 @@ function rowAllowed(table, row, store) {
   }
   if (table === 'payments') return rowAllowed('billing',lookup(store,'billing',row.billing_id || row.invoice_id),store);
   // No patient/branch link exists for these legacy tables; don't expose clinic-wide data to restricted staff.
+  if (table === 'sms_logs') {
+    const digits = String(row.mobile || '').replace(/\D/g,'').slice(-10);
+    return digits.length === 10 && store.cacheGetAll('patients').some(patient => p.branchIds.includes(patient.branch_id) && String(patient.mobile || '').replace(/\D/g,'').slice(-10) === digits);
+  }
   if (['report_payments','booking_requests','sms_logs','audit_logs','medicine_entries','invoice_medicine_mapping'].includes(table)) return false;
   return true;
 }
@@ -65,10 +69,22 @@ function protectClosedDay(table, old, row) {
     }
   }
 }
+function assertCashEntryOpen(table, row, store) {
+  if (table !== 'cash_book_entries' || !row?.entry_date) return;
+  if (store.cacheGetAll('cash_book_days').some(d => d.entry_date === row.entry_date && d.status === 'closed')) throw new Error('Reopen the cash day before changing entries');
+}
 function authorize(channel, args, store) {
+  if (['offline:commitMutation','offline:queueAdd'].includes(channel)) {
+    const m = channel === 'offline:commitMutation' ? args[0]?.mutation : args[0];
+    if (m?.table === 'cash_book_entries') {
+      assertCashEntryOpen(m.table, lookup(store,m.table,m.rowId), store);
+      assertCashEntryOpen(m.table, m.payload, store);
+    }
+  }
   if (['auth:login','auth:check','auth:logout','auth:establish','app:isOnline','app:getVersion','log:rendererError'].includes(channel)) return;
   const p = getPrincipal(); if (!p) throw new Error('Please log in');
   if (p.role === 'admin') return;
+  if (channel === 'offline:refreshCashDays') return assertTable('cash_book_days');
   if (channel === 'offline:cacheGetAll') return assertTable(args[0]);
   if (channel === 'offline:cacheGetRow') return assertTable(args[0]?.table); // result filtered in handler
   if (channel.startsWith('offline:cache')) {
@@ -104,14 +120,14 @@ function authorize(channel, args, store) {
     if (!item || !canMutation(item,store)) throw new Error('Queue access denied');
     if (channel.endsWith('Update')) {
       const patch=args[0].patch || {};
-      if (Object.keys(patch).some(k=>!['retries','lastError','rowId','payload'].includes(k))) throw new Error('Queue identity is immutable');
+      if (Object.keys(patch).some(k=>!['retries','lastError','lastAttemptAt','rowId','payload'].includes(k))) throw new Error('Queue identity is immutable');
       if (patch.rowId && patch.rowId !== item.rowId?.replace(/^local_/,'')) throw new Error('Invalid queue remap');
       if (!canMutation({...item,...patch},store)) throw new Error('Queue branch access denied');
     }
     return;
   }
   if (['offline:isLegacyMigrated','app:openExternal','open-external-url','open-whatsapp','app:print','shell:print','print-invoice','log:getDir','log:getSnapshotDir'].includes(channel)) return;
-  if (['app:sendSMS','open-whatsapp-desktop'].includes(channel)) return assertTable('sms_logs');
+  if (['app:sendSMS','open-whatsapp-desktop'].includes(channel)) { assertTable('sms_logs'); if (channel === 'app:sendSMS') assertRow('sms_logs',args[0],store); return; }
   throw new Error('Administrator permission required');
 }
 function filterBranches(rows) { const p=getPrincipal(); return !p ? [] : p.role==='admin'||p.branchIds==null ? rows : rows.filter(r=>p.branchIds.includes(r.branch_id)); }

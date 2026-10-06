@@ -16,6 +16,7 @@ const logger = require('./logger.cjs');
 const sqliteStore = require('./sqlite-store.cjs');
 const access = require('./access-control.cjs');
 const authPublicConfig = require('./auth-public-config.json');
+let verifiedCloudToken = null;
 // Register guards before any handlers, including raw renderer IPC aliases.
 const originalHandle = ipcMain.handle.bind(ipcMain);
 ipcMain.handle = (channel, fn) => originalHandle(channel, async (event, ...args) => {
@@ -37,6 +38,7 @@ ipcMain.handle('auth:establish', async (_event, token) => {
   const profile = await response.json();
   if (!['admin','staff'].includes(profile.role) || !Array.isArray(profile.pages)) throw new Error('Invalid access profile');
   const verified = { ...profile, expiresAt: Date.now() + 8 * 60 * 60 * 1000 };
+  verifiedCloudToken = token;
   access.setPrincipal(verified); return { success: true, principal: verified };
 });
 
@@ -650,6 +652,7 @@ function openWhatsAppWindow(url) {
 ipcMain.handle('auth:login', async () => ({ success: false, error: 'Use verified cloud sign-in' }));
 ipcMain.handle('auth:check', async () => ({ success: true, valid: !!access.getPrincipal(), principal: access.getPrincipal() }));
 ipcMain.handle('auth:logout', async () => {
+  verifiedCloudToken = null;
   access.setPrincipal(null);
   return { success: true };
 });
@@ -922,6 +925,26 @@ ipcMain.handle('offline:cacheReplaceTable', async (_e, { table, rows, idField })
     sqliteStore.cacheReplaceTable(table, [...rows, ...preserve], idField || 'id'); return { success: true };
   }
   catch (e) { logger.logError('sqlite', `cacheReplaceTable(${table}) fail: ${e.message}`); return { success: false }; }
+});
+
+// Authoritative cash-day refresh never accepts renderer-supplied reopened rows.
+ipcMain.handle('offline:refreshCashDays', async () => {
+  const userId = access.getPrincipal()?.userId;
+  const token = verifiedCloudToken;
+  if (!token || !userId) throw new Error('Verified cloud session required');
+  const rows = [];
+  for (let offset=0; ; offset+=500) {
+    const response = await net.fetch(`${authPublicConfig.url}/rest/v1/cash_book_days?select=*&order=id&limit=500&offset=${offset}`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: authPublicConfig.key }, signal: AbortSignal.timeout(20000),
+    });
+    if (!response.ok) throw new Error('Cash-day refresh unavailable');
+    const batch = await response.json();
+    if (!Array.isArray(batch)) throw new Error('Invalid cash-day response');
+    rows.push(...batch); if (batch.length < 500) break;
+  }
+  if (access.getPrincipal()?.userId !== userId || verifiedCloudToken !== token) throw new Error('Session changed during refresh');
+  sqliteStore.cacheReplaceTable('cash_book_days',rows,'id');
+  return {success:true};
 });
 
 ipcMain.handle('offline:cacheMergeServer', async (_e, { table, row, idField }) => {

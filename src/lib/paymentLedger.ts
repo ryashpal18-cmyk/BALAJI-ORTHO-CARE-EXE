@@ -18,11 +18,14 @@ export function withPaymentHistory(existing: any, changes: any, eventId: string,
         const group = groups.get(key) || { amount: 0, paid_at: receipt.paid_at, payment_mode: receipt.payment_mode };
         group.amount += Number(receipt.amount); groups.set(key,group);
       }
-      let i=0;
+      // Same correction on two PCs must have the same receipt identity.
+      // Keep only original receipt IDs plus a correction generation: no recursive IDs.
+      const originals = history.filter(r => !r.id.startsWith("reclass:")).map(r => r.id).sort();
+      const generation = history.filter(r => r.id.startsWith("reclass:")).length;
       for (const group of groups.values()) {
         if (Math.abs(group.amount) < 0.005) continue;
-        history.push({ id: `${eventId}-reclass-${i}-out`, ...group, amount: -group.amount });
-        history.push({ id: `${eventId}-reclass-${i++}-in`, ...group, payment_mode: changes.payment_mode });
+        history.push({ id: `reclass:${JSON.stringify([existing.id, originals, generation, group.paid_at, group.payment_mode])}:out`, ...group, amount: -group.amount });
+        history.push({ id: `reclass:${JSON.stringify([existing.id, originals, generation, group.paid_at, group.payment_mode])}:in`, ...group, payment_mode: changes.payment_mode });
       }
     }
     if (delta !== 0) history.push({ id: eventId, amount: delta, paid_at: now,

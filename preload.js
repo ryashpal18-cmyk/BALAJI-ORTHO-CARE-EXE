@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('electron', {
     snapshot: () => ipcRenderer.invoke('offline:snapshot'),
     restoreSnapshot: (dump) => ipcRenderer.invoke('offline:restoreSnapshot', dump),
     adjustStock: (args) => ipcRenderer.invoke('offline:adjustStock', args),
+    refreshCashDays: () => ipcRenderer.invoke('offline:refreshCashDays'),
     cacheMergeServer: (table, row, idField) => ipcRenderer.invoke('offline:cacheMergeServer', { table, row, idField }),
     cacheGetAll:       (table)                        => ipcRenderer.invoke('offline:cacheGetAll', table),
     cacheGetRow:        (table, rowId)                 => ipcRenderer.invoke('offline:cacheGetRow', { table, rowId }),

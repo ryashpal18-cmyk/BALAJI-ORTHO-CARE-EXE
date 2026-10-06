@@ -57,7 +57,7 @@ if (typeof window !== "undefined") {
     if (really) {
       cLog.info("sync", "Internet aa gayi — sync + data download shuru");
       void runSync().catch(error => cLog.warn("sync", "Sync failed", error));
-      void downloadAllDataToCache(); // ✅ Internet aate hi fresh data download karo
+      void downloadAllDataToCache().catch(error => cLog.warn("sync", "Refresh delayed", error));
     }
   });
   window.addEventListener("offline", () => {
@@ -185,7 +185,9 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     delete payload._localOnly;
     // ✅ upsert use karo (insert nahi) — agar retry ho (network drop mid-sync
     // ke baad), to same id pe dobara likhega, duplicate row nahi banega.
-    const { data, error } = await supabase.from(table).upsert(payload, { onConflict: "id" }).select().single();
+    const { data, error } = table === "cash_book_days"
+      ? await supabase.rpc("save_cash_day" as any, { p_id: payload.id, p_event: payload } as any)
+      : await supabase.from(table).upsert(payload, { onConflict: "id" }).select().single();
     if (error) { console.error(`Insert failed — table: ${table}`); throw error; }
     if (m.tempId && data) {
       const remaining = (await queueGetAll()).filter(q => q.id !== m.id && q.table === table && (q.rowId === m.tempId || q.rowId === (data as any).id));
@@ -337,15 +339,10 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
       if (!m) continue;
       const key = `${m.table}::${(m.rowId || m.tempId || String(m.id)).replace(/^local_/, "")}`;
       if (blocked.has(key)) continue;
-      // 🚨 FIX: MAX_RETRIES constant define tha lekin kabhi enforce nahi hota
-      // tha — ek permanently-failing mutation (jaise invalid mobile pe SMS,
-      // ya deleted parent row) har 30 second mein dobara try hota rehta,
-      // hamesha fail hota, aur queue kabhi khaali nahi hota tha (queue
-      // growth + fizul API calls + logs bharte rehna). Ab MAX_RETRIES cross
-      // karne ke baad us mutation ko skip kar dete hain — data queue mein
-      // surakshit rehta hai (delete nahi karte, taaki manual review/ silent
-      // data-loss na ho) lekin bar-bar try nahi hota.
-      if ((m.retries || 0) >= MAX_RETRIES) { blocked.add(key); continue; }
+      // Never abandon durable work after a fixed number of failed requests.
+      // Backoff is persisted, so restarting the app doesn't hammer the server.
+      const retryDelay = Math.min(30000 * 2 ** Math.min(Math.max((m.retries || 0) - 1, 0), 4), 300000);
+      if (m.lastAttemptAt && Date.now() - m.lastAttemptAt < retryDelay) { blocked.add(key); continue; }
 
       try {
         await applyMutation(m);
@@ -358,8 +355,8 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
         cLog.error("sync", "Mutation fail — op: " + m.op + ", table: " + m.table + ", msg: " + msg);
         if (m.id !== undefined) {
           const retries = (m.retries || 0) + 1;
-          await queueUpdate(m.id, { retries, lastError: msg });
-          if (retries >= MAX_RETRIES) console.error(`MAX RETRIES — permanently failed, ab retry nahi hoga! op: ${m.op}`);
+          await queueUpdate(m.id, { retries, lastError: msg, lastAttemptAt: Date.now() });
+
         }
         lastError = msg;
       }
@@ -368,7 +365,7 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
     if (synced > 0) {
       console.info(`✅ Sync complete — ${synced} items upload ho gaye`);
       // ✅ Sync ke baad fresh data download karo
-      await downloadAllDataToCache();
+      void downloadAllDataToCache().catch(error => cLog.warn("sync", "Refresh delayed", error));
     }
   } finally {
     syncing = false;
@@ -386,47 +383,19 @@ export function startAutoSync() {
   autoSyncStarted = true;
   cLog.info("sync", "Auto-sync engine start");
 
-  // ── App start hone ke 3 second baad ──────────────────────────────────────
-  setTimeout(async () => {
-    const online = typeof navigator !== "undefined" ? navigator.onLine : false;
-    if (online) {
-      cLog.info("sync", "App start — pehle data download, phir pending sync");
-      await downloadAllDataToCache();
-      await runSync();
-    } else {
-      cLog.info("sync", "App start — offline hai, cache se kaam chalega");
-    }
-    // ✅ App start pe ek baar disk backup bhi le lo (chahe online ho ya offline)
-    backupCacheToDisk();
-  }, 3000);
-
-  // ✅ Har 3 minute mein disk pe real safety backup — IndexedDB kabhi fail
-  // ho jaaye to bhi data yahan se restore ho sake
-  setInterval(() => { backupCacheToDisk(); }, 3 * 60 * 1000);
-
-  // ✅ App band karte waqt bhi ek final backup try karo
-  if (typeof window !== "undefined") {
-    window.addEventListener("beforeunload", () => { backupCacheToDisk(); });
-  }
-
-  // ── Har 30 second mein sync check ────────────────────────────────────────
-  setInterval(async () => {
-    if ((window as any).electron?.checkAuth && !(await (window as any).electron.checkAuth()).valid) return;
-    const online = await isOnline();
-    const wasOffline = !lastKnownOnline;
-
-    if (online !== lastKnownOnline) {
-      emitNetworkChange(online);
-      if (online && wasOffline) {
-        // ✅ Internet wapas aaya — pehle poora data download karo, phir queue sync karo
-        cLog.info("sync", "🌐 Internet wapas aa gayi — data + queue sync shuru");
-        await downloadAllDataToCache();
+  const background = async () => {
+    try {
+      if ((window as any).electron?.checkAuth && !(await (window as any).electron.checkAuth()).valid) return;
+      const online = await isOnline();
+      if (online !== lastKnownOnline) emitNetworkChange(online);
+      if (online) {
         await runSync();
+        void downloadAllDataToCache().catch(error => cLog.warn("sync", "Refresh delayed", error));
       }
-    }
-
-    // Online hai to har 30 sec mein pending queue sync karo
-    if (online) void runSync().catch(error => cLog.warn("sync", "Sync failed", error));
-  }, 30000);
+    } catch (error) { cLog.warn("sync", "Background cycle delayed; local data retained", error); }
+  };
+  setTimeout(() => { void background(); void backupCacheToDisk(); }, 3000);
+  setInterval(background, 30000);
+  setInterval(() => { void backupCacheToDisk(); }, 3 * 60 * 1000);
+  if (typeof window !== "undefined") window.addEventListener("beforeunload", () => { void backupCacheToDisk(); });
 }
-

@@ -1,3 +1,4 @@
+import { netBillAmount } from "@/lib/billAmounts";
 import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { businessDate } from "@/lib/businessDate";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -105,7 +106,7 @@ function getWhatsAppBillMessage(
   pdfUrl?: string | null,
 ) {
   const due = Math.max(amount - paid, 0);
-  const appUrl = `${window.location.origin}/reports`;
+  const appUrl = "https://balaji-health-hub.lovable.app/reports";
   const pdfLine = pdfUrl ? `\n📄 बिल PDF Download करें:\n${pdfUrl}\n` : "";
   return `नमस्ते ${patient} जी 🙏
 
@@ -733,13 +734,13 @@ const filteredPatients = useMemo(() => {
       if (mobile && result?.id) {
         const invoiceNo = `INV-${result.id.slice(0, 8).toUpperCase()}`;
         const date = new Date().toLocaleDateString("en-IN");
-        const due = Math.max(totalAmount - paidNum, 0);
+        const due = Math.max(totalAmount - discountNum - paidNum, 0);
         // PDF URL agar already generate hua ho to include karo
         const pdfUrl = (result as any).invoice_pdf_url || null;
         const pdfLine = pdfUrl
           ? `\n📄 बिल PDF: ${pdfUrl}`
           : "";
-        const smsMsg = `नमस्ते ${patientName} जी 🙏\n\nBalaji Ortho Care Center\n\n📋 बिल नंबर: ${invoiceNo}\n📅 दिनांक: ${date}\n💰 कुल राशि: ₹${totalAmount}\n✅ जमा: ₹${paidNum}\n❗ बकाया: ₹${due}${pdfLine}\n\n🌐 हमारी वेबसाइट: https://balaji-health-hub.lovable.app\n\nधन्यवाद 🙏`;
+        const smsMsg = `नमस्ते ${patientName} जी 🙏\n\nBalaji Ortho Care Center\n\n📋 बिल नंबर: ${invoiceNo}\n📅 दिनांक: ${date}\n💰 कुल राशि: ₹${Math.max(totalAmount - discountNum, 0)}\n✅ जमा: ₹${paidNum}\n❗ बकाया: ₹${due}${pdfLine}\n\n🌐 हमारी वेबसाइट: https://balaji-health-hub.lovable.app\n\nधन्यवाद 🙏`;
         sendSMS(mobile, smsMsg, patientName, "bill_saved");
       }
 
@@ -773,7 +774,7 @@ const filteredPatients = useMemo(() => {
     const freshPdfUrl = await generateAndUploadPDF(bill);
     const msg = getWhatsAppBillMessage(
       patientName,
-      Number(bill.amount),
+      netBillAmount(bill),
       Number((bill as any).amount_paid || 0),
       `INV-${bill.id.slice(0, 8).toUpperCase()}`,
       safeDate(bill.created_at),
@@ -841,7 +842,7 @@ const filteredPatients = useMemo(() => {
       if (mobile) {
         const msg = getWhatsAppBillMessage(
           patientName,
-          newTotal,
+          Math.max(newTotal - discountNum, 0),
           paidNum,
           `INV-${editingBill.id.slice(0, 8).toUpperCase()}`,
           safeDate(editingBill.created_at),
@@ -888,7 +889,7 @@ const filteredPatients = useMemo(() => {
         Service: displayService,
         "Amount (₹)": Number(bill.amount),
         "Paid (₹)": Number((bill as any).amount_paid || 0),
-        "Due (₹)": Number(bill.amount) - Number((bill as any).amount_paid || 0),
+        "Due (₹)": Math.max(netBillAmount(bill) - Number((bill as any).amount_paid || 0), 0),
         "Payment Mode": (bill as any).payment_mode || "",
         Status: bill.status,
         Date: safeDate(bill.created_at),
@@ -1372,7 +1373,7 @@ const filteredPatients = useMemo(() => {
                             .join(", ")
                         : bill.service;
                       const paid = Number((bill as any).amount_paid || 0);
-                      const due = Number(bill.amount) - paid;
+                      const due = Math.max(netBillAmount(bill) - paid, 0);
                       return (
                         <tr key={bill.id} className="border-b last:border-0 hover:bg-muted/30">
                           <td className="py-3 font-medium">
@@ -1463,10 +1464,10 @@ const filteredPatients = useMemo(() => {
                                   className="h-7 w-7 text-warning"
                                   title="Payment Reminder"
                                   onClick={() => {
-                                    const due = Math.max(Number(bill.amount) - paid, 0);
+                                    const due = Math.max(netBillAmount(bill) - paid, 0);
                                     const msg = getWhatsAppReminderMessage(
                                       patient?.name || "",
-                                      Number(bill.amount),
+                                      netBillAmount(bill),
                                       paid,
                                       due,
                                     );

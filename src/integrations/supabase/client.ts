@@ -1,3 +1,4 @@
+import { boundedFetch } from "@/lib/boundedFetch";
 // Pointing to shared external Supabase project (idcxmeczzfnipmybikue)
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
@@ -9,6 +10,7 @@ const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiO
 // import { supabase } from "@/integrations/supabase/client";
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  global: { fetch: boundedFetch },
   auth: {
     storage: localStorage,
     persistSession: true,

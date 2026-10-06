@@ -38,7 +38,7 @@ const reset=()=>{for(const m of store.queueGetAll())store.queueRemove(m.id)};
  let failFirst=true,remote={id,name:'original'};
  const supabase={auth:{getSession:async()=>({data:{session:null}})},from:()=>({update:p=>({eq:()=>({select:()=>({single:async()=>{if(p.name==='first edit'&&failFirst){failFirst=false;return {error:Error('transient')}};remote={...remote,...p};return {data:remote}}})})})})};
  const sync=load('src/lib/offlineSync.ts',['runSync'],{...db,supabase,queryClient:{invalidateQueries:noop},navigator:{onLine:true}});
- await sync.runSync();assert.equal(remote.name,'original');await sync.runSync();assert.equal(remote.name,'latest edit');
+ await sync.runSync();assert.equal(remote.name,'original');for(const m of store.queueGetAll())store.queueUpdate(m.id,{lastAttemptAt:Date.now()-600000});await sync.runSync();assert.equal(remote.name,'latest edit');
  found('F01-order','Regression fixed and verified');
  reset();const deleted=uid();store.cacheUpsertRow('prescriptions',{id:deleted,medicines:'test'},'id');await offline.offlineDelete('prescriptions',deleted);
  await db.cacheUpsertRowFromServer('prescriptions',{id:deleted,medicines:'stale server copy'});
