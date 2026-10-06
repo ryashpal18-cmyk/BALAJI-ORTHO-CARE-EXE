@@ -1,3 +1,5 @@
+import { refreshClinicalUrl } from "@/lib/clinicalFiles";
+import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,7 +29,7 @@ function printSavedAiReport(savedReport: any) {
   const date = new Date(savedReport.created_at || savedReport.uploaded_at).toLocaleDateString("en-IN");
   const win = window.open("", "_blank", "width=800,height=1000");
   if (!win) return;
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>AI X-Ray Report</title><style>body{font-family:Arial,sans-serif;color:#0f172a;padding:24px}.header{border-bottom:3px solid #0891b2;padding-bottom:12px;margin-bottom:18px}.clinic{font-size:24px;font-weight:800;color:#1e3a5f}.muted{color:#64748b;font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:16px 0}.box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px}.section{margin:16px 0}.section h3{color:#0891b2;margin-bottom:6px}.impression{border-left:5px solid #0891b2;background:#f0f9ff;padding:12px;border-radius:8px}pre{white-space:pre-wrap;font-family:inherit}@media print{button{display:none}}</style></head><body><div class="header"><div class="clinic">Balaji Ortho Care Center</div><div class="muted">Dr. S. S. Rathore (DMRT | BPT) · Opp Govt Hospital, Bay Pass Road, Khinwara, Raj. – 306502</div><div class="muted">Phone: +91 8005707783</div></div><h2>🩻 AI X-Ray Report</h2><div class="grid"><div class="box"><span class="muted">Patient</span><br/><b>${savedReport.patient_name || "Unknown"}</b></div><div class="box"><span class="muted">Date</span><br/><b>${date}</b></div><div class="box"><span class="muted">Body Part</span><br/><b>${savedReport.body_part || data.bodyPartDetected || "—"}</b></div><div class="box"><span class="muted">View</span><br/><b>${savedReport.view_projection || "—"}</b></div><div class="box"><span class="muted">Study Type</span><br/><b>${data.studyType || "—"}</b></div><div class="box"><span class="muted">Urgency</span><br/><b>${data.urgency || "Routine"}</b></div></div><div class="section"><h3>Findings</h3><pre>${data.findings?.overall || "—"}</pre>${data.findings?.bones ? `<p><b>Bones:</b> ${data.findings.bones}</p>` : ""}${data.findings?.softTissues ? `<p><b>Soft Tissues:</b> ${data.findings.softTissues}</p>` : ""}${data.findings?.specificFindings ? `<p><b>Specific:</b> ${data.findings.specificFindings}</p>` : ""}</div><div class="section impression"><h3>Impression</h3><pre>${data.impression || "—"}</pre></div>${data.recommendations ? `<div class="section"><h3>Recommendations</h3><p>${data.recommendations}</p></div>` : ""}<p class="muted">AI report sirf reference ke liye hai.</p><button onclick="window.print()">Print</button><script>window.onload=function(){window.print()}</script></body></html>`);
+  writeReportDocument(win, `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>AI X-Ray Report</title><style>body{font-family:Arial,sans-serif;color:#0f172a;padding:24px}.header{border-bottom:3px solid #0891b2;padding-bottom:12px;margin-bottom:18px}.clinic{font-size:24px;font-weight:800;color:#1e3a5f}.muted{color:#64748b;font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:16px 0}.box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px}.section{margin:16px 0}.section h3{color:#0891b2;margin-bottom:6px}.impression{border-left:5px solid #0891b2;background:#f0f9ff;padding:12px;border-radius:8px}pre{white-space:pre-wrap;font-family:inherit}@media print{button{display:none}}</style></head><body><div class="header"><div class="clinic">Balaji Ortho Care Center</div><div class="muted">Dr. S. S. Rathore (DMRT | BPT) · Opp Govt Hospital, Bay Pass Road, Khinwara, Raj. – 306502</div><div class="muted">Phone: +91 8005707783</div></div><h2>🩻 AI X-Ray Report</h2><div class="grid"><div class="box"><span class="muted">Patient</span><br/><b>${savedReport.patient_name || "Unknown"}</b></div><div class="box"><span class="muted">Date</span><br/><b>${date}</b></div><div class="box"><span class="muted">Body Part</span><br/><b>${savedReport.body_part || data.bodyPartDetected || "—"}</b></div><div class="box"><span class="muted">View</span><br/><b>${savedReport.view_projection || "—"}</b></div><div class="box"><span class="muted">Study Type</span><br/><b>${data.studyType || "—"}</b></div><div class="box"><span class="muted">Urgency</span><br/><b>${data.urgency || "Routine"}</b></div></div><div class="section"><h3>Findings</h3><pre>${data.findings?.overall || "—"}</pre>${data.findings?.bones ? `<p><b>Bones:</b> ${data.findings.bones}</p>` : ""}${data.findings?.softTissues ? `<p><b>Soft Tissues:</b> ${data.findings.softTissues}</p>` : ""}${data.findings?.specificFindings ? `<p><b>Specific:</b> ${data.findings.specificFindings}</p>` : ""}</div><div class="section impression"><h3>Impression</h3><pre>${data.impression || "—"}</pre></div>${data.recommendations ? `<div class="section"><h3>Recommendations</h3><p>${data.recommendations}</p></div>` : ""}<p class="muted">AI report sirf reference ke liye hai.</p><button onclick="window.print()">Print</button><script>window.onload=function(){window.print()}</script></body></html>`);
   win.document.close();
 }
 
@@ -70,11 +72,12 @@ export default function Reports() {
       const { error: uploadError } = await supabase.storage.from("xray-files").upload(filePath, file);
       if (uploadError) throw uploadError;
 
-      const { data: urlData } = supabase.storage.from("xray-files").getPublicUrl(filePath);
+      const { data: urlData, error: signError } = await supabase.storage.from("xray-files").createSignedUrl(filePath, 86400);
+      if (signError || !urlData?.signedUrl) throw signError || new Error("Cannot create report link");
 
       await addReport.mutateAsync({
         patient_id: form.patient_id,
-        file_url: urlData.publicUrl,
+        file_url: urlData.signedUrl,
         report_type: form.report_type,
       });
       toast({ title: "Success", description: "Report uploaded!" });
@@ -217,7 +220,11 @@ export default function Reports() {
                     <div className="flex items-center gap-3">
                       <Badge variant="outline" className="text-xs">{r.report_type}</Badge>
                       {r.file_url && (
-                        <a href={r.file_url} target="_blank" rel="noopener noreferrer">
+                        <a href={r.file_url} target="_blank" rel="noopener noreferrer" onClick={async e => {
+                          e.preventDefault();
+                          try { window.open(await refreshClinicalUrl(r.file_url!), "_blank", "noopener,noreferrer"); }
+                          catch { toast({ title: "Report link unavailable", description: "Connect to the internet and check access.", variant: "destructive" }); }
+                        }}>
                           <Button variant="ghost" size="icon" className="h-8 w-8"><Download className="h-4 w-4" /></Button>
                         </a>
                       )}

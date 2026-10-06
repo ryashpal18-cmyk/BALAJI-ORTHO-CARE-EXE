@@ -1,3 +1,5 @@
+import { billDue, netBillAmount } from "@/lib/billAmounts";
+import { normalizeIndianMobile } from "@/lib/mobile";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { StatCard } from "@/components/StatCard";
 import { Users, Calendar, Receipt, UserPlus, IndianRupee, MessageCircle, Pencil, CheckCircle, X, Wallet } from "lucide-react";
@@ -36,16 +38,17 @@ export default function Dashboard() {
   const [editSaving, setEditSaving] = useState(false);
 
   const todayTotalAmount = todayBills?.reduce((sum, b) => sum + Number(b.amount), 0) || 0;
-  const pendingTotal = pendingBills?.reduce((sum, b) => sum + Math.max(Number(b.amount) - Number((b as any).amount_paid || 0), 0), 0) || 0;
+  const pendingTotal = pendingBills?.reduce((sum, b) => sum + billDue(b), 0) || 0;
 
   // ── WhatsApp Reminder ──
   const buildDueReminder = (patient: any, total: number, paid: number, due: number) =>
     `नमस्ते ${patient?.name || "Patient"} जी 🙏\nBalaji Ortho Care Center की सूचना।\n\nआपका बिल विवरण:\n💰 कुल बिल: ₹${total}\n✅ जमा राशि: ₹${paid}\n❗ बकाया राशि: ₹${due}\n\nकृपया ₹${due} जल्द जमा करवाएं।\n\nधन्यवाद 🙏\nBalaji Ortho Care Center`;
 
   const openReminder = (patient: any, total: number, paid: number, due: number) => {
-    const digits = (patient?.mobile || "").replace(/\D/g, "").replace(/^91/, "");
+    let digits: string;
+    try { digits = normalizeIndianMobile(patient?.mobile || ""); } catch { toast({ title: "Invalid mobile number", variant: "destructive" }); return; }
     if (!digits) return;
-    window.open(`https://wa.me/91${digits}?text=${encodeURIComponent(buildDueReminder(patient, total, paid, due))}`, "_blank");
+    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(buildDueReminder(patient, total, paid, due))}`, "_blank");
   };
 
   // ── Quick Pay: sirf payment update ──
@@ -59,13 +62,13 @@ export default function Dashboard() {
   const handleQuickPay = async () => {
     if (!qpBill) return;
     setQpSaving(true);
-    const total = Number(qpBill.amount || 0);
+    const total = netBillAmount(qpBill);
     const paid = parseFloat(qpPaid) || 0;
     const status = paid <= 0 ? "Pending" : paid >= total ? "Paid" : "Partial";
     try {
       await updateBill.mutateAsync({
         id: qpBill.id,
-        amount: total,
+        amount: Number(qpBill.amount || 0),
         amount_paid: paid,
         status,
         payment_mode: qpMode,
@@ -103,7 +106,7 @@ export default function Dashboard() {
     }
     const total = valid.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
     const paid = parseFloat(editPaid) || 0;
-    const status = paid <= 0 ? "Pending" : paid >= total ? "Paid" : "Partial";
+    const status = paid <= 0 ? "Pending" : paid >= Math.max(total - Number(editBill.discount || 0), 0) ? "Paid" : "Partial";
     const serviceStr = valid.map(s => `${s.name}:${s.amount}`).join("|");
     try {
       await updateBill.mutateAsync({
@@ -236,7 +239,7 @@ export default function Dashboard() {
                     {pendingBills.slice(0, 12).map(bill => {
                       const patient = bill.patients as any;
                       const mobile = patient?.mobile || "";
-                      const total = Number(bill.amount || 0);
+                      const total = netBillAmount(bill);
                       const paid = Number((bill as any).amount_paid || 0);
                       const due = Math.max(total - paid, 0);
                       if (due <= 0) return null;
@@ -313,7 +316,7 @@ export default function Dashboard() {
                   <div className="flex justify-between border-t pt-1 mt-1">
                     <span className="text-muted-foreground font-medium">Baki Due</span>
                     <span className="text-destructive font-bold">
-                      ₹{Math.max(Number(qpBill.amount) - Number((qpBill as any).amount_paid || 0), 0).toLocaleString()}
+                      ₹{billDue(qpBill).toLocaleString()}
                     </span>
                   </div>
                 </div>

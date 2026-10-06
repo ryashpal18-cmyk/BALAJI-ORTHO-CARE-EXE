@@ -6,7 +6,7 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-export type Database = {
+export type GeneratedDatabase = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
@@ -857,3 +857,25 @@ export const Constants = {
     },
   },
 } as const
+
+// Additive migrations after the generated baseline; keep table/column checking enabled.
+type Table<R, Required extends keyof R = never> = { Row: R; Insert: Partial<R> & Pick<R, Required>; Update: Partial<R>; Relationships: [] };
+type ExtendTable<T extends { Row: object; Insert: object; Update: object; Relationships: unknown }, X> = {
+ Row: T['Row'] & X; Insert: T['Insert'] & Partial<X>; Update: T['Update'] & Partial<X>; Relationships: T['Relationships'];
+};
+type BaseTables = GeneratedDatabase['public']['Tables'];
+type CashEntry = { id: string; entry_date: string; entry_type: string; amount: number; party_name: string | null; bank_name: string | null; note: string | null; created_by: string | null; created_at: string };
+type CashDay = { id: string; entry_date: string; physical_cash: number | null; calculated_closing: number | null; difference: number | null; remarks: string | null; status: 'open' | 'closed'; closed_by: string | null; closed_at: string | null; reopened_by: string | null; reopened_at: string | null; reopen_reason: string | null; reopen_count: number; created_at: string; updated_at: string };
+export type Database = Omit<GeneratedDatabase, 'public'> & {
+ public: Omit<GeneratedDatabase['public'], 'Tables'> & { Tables: Omit<BaseTables, 'patients' | 'appointments' | 'billing' | 'physiotherapy_sessions' | 'medicines'> & {
+  patients: ExtendTable<BaseTables['patients'], {branch_id: string | null}>;
+  appointments: ExtendTable<BaseTables['appointments'], {branch_id: string | null}>;
+  billing: ExtendTable<BaseTables['billing'], {branch_id: string | null; discount: number; payment_history: Json | null}>;
+  medicines: ExtendTable<BaseTables['medicines'], {stock_quantity: number; low_stock_threshold: number; unit: string}>;
+  physiotherapy_sessions: ExtendTable<BaseTables['physiotherapy_sessions'], {fracture_case_id: string | null}>;
+  cash_book_entries: Table<CashEntry, 'entry_type'>;
+  cash_book_days: Table<CashDay, 'entry_date'>;
+  patient_medicines: Table<{ id: string; patient_id: string; medicine_id: string | null; medicine_name: string | null; dosage: string | null; duration: string | null; created_at: string }, 'patient_id'> & { Relationships: [{foreignKeyName:'patient_medicines_medicine_id_fkey';columns:['medicine_id'];isOneToOne:false;referencedRelation:'medicines';referencedColumns:['id']}] };
+  staff_access: Table<{ user_id: string; display_name: string; allowed_pages: string[]; allowed_branches: string[] | null; enabled: boolean }, 'user_id' | 'display_name'>;
+ }};
+};

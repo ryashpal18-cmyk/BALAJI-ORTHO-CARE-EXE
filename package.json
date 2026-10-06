@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "electron": "electron .",
     "postinstall": "electron-builder install-app-deps",
-    "dist": "npm run build && electron-builder --win portable"
+    "dist": "npm run build && electron-builder --win portable",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",
@@ -66,7 +67,8 @@
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^0.9.3",
     "xlsx": "^0.18.5",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "dompurify": "3.4.16"
   },
   "devDependencies": {
     "@types/node": "^22.7.4",

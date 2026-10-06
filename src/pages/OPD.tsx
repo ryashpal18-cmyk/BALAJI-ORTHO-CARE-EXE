@@ -1,3 +1,5 @@
+import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
+import { normalizeIndianMobile } from "@/lib/mobile";
 import { businessDate } from "@/lib/businessDate";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -273,7 +275,7 @@ export default function OPD() {
     const patient = getSelectedPatient(allPatients, rxForm.patient_id);
     const html = buildPrescriptionHTML(patient, rxForm, advice);
     const container = document.createElement("div");
-    container.innerHTML = html;
+    container.innerHTML = safeReportHtml(html);
     document.body.appendChild(container);
     try {
       const html2pdf = (await import("html2pdf.js")).default;
@@ -308,7 +310,7 @@ export default function OPD() {
     const html = buildPrescriptionHTML(patient, rxForm, advice);
     const printWindow = window.open("", "_blank");
     if (printWindow) {
-      printWindow.document.write(`
+      writeReportDocument(printWindow, `
         <!DOCTYPE html>
         <html><head><title>Prescription - ${patient?.name || "Patient"}</title>
         <style>@media print { body { margin: 0; } }</style>
@@ -360,18 +362,18 @@ export default function OPD() {
       const blob = await generatePdfBlob();
       if (!blob) throw new Error("PDF generation failed");
 
-      const fileName = `${getFileName()}_${Date.now()}.pdf`;
+      const fileName = `${String(patient.id).replace(/^local_/, "")}/${getFileName()}_${Date.now()}.pdf`;
       const { error: uploadError } = await supabase.storage
         .from("prescriptions")
         .upload(fileName, blob, { contentType: "application/pdf", upsert: true });
 
       if (uploadError) throw uploadError;
 
-      const { data: urlData } = supabase.storage
+      const { data: urlData, error: signError } = await supabase.storage
         .from("prescriptions")
-        .getPublicUrl(fileName);
-
-      const pdfLink = urlData.publicUrl;
+        .createSignedUrl(fileName, 86400);
+      if (signError || !urlData?.signedUrl) throw signError || new Error("Cannot create PDF link");
+      const pdfLink = urlData.signedUrl;
 
       // Build WhatsApp message with PDF link
       const msg = [
@@ -390,7 +392,7 @@ export default function OPD() {
       ].filter(Boolean).join("\n");
 
       const whatsappUrl = patient?.mobile
-        ? `https://wa.me/91${patient.mobile.replace(/\D/g, "").replace(/^91/, "")}?text=${encodeURIComponent(msg)}`
+        ? `https://wa.me/${normalizeIndianMobile(patient.mobile)}?text=${encodeURIComponent(msg)}`
         : `https://wa.me/?text=${encodeURIComponent(msg)}`;
 
       window.open(whatsappUrl, "_blank");

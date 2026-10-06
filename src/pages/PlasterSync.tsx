@@ -56,7 +56,7 @@ export default function PlasterSync() {
       addLog(`✅ ${bills?.length || 0} bills mile`);
 
       // 2. Plaster wale bills filter karo
-      const plasterBills = (bills || []).filter((b: any) => hasPlaster(b.service || ""));
+      const plasterBills = ((bills || []) as any[]).filter((b: any) => hasPlaster(b.service || ""));
       addLog(`🔍 ${plasterBills.length} bills mein plaster service mili`);
 
       // 3. Existing fracture cases fetch karo (duplicate avoid ke liye)
@@ -64,7 +64,7 @@ export default function PlasterSync() {
         .from("fracture_cases" as any)
         .select("patient_id, plaster_status");
       const activePatients = new Set(
-        (existingCases || [])
+        ((existingCases || []) as any[])
           .filter((c: any) => c.plaster_status === "Active")
           .map((c: any) => c.patient_id)
       );

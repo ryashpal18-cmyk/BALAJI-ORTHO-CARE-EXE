@@ -64,6 +64,8 @@ function init(dbDir) {
       );
     `);
 
+    if (!db.prepare('PRAGMA table_info(mutation_queue)').all().some(c => c.name === 'ownerUserId')) db.exec('ALTER TABLE mutation_queue ADD COLUMN ownerUserId TEXT');
+
     logger.logInfo('sqlite', `Offline SQLite DB ready — ${dbPath}`);
     return db;
   } catch (e) {
@@ -118,6 +120,17 @@ function cacheReplaceTable(table, rows, idField) {
   runAll();
 }
 
+function cacheMergeServer(table, row, idField = 'id') {
+  return getDb().transaction(() => {
+    const id = String(row[idField] ?? '').replace(/^local_/, '');
+    if (!id) throw new Error('Server row missing ID');
+    if (queueGetAll().some(m => m.table === table && [m.rowId,m.tempId].some(v => v && v.replace(/^local_/, '') === id))) return;
+    const existing = cacheGetRow(table, row[idField]) || cacheGetRow(table, 'local_' + id);
+    if (existing?._pendingSync) return;
+    cacheUpsertRow(table, row, idField);
+  })();
+}
+
 function cacheUpsertRow(table, row, idField) {
   const rowId = row[idField];
   getDb().prepare(
@@ -142,9 +155,10 @@ function cacheReplaceRowKey(table, oldId, newRow, idField) {
 
 function queueAdd(mutation) {
   const info = getDb().prepare(
-    `INSERT INTO mutation_queue (table_name, op, payload, rowId, tempId, selectAfter, createdAt, retries, lastError)
-     VALUES (@table, @op, @payload, @rowId, @tempId, @selectAfter, @createdAt, 0, NULL)`
+    `INSERT INTO mutation_queue (table_name, op, payload, rowId, tempId, selectAfter, createdAt, retries, lastError, ownerUserId)
+     VALUES (@table, @op, @payload, @rowId, @tempId, @selectAfter, @createdAt, 0, NULL, @ownerUserId)`
   ).run({
+    ownerUserId: mutation.ownerUserId ?? null,
     table: mutation.table,
     op: mutation.op,
     payload: mutation.payload !== undefined ? JSON.stringify(mutation.payload) : null,
@@ -160,6 +174,7 @@ function rowToMutation(r) {
   return {
     id: r.id,
     table: r.table_name,
+    ownerUserId: r.ownerUserId ?? null,
     op: r.op,
     payload: r.payload ? JSON.parse(r.payload) : undefined,
     rowId: r.rowId ?? undefined,
@@ -177,6 +192,11 @@ function queueGetAll() {
 }
 
 function queueRemove(id) {
+  const m = getDb().prepare('SELECT * FROM mutation_queue WHERE id = ?').get(id);
+  if (m?.table_name === 'audit_logs' && m.op === 'insert') {
+    const key = m.tempId || m.rowId;
+    if (key) cacheDeleteRow('audit_logs', key);
+  }
   getDb().prepare(`DELETE FROM mutation_queue WHERE id = ?`).run(id);
 }
 
@@ -304,12 +324,12 @@ function adjustStock(args) {
       created_by: args.actorName || 'Unknown', created_at: new Date().toISOString(), _pendingSync: true };
     cacheUpsertRow('medicines', { ...medicine, stock_quantity: next, _pendingSync: true }, 'id');
     cacheUpsertRow('stock_movements', movement, 'id');
-    queueAdd({ table: 'stock_movements', op: 'stock_adjust', payload: movement, tempId: movement.id });
+    queueAdd({ ownerUserId: args.ownerUserId, table: 'stock_movements', op: 'stock_adjust', payload: movement, tempId: movement.id });
     return { ...medicine, stock_quantity: next, _pendingSync: true };
   })();
 }
 module.exports = {
-  commitMutation, snapshot, restoreSnapshot, adjustStock,
+  commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
   init, close,
   cacheGetAll, cacheGetRow, cacheSetRows, cacheReplaceTable, cacheUpsertRow, cacheDeleteRow, cacheReplaceRowKey,
   queueAdd, queueGetAll, queueRemove, queueUpdate,

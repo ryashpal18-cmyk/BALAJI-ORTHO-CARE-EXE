@@ -1,3 +1,4 @@
+import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { businessDate } from "@/lib/businessDate";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -149,7 +150,7 @@ Balaji Ortho Care Center`;
 }
 
 function buildInvoiceHTML(bill: any, logoUrl: string = "/images/logo.png") {
-  const patientName = (bill.patients as any)?.name || "Patient";
+  const patientName = escapeHtml((bill.patients as any)?.name || "Patient");
   const patientAge = (bill.patients as any)?.age || "—";
   const patientGender = (bill.patients as any)?.gender || "—";
   const invoiceNo = `INV-${bill.id.slice(0, 8).toUpperCase()}`;
@@ -179,7 +180,7 @@ function buildInvoiceHTML(bill: any, logoUrl: string = "/images/logo.png") {
       (s: any, i: number) => `
     <tr>
       <td style="padding:4px 8px;color:#1e293b;font-size:10.5px;font-weight:500;">${i + 1}</td>
-      <td style="padding:4px 8px;color:#1e293b;font-size:10.5px;font-weight:500;">${s.name}</td>
+      <td style="padding:4px 8px;color:#1e293b;font-size:10.5px;font-weight:500;">${escapeHtml(s.name)}</td>
       <td style="padding:4px 8px;text-align:right;color:#1e293b;font-size:10.5px;font-weight:600;">₹${Number(s.amount).toLocaleString()}</td>
     </tr>
   `,
@@ -342,7 +343,7 @@ function printInvoice(bill: any) {
       <div class="invoice-wrap">${buildInvoiceHTML(bill, logoUrl)}</div>
     </div>
     <script>window.onload = function() { window.print(); };</script></body></html>`;
-  win.document.write(invoiceHTML);
+  writeReportDocument(win, invoiceHTML);
   win.document.close();
 }
 
@@ -356,7 +357,7 @@ function previewInvoice(bill: any) {
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body { font-family: 'Inter', sans-serif; background: #f1f5f9; display:flex; justify-content:center; padding:20px; }
     </style></head><body>${buildInvoiceHTML(bill, logoUrl)}</body></html>`;
-  win.document.write(html);
+  writeReportDocument(win, html);
   win.document.close();
 }
 
@@ -376,7 +377,7 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
 
   // ✅ Container bilkul screen se bahar rakho — white screen nahi aayegi
   const container = document.createElement("div");
-  container.innerHTML = html;
+  container.innerHTML = safeReportHtml(html);
   container.style.position = "absolute";
   container.style.top = "-9999px";
   container.style.left = "-9999px";
@@ -429,7 +430,7 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
       .outputPdf("blob");
 
     const invoiceNo = `INV-${bill.id.slice(0, 8).toUpperCase()}`;
-    const fileName = `${invoiceNo}-${Date.now()}.pdf`;
+    const fileName = `${String(bill.patient_id).replace(/^local_/, "")}/${invoiceNo}-${Date.now()}.pdf`;
 
     // PDF upload sirf online ho tab karo — offline ho to silently skip
     const online = await isOnline();
@@ -441,15 +442,16 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
 
     if (uploadError) return null; // upload fail — koi error nahi dikhana
 
-    const { data: urlData } = supabase.storage.from("invoices").getPublicUrl(fileName);
+    const { data: urlData, error: signError } = await supabase.storage.from("invoices").createSignedUrl(fileName, 86400);
+    if (signError || !urlData?.signedUrl) throw signError || new Error("Cannot create invoice link");
     try {
       await supabase
         .from("billing")
-        .update({ invoice_pdf_url: urlData.publicUrl } as any)
+        .update({ invoice_pdf_url: urlData.signedUrl } as any)
         .eq("id", bill.id);
     } catch { /* URL save fail hona koi badi baat nahi */ }
 
-    return urlData.publicUrl;
+    return urlData.signedUrl;
   } catch (err) {
     cLog.error("billing", "PDF generation fail", err); return null;
   } finally {
@@ -767,17 +769,15 @@ const filteredPatients = useMemo(() => {
       return;
     }
 
-    if (!(bill as any).invoice_pdf_url) {
-      toast({ title: "Generating PDF...", description: "Please wait" });
-      await generateAndUploadPDF(bill);
-    }
+    toast({ title: "Generating PDF...", description: "Please wait" });
+    const freshPdfUrl = await generateAndUploadPDF(bill);
     const msg = getWhatsAppBillMessage(
       patientName,
       Number(bill.amount),
       Number((bill as any).amount_paid || 0),
       `INV-${bill.id.slice(0, 8).toUpperCase()}`,
       safeDate(bill.created_at),
-      (bill as any).invoice_pdf_url || null,
+      freshPdfUrl || null,
     );
     openWhatsAppWeb(mobile, msg);
   };

@@ -41,7 +41,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }, [pathname]);
   if (result.loading) return <div className="p-8">Checking access…</div>;
   if (!result.profile) return <Navigate to="/login" replace />;
-  const allowed = result.profile.role === "admin" || (result.profile.pages || []).includes(pageFor(pathname));
+  const allowed = result.profile.role === "admin" || ((result.profile.pages || []).includes(pageFor(pathname)) && !(pathname === "/daily-cash-book" && result.profile.branchIds != null));
   if (!allowed) return <div className="p-8"><h2>Access denied</h2><p>इस पेज की अनुमति नहीं है। Admin से संपर्क करें।</p><a href={`#${result.profile.pages?.[0] || "/login"}`}>वापस जाएँ</a></div>;
   return <>{children}</>;
 }

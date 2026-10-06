@@ -167,17 +167,17 @@ export async function cacheReplaceTable(table: string, rows: any[], idField = "i
 }
 
 export async function cacheUpsertRowFromServer(table: string, row: any, idField = "id") {
-  try {
-    const rowId = row[idField];
-    const existing = await cacheGetRow(table, rowId);
-    // Agar is row mein abhi unsynced local change hai, to server ki purani
-    // copy se use overwrite mat karo (same wajah jo upar cacheReplaceTable mein hai).
-    if (existing && existing._pendingSync) return;
-    await cacheUpsertRow(table, row, idField);
-  } catch (err) {
-    cLog.error("sqlite", `${table} cacheUpsertRowFromServer fail`, err);
-    throw err;
+  const bridge = electronOffline() as any;
+  if (bridge) {
+    if (!bridge.cacheMergeServer) throw new Error("Desktop app update required");
+    assertSuccess(await bridge.cacheMergeServer(table, row, idField));
+    return;
   }
+  const id = String(row[idField]).replace(/^local_/, "");
+  const pending = await queueGetAll();
+  if (pending.some(m => m.table === table && [m.rowId,m.tempId].some(v => v?.replace(/^local_/, "") === id))) return;
+  const existing = await cacheGetRow(table, row[idField]);
+  if (!existing?._pendingSync) await cacheUpsertRow(table, row, idField);
 }
 
 export async function cacheUpsertRow(table: string, row: any, idField = "id") {

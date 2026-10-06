@@ -151,3 +151,37 @@ Windows पर EXE बनाना/जाँचना उचित है; SQLit
 - `supabase/functions/create-admin-user/index.ts`
 - `supabase/functions/session-access/index.ts`
 - `supabase/migrations/20261005150000_fix_report_02_20.sql`
+
+
+## 6 अक्टूबर 2026: दूसरे audit के F01–F16 सुधार
+
+इस update में offline update क्रम, pending-delete cache, staff queue ownership/branch access,
+write-only audit RPC, Cash/UPI correction receipts, authorized delete acknowledgement और sync lock सुधारे गए हैं।
+Clinical child tables/storage में active staff व patient branch जाँच है। Closed cash day को staff reopen नहीं कर सकता।
+Prescription/invoice/report links private signed links हैं; invoice resend नया PDF/link बनाता है और Reports download link renew करता है।
+Generated print/PDF HTML sanitize होता है; mobile prefix व discounted dashboard balance सुधारे गए हैं।
+TypeScript की 22 errors हटाई गईं और EXE workflow में typecheck gate जोड़ा गया है।
+
+### Deploy करना जरूरी है
+1. Database backup लें। पहले `20261005150000_fix_report_02_20.sql` लागू होना चाहिए।
+2. Supabase SQL Editor में `supabase/migrations/20261006120000_fix_deep_audit_f01_f16.sql` लागू करें।
+   GitHub push अथवा EXE build इसे अपने आप live database में लागू **नहीं** करता।
+3. पहली patch के `session-access` और `create-admin-user` Edge Functions भी deploy रहने चाहिए।
+4. नया EXE सभी PCs पर लगाएँ। पुराने versions नई audit/delete RPC व्यवस्था के अनुकूल नहीं हैं।
+5. पुराने queued records जिनका verified owner नहीं है, admin login से sync करें; staff को दूसरे user की queue नहीं दिखाई जाएगी।
+
+### Cash book और PDF व्यवहार
+- Cash book का historical schema clinic-wide है। इसलिए collection, expenses और closing सभी branches के हैं;
+  header पर All Branches लिखा है। Branch-limited staff को यह clinic-wide page नहीं मिलेगा।
+- Cash/UPI correction पुराने receipt की तारीख पर reversal/reclassification जोड़ता है। पहले बंद किए दिन की
+  saved closing snapshot नहीं बदलती; जरूरी हो तो admin कारण लिखकर reopen करके जाँच करे।
+- नए invoice/prescription/report sharing links 24 घंटे के हैं। Expire होने पर नया link share करें।
+  पुराने public invoice links private bucket होने के बाद काम नहीं करेंगे। पहले जारी signed links अपनी expiry तक चल सकते हैं।
+- खाली beds जिनमें patient नहीं जुड़ा है, केवल clinic-wide staff/admin देख सकते हैं।
+
+### Verification
+`npm run typecheck`, `npm run build`, `node tests/report-02-20.cjs`, `node tests/auth-01.cjs`,
+`node tests/deep-audit.cjs` पास किए गए। `tests/deep-audit-sql.cjs` isolated PostgreSQL-compatible
+PGlite में migrations, RLS, audit, stock, payment और cash-day protection जाँचता है।
+Browser में invoice XSS payload inert रहा और 9 screens/permission/offline prescription checks पास हुए।
+Windows EXE और live Supabase का end-to-end परीक्षण यहाँ नहीं किया गया है।

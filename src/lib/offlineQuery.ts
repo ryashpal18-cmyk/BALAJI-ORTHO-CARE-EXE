@@ -47,7 +47,7 @@ export async function offlineFetch<T = any>(
     try {
       const rows = await fetcher();
       for (const row of rows as any[]) await cacheUpsertRowFromServer(table, row, idField);
-      return rows;
+      return (await cacheGetAll(table)) as T[];
     } catch (err) {
       cLog.warn("offline", `${table} — cache khaali thi aur online fetch bhi fail — khaali return kar rahe hain`, err);
       return cached;
@@ -82,7 +82,7 @@ export async function offlineFetchScoped<T = any>(
       for (const row of rows as any[]) {
         if (row && row[idField] !== undefined) await cacheUpsertRowFromServer(table, row, idField);
       }
-      return rows;
+      return fallbackFilter(await cacheGetAll(table)) as T[];
     } catch (err) {
       cLog.warn("offline", `${table} scoped — cache khaali thi aur online fetch bhi fail`, err);
       return fallbackFilter(cached) as T[];

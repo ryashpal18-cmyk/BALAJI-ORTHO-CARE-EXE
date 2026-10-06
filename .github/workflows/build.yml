@@ -48,6 +48,8 @@ jobs:
             echo "Push reject hua (attempt $attempt) — latest khींच ke retry kar rahe hain..."
             sleep 5
           done
+      - name: Check TypeScript
+        run: npm run typecheck
       - name: Build React App
         run: npm run build
       - name: Build & Publish Setup EXE

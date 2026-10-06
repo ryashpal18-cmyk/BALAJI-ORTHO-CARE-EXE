@@ -43,10 +43,11 @@ export function usePendingBills() {
     queryFn: async () => (await readBranchTable("billing", selectedBranchId, "*, patients(name, mobile, address)")).filter(b => ["Pending", "Partial"].includes(b.status)) });
 }
 
-export function useBills() {
+export function useBills(scope: "selected" | "clinic" = "selected") {
   const { selectedBranchId } = useBranchContext();
-  return useQuery({ queryKey: ["billing", "all", selectedBranchId], ...QUERY_OPTS,
-    queryFn: async () => (await readBranchTable("billing", selectedBranchId, "*, patients(name, mobile, address)")).sort((a,b) => (b.created_at || "").localeCompare(a.created_at || "")) });
+  const branch = scope === "clinic" ? null : selectedBranchId;
+  return useQuery({ queryKey: ["billing", "all", branch], ...QUERY_OPTS,
+    queryFn: async () => (await readBranchTable("billing", branch, "*, patients(name, mobile, address)")).sort((a,b) => (b.created_at || "").localeCompare(a.created_at || "")) });
 }
 
 export function usePatients() {
@@ -163,8 +164,7 @@ export function useAddBill() {
               .single()
               .then(({ data }) => {
                 if (data) payload.patients = { name: data.name || "", mobile: data.mobile || "", address: data.address || "" };
-              })
-              .catch(() => { /* silently ignore — sync ke baad naam theek ho jaayega */ });
+              }, () => { /* refresh will retry patient lookup */ });
           }
         } catch { /* silently ignore */ }
       }

@@ -8,11 +8,6 @@
 // Folder" khol kar exact wajah pata chal sakti hai.
 // ─────────────────────────────────────────────────────────────────────────
 
-declare global {
-  interface Window {
-    electron?: any;
-  }
-}
 
 function send(source: string, message: string, stack?: string) {
   try {

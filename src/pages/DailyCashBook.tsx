@@ -1,3 +1,4 @@
+import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { collectionRows } from "@/lib/paymentLedger";
 import { businessDate } from "@/lib/businessDate";
 import { useMemo, useState } from "react";
@@ -95,7 +96,7 @@ function printCashBook(dateLabel: string, rows: any[], bills: any[], summary: Re
     ? (Math.abs(dayRecord.difference) < 0.01 ? "Matched" : dayRecord.difference > 0 ? `Excess ₹${Math.abs(dayRecord.difference).toLocaleString("en-IN")}` : `Short ₹${Math.abs(dayRecord.difference).toLocaleString("en-IN")}`)
     : "—";
 
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Daily Cash Book</title>
+  writeReportDocument(win, `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Daily Cash Book — All Branches</title>
   <style>
     @page{size:A4;margin:14mm}
     body{font-family:Arial,sans-serif;color:#0f172a;padding:0}
@@ -148,7 +149,7 @@ function printCashBook(dateLabel: string, rows: any[], bills: any[], summary: Re
   win.document.close();
 }
 
-function printMonthlyCashBook(monthLabel: string, rows: { date: string; opening: number; totalCollection: number; expense: number; bankDepositOut: number; homeGiven: number; closing: number; status: string }[], totals: Record<string, number>) {
+function printMonthlyCashBook(monthLabel: string, rows: { date: string; opening: number; totalCollection: number; expense: number; bankDepositOut: number; homeGiven: number; closing: number; status: string }[], totals: { cash: number; upi: number; card: number; bank: number; grandTotal: number; expense: number; bankDepositOut: number; homeGiven: number; netCash: number; monthlyClosing: number; avgDaily: number; workingDays: number }) {
   const win = window.open("", "_blank");
   if (!win) return;
   const tableRows = rows.map((r) => `<tr>
@@ -162,7 +163,7 @@ function printMonthlyCashBook(monthLabel: string, rows: { date: string; opening:
     <td>${r.status}</td>
   </tr>`).join("");
 
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Monthly Cash Book</title>
+  writeReportDocument(win, `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Monthly Cash Book</title>
   <style>
     @page{size:A4;margin:12mm}
     body{font-family:Arial,sans-serif;color:#0f172a}
@@ -200,7 +201,7 @@ function printMonthlyCashBook(monthLabel: string, rows: { date: string; opening:
 
 export default function DailyCashBook() {
   const { data: allEntries = [], isLoading } = useCashBookEntries();
-  const { data: sourceBills = [] } = useBills();
+  const { data: sourceBills = [] } = useBills("clinic");
   const addEntry = useAddCashBookEntry();
   const deleteEntry = useDeleteCashBookEntry();
   const qc = useQueryClient();
@@ -542,7 +543,7 @@ export default function DailyCashBook() {
               fontSize: "28px", flexShrink: 0,
             }}>💵</div>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 800, color: "white", margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Daily Cash Book</h1>
+              <h1 style={{ fontSize: "22px", fontWeight: 800, color: "white", margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Daily Cash Book — All Branches</h1>
               <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.75)", margin: 0 }}>Rozana cash, UPI, card, bank aur kharcha ka hisaab — auto calculated</p>
             </div>
           </div>

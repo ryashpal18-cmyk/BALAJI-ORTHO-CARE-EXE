@@ -1,3 +1,4 @@
+import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { businessDate } from "@/lib/businessDate";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,7 +44,7 @@ function printDailyReport(
     })
     .join("");
 
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Daily Report</title>
+  writeReportDocument(win, `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Daily Report</title>
   <style>
     @page{size:A4;margin:14mm}
     body{font-family:Arial,sans-serif;color:#0f172a;padding:0}

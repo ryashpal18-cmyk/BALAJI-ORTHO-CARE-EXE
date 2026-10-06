@@ -1,3 +1,4 @@
+import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { isOnline } from "@/lib/offlineSync";
 import { cacheGetAll } from "@/lib/offlineDb";
 import { businessDate } from "@/lib/businessDate";
@@ -68,7 +69,7 @@ function printRemovalSlip(c: any) {
   const name = c.patients?.name||"—"; const mob = c.patients?.mobile||"";
   const bp = `${c.side||""} ${c.body_part||""}`.trim();
   const totalDays = c.plaster_date && c.next_followup_date ? diffDays(c.plaster_date, todayIso()) : "—";
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Plaster Removal Slip</title>
+  writeReportDocument(win, `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Plaster Removal Slip</title>
   <style>
     @page{size:A5;margin:12mm} body{font-family:Arial,sans-serif;color:#1e293b}
     .logo{font-size:20px;font-weight:800;color:#1e3a5f} .sub{font-size:11px;color:#64748b}
@@ -110,7 +111,7 @@ function printCareInstructions(c: any) {
   const bp   = `${c.side||""} ${c.body_part||""}`.trim();
   const diet = DIET_BY_PART[c.body_part||""]||DIET_BY_PART.default;
   const exer = EXERCISE_BY_PART[c.body_part||""]||EXERCISE_BY_PART.default;
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Care Instructions</title>
+  writeReportDocument(win, `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Care Instructions</title>
   <style>
     @page{size:A5;margin:12mm} body{font-family:Arial,sans-serif;color:#1e293b;font-size:13px}
     .logo{font-size:18px;font-weight:800;color:#1e3a5f} .sub{font-size:10px;color:#64748b;margin-bottom:10px}
@@ -148,7 +149,7 @@ function printMonthlyReport(cases: any[], followups: any[]) {
   cases.forEach(c => { if(c.body_part) bodyCount[c.body_part]=(bodyCount[c.body_part]||0)+1; });
   const topParts = Object.entries(bodyCount).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const rows = thisMo.map(c => `<tr><td>${c.patients?.name||"—"}</td><td>${(c.side||"")+" "+(c.body_part||"")}</td><td>${c.fracture_type||"—"}</td><td>${fmtDate(c.plaster_date)}</td><td>${c.plaster_status==="Active"?"Active ✅":"Removed"}</td></tr>`).join("");
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Monthly Ortho Report</title>
+  writeReportDocument(win, `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Monthly Ortho Report</title>
   <style>
     @page{size:A4;margin:14mm} body{font-family:Arial,sans-serif;color:#1e293b}
     .logo{font-size:22px;font-weight:800;color:#1e3a5f} .sub{font-size:11px;color:#64748b;margin-bottom:12px}
@@ -303,6 +304,8 @@ function EditDialog({ open, onClose, caseData }: { open: boolean; onClose: () =>
 
 // ─── Fracture Profile Dialog (X-Ray + Details) ───────────────────────────────
 type FractureXray = {
+  report_type?: string;
+  report_data?: string;
   id: string;
   file_url: string;
   notes?: string;

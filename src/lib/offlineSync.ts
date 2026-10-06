@@ -162,6 +162,14 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
   }
 
 
+  if (m.table === "audit_logs" && m.op === "insert") {
+    const { data, error } = await supabase.rpc("append_audit_event" as any, {
+      p_id: (m.tempId || m.payload.id).replace(/^local_/, ""), p_event: stripLocalPrefixes(m.payload),
+    } as any);
+    if (error) throw error;
+    if (data !== true) throw new Error("Audit event not acknowledged");
+    return;
+  }
   if (m.op === "insert") {
     let payload = { ...m.payload };
     // ✅ tempId ab "local_<real-uuid>" hai — prefix hata ke wahi UUID
@@ -221,8 +229,9 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
   if (m.op === "delete") {
     if (!m.rowId) throw new Error("delete mutation missing rowId");
 
-    const { error } = await supabase.from(table).delete().eq("id", m.rowId);
-    if (error) { console.error(`Delete failed — table: ${table}`); throw error; }
+    const { data, error } = await supabase.rpc("delete_record_authorized" as any, { p_table: table, p_id: m.rowId } as any);
+    if (error) throw error;
+    if (data !== true) throw new Error("Delete was not acknowledged by the server");
     return;
   }
 
@@ -312,11 +321,12 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
   if (!online) return { synced: 0, pending: (await queueGetAll()).length };
 
   syncing = true;
-  emitSyncStatus((await queueGetAll()).length);
   let synced = 0;
   let lastError: string | undefined;
 
   try {
+    emitSyncStatus((await queueGetAll()).length);
+    const blocked = new Set<string>();
     let queue = await queueGetAll();
     queue = queue.sort((a, b) => (a.id || 0) - (b.id || 0));
 
@@ -325,6 +335,8 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
     for (const snapshotItem of queue) {
       const m = (await queueGetAll()).find(q => q.id === snapshotItem.id);
       if (!m) continue;
+      const key = `${m.table}::${(m.rowId || m.tempId || String(m.id)).replace(/^local_/, "")}`;
+      if (blocked.has(key)) continue;
       // 🚨 FIX: MAX_RETRIES constant define tha lekin kabhi enforce nahi hota
       // tha — ek permanently-failing mutation (jaise invalid mobile pe SMS,
       // ya deleted parent row) har 30 second mein dobara try hota rehta,
@@ -333,13 +345,14 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
       // karne ke baad us mutation ko skip kar dete hain — data queue mein
       // surakshit rehta hai (delete nahi karte, taaki manual review/ silent
       // data-loss na ho) lekin bar-bar try nahi hota.
-      if ((m.retries || 0) >= MAX_RETRIES) continue;
+      if ((m.retries || 0) >= MAX_RETRIES) { blocked.add(key); continue; }
 
       try {
         await applyMutation(m);
         if (m.id !== undefined) await queueRemove(m.id);
         synced++;
       } catch (err: any) {
+        blocked.add(key);
         const msg = err?.message || String(err);
         if (msg === "PENDING_PARENT_INSERT") continue;
         cLog.error("sync", "Mutation fail — op: " + m.op + ", table: " + m.table + ", msg: " + msg);

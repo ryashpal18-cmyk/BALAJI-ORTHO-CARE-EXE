@@ -543,13 +543,21 @@ function createWindow() {
       preload:          path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration:  false,
-      webSecurity:      false
+      webSecurity:      true
     }
   });
 
   Menu.setApplicationMenu(null);
 
   const indexPath = path.join(__dirname, 'dist', 'index.html');
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.split('#')[0] !== require('url').pathToFileURL(indexPath).href) event.preventDefault();
+  });
+  mainWindow.webContents.setWindowOpenHandler(({url}) => {
+    if (url === 'about:blank' || url === '') return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } } };
+    if (/^https:\/\//.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
   if (fs.existsSync(indexPath)) {
     mainWindow.loadFile(indexPath);
   } else {
@@ -876,7 +884,7 @@ ipcMain.handle('backup:writeSnapshot', async (_e, tables) => {
 // try/catch mein hai taaki kisi ek query fail hone se poora app na gire.
 
 ipcMain.handle('offline:commitMutation', async (_e, { mutation, row, idField }) => {
-  try { return { success: true, data: sqliteStore.commitMutation(mutation, row, idField) }; }
+  try { return { success: true, data: sqliteStore.commitMutation({ ...mutation, ownerUserId: access.getPrincipal()?.userId || null }, row, idField) }; }
   catch (e) { return { success: false, error: e.message }; }
 });
 ipcMain.handle('offline:snapshot', async () => {
@@ -888,16 +896,16 @@ ipcMain.handle('offline:restoreSnapshot', async (_e, dump) => {
   catch (e) { return { success: false, error: e.message }; }
 });
 ipcMain.handle('offline:adjustStock', async (_e, args) => {
-  try { return { success: true, data: sqliteStore.adjustStock(args) }; }
+  try { return { success: true, data: sqliteStore.adjustStock({ ...args, ownerUserId: access.getPrincipal()?.userId || null }) }; }
   catch (e) { return { success: false, error: e.message }; }
 });
 ipcMain.handle('offline:cacheGetAll', async (_e, table) => {
-  try { return { success: true, data: ["patients","billing","appointments"].includes(table) ? access.filterBranches(sqliteStore.cacheGetAll(table)) : sqliteStore.cacheGetAll(table) }; }
+  try { return { success: true, data: access.filterRows(table, sqliteStore.cacheGetAll(table), sqliteStore) }; }
   catch (e) { logger.logError('sqlite', `cacheGetAll(${table}) fail: ${e.message}`); return { success: false, data: [] }; }
 });
 
 ipcMain.handle('offline:cacheGetRow', async (_e, { table, rowId }) => {
-  try { return { success: true, data: ["patients","billing","appointments"].includes(table) ? access.filterBranches([sqliteStore.cacheGetRow(table, rowId)].filter(Boolean))[0] : sqliteStore.cacheGetRow(table, rowId) }; }
+  try { return { success: true, data: access.filterRows(table, [sqliteStore.cacheGetRow(table, rowId)].filter(Boolean), sqliteStore)[0] }; }
   catch (e) { logger.logError('sqlite', `cacheGetRow(${table}) fail: ${e.message}`); return { success: false, data: undefined }; }
 });
 
@@ -910,11 +918,14 @@ ipcMain.handle('offline:cacheReplaceTable', async (_e, { table, rows, idField })
   try {
     const principal = access.getPrincipal();
     const all = sqliteStore.cacheGetAll(table);
-    const preserve = principal?.role === 'staff' && principal.branchIds != null && ['patients','billing','appointments'].includes(table)
-      ? all.filter(row => !principal.branchIds.includes(row.branch_id)) : [];
+    const preserve = principal?.role === 'staff' ? all.filter(row => !access.rowAllowed(table, row, sqliteStore)) : [];
     sqliteStore.cacheReplaceTable(table, [...rows, ...preserve], idField || 'id'); return { success: true };
   }
   catch (e) { logger.logError('sqlite', `cacheReplaceTable(${table}) fail: ${e.message}`); return { success: false }; }
+});
+
+ipcMain.handle('offline:cacheMergeServer', async (_e, { table, row, idField }) => {
+  sqliteStore.cacheMergeServer(table, row, idField || 'id'); return { success: true };
 });
 
 ipcMain.handle('offline:cacheUpsertRow', async (_e, { table, row, idField }) => {
@@ -933,12 +944,12 @@ ipcMain.handle('offline:cacheReplaceRowKey', async (_e, { table, oldId, newRow, 
 });
 
 ipcMain.handle('offline:queueAdd', async (_e, mutation) => {
-  try { return { success: true, id: sqliteStore.queueAdd(mutation) }; }
+  try { return { success: true, id: sqliteStore.queueAdd({ ...mutation, ownerUserId: access.getPrincipal()?.userId || null }) }; }
   catch (e) { logger.logError('sqlite', `queueAdd fail: ${e.message}`); return { success: false, id: -1 }; }
 });
 
 ipcMain.handle('offline:queueGetAll', async () => {
-  try { return { success: true, data: sqliteStore.queueGetAll().filter(m => access.canTable(m.table)) }; }
+  try { return { success: true, data: sqliteStore.queueGetAll().filter(m => access.canMutation(m, sqliteStore)) }; }
   catch (e) { logger.logError('sqlite', `queueGetAll fail: ${e.message}`); return { success: false, data: [] }; }
 });
 
