@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/businessDate";
 import { useState, useEffect, useRef } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
@@ -18,7 +19,7 @@ import bg3 from "@/assets/dash-bg3.png";
 
 interface DashboardLayoutProps { children: React.ReactNode; }
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => businessDate();
 const BG_IMAGES = [bg1, bg2, bg3];
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {

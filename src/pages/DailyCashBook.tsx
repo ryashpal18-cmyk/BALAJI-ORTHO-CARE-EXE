@@ -1,3 +1,5 @@
+import { collectionRows } from "@/lib/paymentLedger";
+import { businessDate } from "@/lib/businessDate";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -23,10 +25,7 @@ import { getCurrentRole } from "@/lib/appConfig";
 import { toast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx";
 
-const toLocalDateInput = (date: Date) => {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 10);
-};
+const toLocalDateInput = (date: Date) => businessDate(date);
 
 const fmt = (n: number) => `₹${(n || 0).toLocaleString("en-IN")}`;
 const currentUserName = () => localStorage.getItem("userName") || "Unknown";
@@ -62,7 +61,7 @@ function sumByType(entries: any[]) {
 }
 
 function billDate(b: any) {
-  return (b?.created_at || "").slice(0, 10);
+  return businessDate(b?.created_at || "");
 }
 
 // ── Printable Daily Cash Book (extended with auto-collection + verification) ──
@@ -201,7 +200,7 @@ function printMonthlyCashBook(monthLabel: string, rows: { date: string; opening:
 
 export default function DailyCashBook() {
   const { data: allEntries = [], isLoading } = useCashBookEntries();
-  const { data: allBills = [] } = useBills();
+  const { data: sourceBills = [] } = useBills();
   const addEntry = useAddCashBookEntry();
   const deleteEntry = useDeleteCashBookEntry();
   const qc = useQueryClient();
@@ -244,6 +243,8 @@ export default function DailyCashBook() {
   // ── Build a chronological ledger for EVERY date that has any activity,
   // so opening/closing carries forward correctly day-to-day and closed
   // days keep their frozen snapshot forever (never overwritten). ──
+  const allBills = useMemo(() => collectionRows(sourceBills as any[]), [sourceBills]);
+
   const dailyMap = useMemo(() => {
     const dates = new Set<string>();
     (allEntries as any[]).forEach((e) => dates.add(e.entry_date));

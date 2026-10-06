@@ -1,3 +1,5 @@
+import { atomicStockAdjustment } from "@/lib/offlineDb";
+import { runSync } from "@/lib/offlineSync";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { offlineFetch, offlineUpdate, offlineInsert } from "@/lib/offlineQuery";
@@ -64,29 +66,8 @@ export function useAdjustStock() {
     }) => {
       const { medicineId, medicineName, changeQty, reason = "manual", note, actorName } = params;
 
-      // current stock cache se nikaal kar naya total calculate karo
-      const cached = await cacheGetAll("medicines");
-      const existing = (cached as any[]).find((m) => m.id === medicineId);
-      const currentQty = Number(existing?.stock_quantity || 0);
-      const newQty = Math.max(0, currentQty + changeQty);
-
-      const updated = await offlineUpdate("medicines", medicineId, {
-        stock_quantity: newQty,
-      });
-
-      // movement log — ✅ ab offline mein bhi queue hoga (skip nahi hoga)
-      try {
-        await offlineInsert("stock_movements", {
-          medicine_id: medicineId,
-          medicine_name: medicineName,
-          change_qty: changeQty,
-          reason,
-          note: note || null,
-          created_by: actorName || localStorage.getItem("userName") || "Unknown",
-        });
-      } catch (err) {
-        cLog.error("supabase", "stock_movements insert fail", err);
-      }
+      const updated = await atomicStockAdjustment(params);
+      void runSync().catch(() => {});
 
       await logAudit({
         action: changeQty >= 0 ? "stock_in" : "stock_out",
@@ -106,25 +87,9 @@ export function useAdjustStock() {
 // ── Bill banate waqt stock automatically ghataane ke liye helper ──
 // (Billing.tsx se call kar sakte hain jab medicine line item add ho)
 export async function deductStockForSale(medicineId: string, medicineName: string, qty: number) {
-  if (!medicineId || !qty) return;
-  try {
-    const cached = await cacheGetAll("medicines");
-    const existing = (cached as any[]).find((m) => m.id === medicineId);
-    if (!existing) return;
-    const newQty = Math.max(0, Number(existing.stock_quantity || 0) - qty);
-    await offlineUpdate("medicines", medicineId, { stock_quantity: newQty });
-
-    // ✅ offline mein bhi queue hoga
-    await offlineInsert("stock_movements", {
-      medicine_id: medicineId,
-      medicine_name: medicineName,
-      change_qty: -qty,
-      reason: "sale",
-      created_by: localStorage.getItem("userName") || "Unknown",
-    });
-  } catch (err) {
-    cLog.error("supabase", "deductStockForSale fail", err);
-  }
+  if (!Number.isFinite(qty) || qty <= 0) throw new Error("Invalid stock quantity");
+  await atomicStockAdjustment({ medicineId, medicineName, changeQty: -qty, reason: "sale", actorName: localStorage.getItem("userName") || "Unknown" });
+  void runSync().catch(() => {});
 }
 
 // ── Movement history (ek medicine ki ya sabki) ──

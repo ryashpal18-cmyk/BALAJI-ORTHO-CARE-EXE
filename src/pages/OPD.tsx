@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/businessDate";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -263,7 +264,7 @@ export default function OPD() {
 
   const getFileName = () => {
     const patient = getSelectedPatient(allPatients, rxForm.patient_id);
-    const date = new Date().toISOString().slice(0, 10);
+    const date = businessDate();
     const name = (patient?.name || "Patient").replace(/\s+/g, "_");
     return `Prescription_${name}_${date}`;
   };

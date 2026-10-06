@@ -1,3 +1,7 @@
+import { useBranchContext } from "@/lib/branchContext";
+import { readBranchTable } from "@/lib/branchData";
+import { businessDayStart, businessDayEnd } from "@/lib/businessDate";
+import { businessDate } from "@/lib/businessDate";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { offlineFetch, offlineFetchScoped, offlineInsert, offlineUpdate, offlineDelete } from "@/lib/offlineQuery";
@@ -14,166 +18,41 @@ const QUERY_OPTS = {
 };
 
 export function useDashboardStats() {
-  const today = new Date().toISOString().split("T")[0];
-  return useQuery({
-    queryKey: ["dashboard-stats"],
-    ...QUERY_OPTS,
+  const { selectedBranchId } = useBranchContext(); const today = businessDate();
+  return useQuery({ queryKey: ["dashboard-stats", selectedBranchId, today], ...QUERY_OPTS,
     queryFn: async () => {
-      const online = await isOnline();
-
-      if (!online) {
-        const [patients, appointments, billing, beds] = await Promise.all([
-          cacheGetAll("patients"),
-          cacheGetAll("appointments"),
-          cacheGetAll("billing"),
-          cacheGetAll("beds"),
-        ]);
-        const pendingBills = billing.filter((b: any) => ["Pending", "Partial"].includes(b.status));
-        const todayBills = billing.filter((b: any) => (b.created_at || "").slice(0, 10) === today);
-        const todayAppointments = appointments.filter((a: any) => a.date === today);
-        const pendingTotal = pendingBills.reduce((sum: number, b: any) => sum + Math.max(Number(b.amount || 0) - Number(b.amount_paid || 0), 0), 0);
-        const todayTotal = todayBills.reduce((sum: number, b: any) => sum + Number(b.amount || 0), 0);
-        return {
-          todayPatients: patients.length,
-          todayAppointments: todayAppointments.length,
-          pendingPayments: pendingTotal,
-          bedsOccupied: beds.filter((b: any) => b.status === "occupied").length,
-          totalBeds: beds.length,
-          todayRevenue: todayTotal,
-        };
-      }
-
-      try {
-        const [patients, appointments, pendingBills, beds, todayBills] = await Promise.all([
-          supabase.from("patients").select("id", { count: "exact", head: true }),
-          supabase.from("appointments").select("id", { count: "exact", head: true }).eq("date", today),
-          supabase.from("billing").select("amount, amount_paid, status").in("status", ["Pending", "Partial"]),
-          supabase.from("beds").select("id, status"),
-          supabase.from("billing").select("amount").gte("created_at", `${today}T00:00:00`).lte("created_at", `${today}T23:59:59`),
-        ]);
-        const pendingTotal = pendingBills.data?.reduce((sum, b) => sum + Math.max(Number(b.amount || 0) - Number((b as any).amount_paid || 0), 0), 0) || 0;
-        const todayTotal = todayBills.data?.reduce((sum, b) => sum + Number(b.amount || 0), 0) || 0;
-        return {
-          todayPatients: patients.count || 0,
-          todayAppointments: appointments.count || 0,
-          pendingPayments: pendingTotal,
-          bedsOccupied: beds.data?.filter(b => b.status === "occupied").length || 0,
-          totalBeds: beds.data?.length || 0,
-          todayRevenue: todayTotal,
-        };
-      } catch {
-        // network blip — recurse into the offline branch's cache-based calc
-        const [patients, appointments, billing, beds] = await Promise.all([
-          cacheGetAll("patients"),
-          cacheGetAll("appointments"),
-          cacheGetAll("billing"),
-          cacheGetAll("beds"),
-        ]);
-        const pendingBills = billing.filter((b: any) => ["Pending", "Partial"].includes(b.status));
-        const todayBills = billing.filter((b: any) => (b.created_at || "").slice(0, 10) === today);
-        const todayAppointments = appointments.filter((a: any) => a.date === today);
-        const pendingTotal = pendingBills.reduce((sum: number, b: any) => sum + Math.max(Number(b.amount || 0) - Number(b.amount_paid || 0), 0), 0);
-        const todayTotal = todayBills.reduce((sum: number, b: any) => sum + Number(b.amount || 0), 0);
-        return {
-          todayPatients: patients.length,
-          todayAppointments: todayAppointments.length,
-          pendingPayments: pendingTotal,
-          bedsOccupied: beds.filter((b: any) => b.status === "occupied").length,
-          totalBeds: beds.length,
-          todayRevenue: todayTotal,
-        };
-      }
-    },
-  });
+      const [patients, appointments, billing, beds] = await Promise.all([
+        readBranchTable("patients", selectedBranchId), readBranchTable("appointments", selectedBranchId),
+        readBranchTable("billing", selectedBranchId), cacheGetAll("beds")]);
+      return { todayPatients: patients.length, todayAppointments: appointments.filter(a => a.date === today).length,
+        pendingPayments: billing.reduce((sum,b) => sum + Math.max(Number(b.amount || 0)-Number(b.discount || 0)-Number(b.amount_paid || 0),0),0),
+        todayRevenue: billing.filter(b => businessDate(b.created_at) === today).reduce((sum,b) => sum+Number(b.amount || 0),0),
+        bedsOccupied: beds.filter(b => b.status === "occupied").length, totalBeds: beds.length };
+    } });
 }
 
 export function useTodayBills() {
-  const today = new Date().toISOString().split("T")[0];
-  return useQuery({
-    queryKey: ["billing", "today"],
-    ...QUERY_OPTS,
-    queryFn: async () => {
-      return offlineFetchScoped(
-        "billing",
-        async () => {
-          const { data, error } = await supabase.from("billing").select("*, patients(name, mobile, address)").gte("created_at", `${today}T00:00:00`).lte("created_at", `${today}T23:59:59`).order("created_at", { ascending: false });
-          if (error) throw error;
-          return data || [];
-        },
-        (cached) => cached.filter((b: any) => (b.created_at || "").slice(0, 10) === today)
-      );
-    },
-  });
+  const { selectedBranchId } = useBranchContext(); const today = businessDate();
+  return useQuery({ queryKey: ["billing", "today", selectedBranchId, today], ...QUERY_OPTS,
+    queryFn: async () => (await readBranchTable("billing", selectedBranchId, "*, patients(name, mobile, address)")).filter(b => businessDate(b.created_at) === today) });
 }
 
 export function usePendingBills() {
-  return useQuery({
-    queryKey: ["billing", "pending"],
-    ...QUERY_OPTS,
-    queryFn: async () => {
-      return offlineFetchScoped(
-        "billing",
-        async () => {
-          const { data, error } = await supabase.from("billing").select("*, patients(name, mobile, address)").in("status", ["Pending", "Partial"]).order("created_at", { ascending: false });
-          if (error) throw error;
-          return data || [];
-        },
-        (cached) => cached.filter((b: any) => ["Pending", "Partial"].includes(b.status))
-      );
-    },
-  });
+  const { selectedBranchId } = useBranchContext();
+  return useQuery({ queryKey: ["billing", "pending", selectedBranchId], ...QUERY_OPTS,
+    queryFn: async () => (await readBranchTable("billing", selectedBranchId, "*, patients(name, mobile, address)")).filter(b => ["Pending", "Partial"].includes(b.status)) });
 }
 
 export function useBills() {
-  return useQuery({
-    queryKey: ["billing", "all"],
-    staleTime: 0,
-    refetchOnMount: true,
-    queryFn: async () => {
-      return offlineFetch("billing", async () => {
-        const { data, error } = await supabase.from("billing").select("*, patients(name, mobile, address)").order("created_at", { ascending: false });
-        if (error) throw error;
-        return data || [];
-      });
-    },
-  });
+  const { selectedBranchId } = useBranchContext();
+  return useQuery({ queryKey: ["billing", "all", selectedBranchId], ...QUERY_OPTS,
+    queryFn: async () => (await readBranchTable("billing", selectedBranchId, "*, patients(name, mobile, address)")).sort((a,b) => (b.created_at || "").localeCompare(a.created_at || "")) });
 }
 
 export function usePatients() {
-  const qc = useQueryClient();
-  return useQuery({
-    queryKey: ["patients"],
-    staleTime: 30000, // ✅ 30 sec — setQueryData ka data turant dikh jaayega
-    refetchOnMount: true,
-    queryFn: async () => {
-      // ✅ Cache-first — turant local se do, network ka kabhi wait nahi
-      // (naye offline patients bhi yahan milenge). Search/list hamesha fast.
-      const cached = await cacheGetAll("patients");
-      const sorted = [...cached].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
-
-      // Online hai to background mein silently fresh data le aao — UI block nahi hoga
-      const online = typeof navigator !== "undefined" ? navigator.onLine : false;
-      if (online) {
-        supabase.from("patients").select("*").order("name").then(({ data, error }) => {
-          if (error || !data || data.length === 0) return;
-          const onlineIds = new Set(data.map((p: any) => p.id));
-          const offlineOnly = cached.filter((p: any) => !onlineIds.has(p.id));
-          const merged = [...data, ...offlineOnly].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
-          cacheReplaceTable("patients", [...data, ...offlineOnly]).then(() => {
-            // ✅ FIX: pehle yahan invalidateQueries call hota tha, jisse queryFn
-            // dobara chalta, jo phir se background fetch karta, jo phir invalidate
-            // karta — ek INFINITE LOOP ban jaata tha (bina ruke Supabase ko call
-            // karte rehna). setQueryData seedha cache update karta hai, queryFn ko
-            // dobara nahi chalata — loop nahi banta, UI phir bhi turant update ho
-            // jaata hai.
-            qc.setQueryData(["patients"], merged);
-          });
-        }).catch((err) => cLog.warn("patients", "Background refresh fail — cache use ho raha hai", err));
-      }
-
-      return sorted;
-    },
-  });
+  const { selectedBranchId } = useBranchContext();
+  return useQuery({ queryKey: ["patients", selectedBranchId], ...QUERY_OPTS,
+    queryFn: async () => (await readBranchTable("patients", selectedBranchId)).sort((a,b) => (a.name || "").localeCompare(b.name || "")) });
 }
 
 export function useUpdateBill() {
@@ -201,23 +80,9 @@ export function useUpdateBill() {
 }
 
 export function useTodayAppointments() {
-  const today = new Date().toISOString().split("T")[0];
-  return useQuery({
-    queryKey: ["appointments", "today"],
-    staleTime: 0,
-    refetchOnMount: true,
-    queryFn: async () => {
-      return offlineFetchScoped(
-        "appointments",
-        async () => {
-          const { data, error } = await supabase.from("appointments").select("*, patients(name, mobile)").eq("date", today).order("time");
-          if (error) throw error;
-          return data || [];
-        },
-        (cached) => cached.filter((a: any) => a.date === today).sort((a: any, b: any) => (a.time || "").localeCompare(b.time || ""))
-      );
-    },
-  });
+  const { selectedBranchId } = useBranchContext(); const today = businessDate();
+  return useQuery({ queryKey: ["appointments", "today", selectedBranchId, today], ...QUERY_OPTS,
+    queryFn: async () => (await readBranchTable("appointments", selectedBranchId, "*, patients(name, mobile)")).filter(a => a.date === today).sort((a,b) => (a.time_slot || "").localeCompare(b.time_slot || "")) });
 }
 
 export function usePrescriptions() {
@@ -264,7 +129,7 @@ export function useReportPayments() {
         },
         (cached) => cached.filter((b: any) => b.status === "Paid")
       );
-      return (rows || []).map((b: any) => ({ amount: Number(b.amount_paid || b.amount || 0), payment_date: b.created_at?.slice(0, 10) }));
+      return (rows || []).map((b: any) => ({ amount: Number(b.amount_paid || b.amount || 0), payment_date: businessDate(b.created_at || "") }));
     },
   });
 }
@@ -403,25 +268,9 @@ export function saveLocalData(type: string, data: any) {
 
 // ─── Restored hooks for existing pages ───
 export function useAppointments() {
-  return useQuery({
-    queryKey: ["appointments"],
-    queryFn: async () => {
-      const rows = await offlineFetch("appointments", async () => {
-        const { data, error } = await supabase
-          .from("appointments")
-          .select("*, patients(name, mobile)")
-          .order("date", { ascending: false })
-          .order("time_slot", { ascending: true });
-        if (error) throw error;
-        return data || [];
-      });
-      return [...rows].sort((a: any, b: any) => {
-        const d = (b.date || "").localeCompare(a.date || "");
-        if (d !== 0) return d;
-        return (a.time_slot || "").localeCompare(b.time_slot || "");
-      });
-    },
-  });
+  const { selectedBranchId } = useBranchContext();
+  return useQuery({ queryKey: ["appointments", selectedBranchId], ...QUERY_OPTS,
+    queryFn: async () => (await readBranchTable("appointments", selectedBranchId, "*, patients(name, mobile)")).sort((a,b) => (b.date || "").localeCompare(a.date || "") || (a.time_slot || "").localeCompare(b.time_slot || "")) });
 }
 
 export function useAddAppointment() {
@@ -491,41 +340,13 @@ export function useAddPatient() {
 }
 
 export function useSearchPatients(search: string) {
-  return useQuery({
-    queryKey: ["patients", "search", search],
+  const { selectedBranchId } = useBranchContext();
+  return useQuery({ queryKey: ["patients", "search", search, selectedBranchId], enabled: search.trim().length > 0,
     queryFn: async () => {
-      if (!search) return [] as any[];
-
-      // ✅ Cache-first — mobile number type karte hi turant local se milta
-      // hai, internet ka kabhi wait nahi karna padta.
-      const cached = await cacheGetAll("patients");
-      const term = search.toLowerCase();
-      const localMatches = cached
-        .filter((p: any) => (p.name || "").toLowerCase().includes(term) || (p.mobile || "").includes(search))
-        .slice(0, 20);
-
-      const online = await isOnline();
-      if (online) {
-        try {
-          const { data, error } = await supabase
-            .from("patients")
-            .select("*")
-            .or(`name.ilike.%${search}%,mobile.ilike.%${search}%`)
-            .limit(20);
-          if (!error && data) {
-            // Online result + koi offline-only naya patient jo abhi tak sync nahi hua
-            const onlineIds = new Set(data.map((p: any) => p.id));
-            const offlineOnly = localMatches.filter((p: any) => !onlineIds.has(p.id));
-            return [...data, ...offlineOnly] as any[];
-          }
-        } catch {
-          // fall through to cache result
-        }
-      }
-      return localMatches;
-    },
-    enabled: search.length > 0,
-  });
+      const rows = await readBranchTable("patients", selectedBranchId);
+      const term = search.toLowerCase().trim();
+      return rows.filter(p => (p.name || "").toLowerCase().includes(term) || (p.mobile || "").includes(term)).slice(0,20);
+    } });
 }
 
 export function useAddPrescription() {

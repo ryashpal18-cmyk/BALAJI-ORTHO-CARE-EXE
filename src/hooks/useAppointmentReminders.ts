@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/businessDate";
 import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -54,7 +55,7 @@ export function useAppointmentReminders() {
     queryFn: async () => {
       const online = await isOnline();
       if (!online || !isNotificationEnabled()) return [];
-      const today = new Date().toISOString().split("T")[0];
+      const today = businessDate();
       const { data, error } = await supabase
         .from("appointments")
         .select("id, date, time_slot, status, patients(name)")

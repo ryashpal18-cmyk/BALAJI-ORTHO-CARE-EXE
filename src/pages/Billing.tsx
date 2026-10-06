@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/businessDate";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -76,10 +77,7 @@ const statusStyle: Record<string, string> = {
   Partial: "bg-info/10 text-info",
 };
 
-const toLocalDateInput = (date: Date) => {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 10);
-};
+const toLocalDateInput = (date: Date) => businessDate(date);
 
 const getMonthStart = (date: Date) =>
   toLocalDateInput(new Date(date.getFullYear(), date.getMonth(), 1));
@@ -687,9 +685,8 @@ const filteredPatients = useMemo(() => {
             (c: any) => c.patient_id === selectedPatient && c.plaster_status === "Active"
           );
           if (!alreadyExists) {
-            const today = new Date().toISOString().split("T")[0];
-            const nextFollowup = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-              .toISOString().split("T")[0];
+            const today = businessDate();
+            const nextFollowup = businessDate(Date.now() + 7 * 24 * 60 * 60 * 1000);
             await addFractureCase.mutateAsync({
               patient_id: selectedPatient,
               patient_type: "fracture",
@@ -900,7 +897,7 @@ const filteredPatients = useMemo(() => {
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Patient Bills");
-    XLSX.writeFile(wb, `Patient_Bills_${new Date().toISOString().split("T")[0]}.xlsx`);
+    XLSX.writeFile(wb, `Patient_Bills_${businessDate()}.xlsx`);
     toast({ title: "Exported!", description: "Excel file download हो गई" });
   };
 

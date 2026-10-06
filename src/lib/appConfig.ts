@@ -16,7 +16,7 @@ export const STORAGE_KEYS = {
 export interface StaffUser {
   id: string;
   username: string;
-  password: string;
+  password?: string;
   displayName: string;
   allowedPages: string[];   // array of route paths e.g. ['/dashboard', '/opd']
   createdAt: string;
@@ -57,7 +57,7 @@ export const getDashModules  = (): DashModules  => {
 export const getAppTheme     = (): AppTheme     => {
   try { return { ...DEFAULT_THEME, ...JSON.parse(localStorage.getItem(STORAGE_KEYS.APP_THEME) || "{}") }; } catch { return DEFAULT_THEME; }
 };
-export const getCurrentRole  = (): "admin"|"staff" => (localStorage.getItem(STORAGE_KEYS.USER_ROLE) as any) || "admin";
+export const getCurrentRole  = (): "admin"|"staff" => (localStorage.getItem(STORAGE_KEYS.USER_ROLE) as any) || "staff";
 export const getCurrentPerms = (): string[]       => {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.USER_PERMS) || "[]"); } catch { return []; }
 };
@@ -69,6 +69,14 @@ export const saveAppTheme    = (t: AppTheme)        => localStorage.setItem(STOR
 
 // ── All pages list ──
 export const ALL_PAGES = [
+  { path: "/due-amount", label: "Due Amount" },
+  { path: "/prescription", label: "Prescription" },
+  { path: "/inventory", label: "Inventory" },
+  { path: "/revenue-dashboard", label: "Revenue Dashboard" },
+  { path: "/insurance-claims", label: "Insurance Claims" },
+  { path: "/booking-requests", label: "Booking Requests" },
+  { path: "/plaster-sync", label: "Plaster Sync" },
+  { path: "/audit-log", label: "Audit Log" },
   { path: "/dashboard",           label: "Dashboard" },
   { path: "/opd",                 label: "OPD" },
   { path: "/daily-cash-book",     label: "Daily Cash Book" },

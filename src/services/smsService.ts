@@ -1,3 +1,4 @@
+import { normalizeIndianMobile } from "@/lib/mobile";
 // ─────────────────────────────────────────────────────────────────────────────
 // SMS Service — Offline-first
 //
@@ -23,8 +24,7 @@ export type SendSmsResult = {
 
 // ── Mobile number normalize karo ─────────────────────────────────────────────
 function normalizeMobile(mobile: string): string {
-  const digits = mobile.replace(/\D/g, "");
-  return digits.startsWith("91") ? digits : `91${digits}`;
+  return normalizeIndianMobile(mobile);
 }
 
 // ── Queue mein daal do — internet aane pe jayega ──────────────────────────────

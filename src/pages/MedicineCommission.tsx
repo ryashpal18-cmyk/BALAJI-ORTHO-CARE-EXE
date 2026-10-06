@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/businessDate";
 import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,10 +24,10 @@ interface Entry {
   invoice_medicine_mapping: { medicine_name: string; rate: number }[];
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => businessDate();
 const monthStart = () => {
   const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  return businessDate(d).slice(0, 7) + "-01";
 };
 
 export default function MedicineCommission() {

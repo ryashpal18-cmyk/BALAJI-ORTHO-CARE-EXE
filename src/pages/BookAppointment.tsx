@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/businessDate";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -76,7 +77,7 @@ export default function BookAppointment() {
         <CardContent className="space-y-3">
           <div><Label>Patient ka Naam *</Label><Input value={form.patient_name} onChange={(e) => setForm({ ...form, patient_name: e.target.value })} /></div>
           <div><Label>Mobile Number *</Label><Input type="tel" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="10 digit number" /></div>
-          <div><Label>Pasandida Date *</Label><Input type="date" value={form.preferred_date} onChange={(e) => setForm({ ...form, preferred_date: e.target.value })} min={new Date().toISOString().split("T")[0]} /></div>
+          <div><Label>Pasandida Date *</Label><Input type="date" value={form.preferred_date} onChange={(e) => setForm({ ...form, preferred_date: e.target.value })} min={businessDate()} /></div>
           <div><Label>Pasandida Time (optional)</Label><Input type="time" value={form.preferred_time} onChange={(e) => setForm({ ...form, preferred_time: e.target.value })} /></div>
           <div><Label>Reason (optional)</Label><Textarea rows={2} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="e.g. Fracture follow-up, Knee pain" /></div>
           {error && <p className="text-sm text-destructive">{error}</p>}

@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/businessDate";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -86,10 +87,7 @@ function printDailyReport(
   win.document.close();
 }
 
-const toLocalDateInput = (date: Date) => {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 10);
-};
+const toLocalDateInput = (date: Date) => businessDate(date);
 
 const getMonthStart = (date: Date) =>
   toLocalDateInput(new Date(date.getFullYear(), date.getMonth(), 1));

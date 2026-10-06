@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/businessDate";
 import { useMemo } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,7 +25,7 @@ function getLast30Days() {
   for (let i = 29; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
-    days.push(d.toISOString().slice(0, 10));
+    days.push(businessDate(d));
   }
   return days;
 }
@@ -35,12 +36,12 @@ export default function RevenueDashboard() {
 
   const stats = useMemo(() => {
     const all = bills || [];
-    const today = new Date().toISOString().slice(0, 10);
-    const thisMonth = new Date().toISOString().slice(0, 7);
+    const today = businessDate();
+    const thisMonth = businessDate().slice(0, 7);
     const days = getLast30Days();
 
     const todayRevenue = all
-      .filter((b: any) => (b.created_at || "").slice(0, 10) === today)
+      .filter((b: any) => businessDate(b.created_at || "") === today)
       .reduce((s: number, b: any) => s + Number(b.amount || 0), 0);
 
     const monthRevenue = all
@@ -56,7 +57,7 @@ export default function RevenueDashboard() {
     // Daily revenue — last 30 days
     const dailyRevenue = days.map((d) => {
       const rev = all
-        .filter((b: any) => (b.created_at || "").slice(0, 10) === d)
+        .filter((b: any) => businessDate(b.created_at || "") === d)
         .reduce((s: number, b: any) => s + Number(b.amount || 0), 0);
       return { date: d.slice(5), revenue: rev };
     });

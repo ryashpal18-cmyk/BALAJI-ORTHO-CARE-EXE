@@ -1,62 +1,47 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-
+import { STORAGE_KEYS } from "@/lib/appConfig";
+function pageFor(path: string) {
+  if (path.startsWith("/patient-profile/")) return "/opd";
+  if (path.startsWith("/recovery-tracker/")) return "/ortho";
+  return path;
+}
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const [loading,       setLoading]       = useState(true);
-  const [authenticated, setAuthenticated] = useState(false);
-
+  const { pathname } = useLocation();
+  const [result, setResult] = useState<{ loading: boolean; profile: any }>({ loading: true, profile: null });
   useEffect(() => {
-    const checkAuth = async () => {
-      // ── Offline check: localStorage mein login hai? ──
-      const isLoggedIn = localStorage.getItem("isLoggedIn");
-      if (isLoggedIn === "true") {
-        setAuthenticated(true);
-        setLoading(false);
-
-        // Background mein Supabase session bhi refresh karo (optional)
-        supabase.auth.getSession().catch(() => {});
-        return;
-      }
-
-      // ── Online check: Supabase session ──
+    let live = true;
+    const check = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          localStorage.setItem("isLoggedIn", "true");
-          setAuthenticated(true);
-        } else {
-          setAuthenticated(false);
+        let profile;
+        const bridge = (window as any).electron;
+        if (bridge?.checkAuth) {
+          let res = await bridge.checkAuth();
+          if (res.principal && navigator.onLine) {
+            try { const { data: { session } } = await supabase.auth.getSession(); if (session) await bridge.establishSession(session.access_token); }
+            catch { /* A transport outage can use the bounded, previously verified desktop session. */ }
+            res = await bridge.checkAuth();
+          }
+          profile = res.valid ? res.principal : null;
         }
-      } catch (_) {
-        setAuthenticated(false);
-      }
-
-      setLoading(false);
+        else { const { data, error } = await supabase.functions.invoke("session-access"); if (error) throw error; profile = data; }
+        if (live) {
+          if (profile) {
+            localStorage.setItem(STORAGE_KEYS.USER_ROLE, profile.role);
+            localStorage.setItem(STORAGE_KEYS.USER_PERMS, JSON.stringify(profile.pages || []));
+          }
+          setResult({ loading: false, profile });
+        }
+      } catch { if (live) setResult({ loading: false, profile: null }); }
     };
-
-    checkAuth();
-
-    // Supabase auth change listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        localStorage.setItem("isLoggedIn", "true");
-        setAuthenticated(true);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
-      </div>
-    );
-  }
-
-  if (!authenticated) return <Navigate to="/login" replace />;
-
+    setResult({ loading: true, profile: null }); void check();
+    const interval = setInterval(check, 60000);
+    return () => { live = false; clearInterval(interval); };
+  }, [pathname]);
+  if (result.loading) return <div className="p-8">Checking access…</div>;
+  if (!result.profile) return <Navigate to="/login" replace />;
+  const allowed = result.profile.role === "admin" || (result.profile.pages || []).includes(pageFor(pathname));
+  if (!allowed) return <div className="p-8"><h2>Access denied</h2><p>इस पेज की अनुमति नहीं है। Admin से संपर्क करें।</p><a href={`#${result.profile.pages?.[0] || "/login"}`}>वापस जाएँ</a></div>;
   return <>{children}</>;
 }

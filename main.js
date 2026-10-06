@@ -14,6 +14,32 @@ const https = require('https');
 const { autoUpdater } = require('electron-updater');
 const logger = require('./logger.cjs');
 const sqliteStore = require('./sqlite-store.cjs');
+const access = require('./access-control.cjs');
+const authPublicConfig = require('./auth-public-config.json');
+// Register guards before any handlers, including raw renderer IPC aliases.
+const originalHandle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, fn) => originalHandle(channel, async (event, ...args) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Untrusted IPC sender");
+  access.authorize(channel, args, sqliteStore);
+  return fn(event, ...args);
+});
+const originalOn = ipcMain.on.bind(ipcMain);
+ipcMain.on = (channel, fn) => originalOn(channel, (event, ...args) => {
+  try { if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Untrusted sender"); access.authorize(channel, args, sqliteStore); return fn(event, ...args); }
+  catch (error) { logger.logWarn('auth', `IPC denied: ${channel}`); }
+});
+ipcMain.handle('auth:establish', async (_event, token) => {
+  if (typeof token !== 'string' || token.length > 8192) throw new Error('Invalid session');
+  const response = await net.fetch(`${authPublicConfig.url}/functions/v1/session-access`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, apikey: authPublicConfig.key },
+  });
+  if (!response.ok) { if ([401,403].includes(response.status)) access.setPrincipal(null); throw new Error('Session verification failed; check function deployment'); }
+  const profile = await response.json();
+  if (!['admin','staff'].includes(profile.role) || !Array.isArray(profile.pages)) throw new Error('Invalid access profile');
+  const verified = { ...profile, expiresAt: Date.now() + 8 * 60 * 60 * 1000 };
+  access.setPrincipal(verified); return { success: true, principal: verified };
+});
+
 
 // Process-level crash/error handlers jitni jaldi ho sake set kar do, taaki
 // startup ke dauran bhi koi exception silently na guzar jaaye.
@@ -226,12 +252,9 @@ function initFiles() {
     supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkY3htZWN6emZuaXBteWJpa3VlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzODc4OTIsImV4cCI6MjA5MDk2Mzg5Mn0.WdbFTPLnUC5U3YFL6Y8dgWETit-aFspgf8RA-A6HaFc',
     autoSync:    true
   });
-  if (!fs.existsSync(AUTH_FILE)) writeJSON(AUTH_FILE, {
-    username:    'Yashpal18',
-    password:    'Aarya@2019',
-    token:       null,
-    tokenExpiry: null
-  });
+  // Legacy auth.json is no longer trusted or exported. Remove plaintext credentials.
+  if (fs.existsSync(AUTH_FILE)) fs.unlinkSync(AUTH_FILE);
+  if (fs.existsSync(AUTH_FILE + '.bak')) fs.unlinkSync(AUTH_FILE + '.bak');
 }
 
 // ─── DAILY SAFETY SNAPSHOT ────────────────────────────────────────────────────
@@ -615,40 +638,12 @@ function openWhatsAppWindow(url) {
 //  IPC — AUTH (Offline + Online)
 // ═══════════════════════════════════════════════════════════════
 
-ipcMain.handle('auth:login', async (_event, { username, password }) => {
-  try {
-    const auth = readJSON(AUTH_FILE, {});
-    if (username === auth.username && password === auth.password) {
-      const token      = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-      const tokenExpiry = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 din
-      writeJSON(AUTH_FILE, { ...auth, token, tokenExpiry });
-      return { success: true, token };
-    }
-    return { success: false, error: 'Invalid username or password' };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('auth:check', async () => {
-  try {
-    const auth = readJSON(AUTH_FILE, {});
-    if (auth.token && auth.tokenExpiry && Date.now() < auth.tokenExpiry)
-      return { success: true, valid: true };
-    return { success: true, valid: false };
-  } catch (_) {
-    return { success: true, valid: false };
-  }
-});
-
+// Compatibility endpoint cannot grant a local administrator session.
+ipcMain.handle('auth:login', async () => ({ success: false, error: 'Use verified cloud sign-in' }));
+ipcMain.handle('auth:check', async () => ({ success: true, valid: !!access.getPrincipal(), principal: access.getPrincipal() }));
 ipcMain.handle('auth:logout', async () => {
-  try {
-    const auth = readJSON(AUTH_FILE, {});
-    writeJSON(AUTH_FILE, { ...auth, token: null, tokenExpiry: null });
-    return { success: true };
-  } catch (_) {
-    return { success: false };
-  }
+  access.setPrincipal(null);
+  return { success: true };
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -880,13 +875,29 @@ ipcMain.handle('backup:writeSnapshot', async (_e, tables) => {
 // ke through main-process SQLite file se baat karta hai. Har handler
 // try/catch mein hai taaki kisi ek query fail hone se poora app na gire.
 
+ipcMain.handle('offline:commitMutation', async (_e, { mutation, row, idField }) => {
+  try { return { success: true, data: sqliteStore.commitMutation(mutation, row, idField) }; }
+  catch (e) { return { success: false, error: e.message }; }
+});
+ipcMain.handle('offline:snapshot', async () => {
+  try { return { success: true, data: sqliteStore.snapshot() }; }
+  catch (e) { return { success: false, error: e.message }; }
+});
+ipcMain.handle('offline:restoreSnapshot', async (_e, dump) => {
+  try { return { success: true, data: sqliteStore.restoreSnapshot(dump) }; }
+  catch (e) { return { success: false, error: e.message }; }
+});
+ipcMain.handle('offline:adjustStock', async (_e, args) => {
+  try { return { success: true, data: sqliteStore.adjustStock(args) }; }
+  catch (e) { return { success: false, error: e.message }; }
+});
 ipcMain.handle('offline:cacheGetAll', async (_e, table) => {
-  try { return { success: true, data: sqliteStore.cacheGetAll(table) }; }
+  try { return { success: true, data: ["patients","billing","appointments"].includes(table) ? access.filterBranches(sqliteStore.cacheGetAll(table)) : sqliteStore.cacheGetAll(table) }; }
   catch (e) { logger.logError('sqlite', `cacheGetAll(${table}) fail: ${e.message}`); return { success: false, data: [] }; }
 });
 
 ipcMain.handle('offline:cacheGetRow', async (_e, { table, rowId }) => {
-  try { return { success: true, data: sqliteStore.cacheGetRow(table, rowId) }; }
+  try { return { success: true, data: ["patients","billing","appointments"].includes(table) ? access.filterBranches([sqliteStore.cacheGetRow(table, rowId)].filter(Boolean))[0] : sqliteStore.cacheGetRow(table, rowId) }; }
   catch (e) { logger.logError('sqlite', `cacheGetRow(${table}) fail: ${e.message}`); return { success: false, data: undefined }; }
 });
 
@@ -896,7 +907,13 @@ ipcMain.handle('offline:cacheSetRows', async (_e, { table, rows, idField }) => {
 });
 
 ipcMain.handle('offline:cacheReplaceTable', async (_e, { table, rows, idField }) => {
-  try { sqliteStore.cacheReplaceTable(table, rows, idField || 'id'); return { success: true }; }
+  try {
+    const principal = access.getPrincipal();
+    const all = sqliteStore.cacheGetAll(table);
+    const preserve = principal?.role === 'staff' && principal.branchIds != null && ['patients','billing','appointments'].includes(table)
+      ? all.filter(row => !principal.branchIds.includes(row.branch_id)) : [];
+    sqliteStore.cacheReplaceTable(table, [...rows, ...preserve], idField || 'id'); return { success: true };
+  }
   catch (e) { logger.logError('sqlite', `cacheReplaceTable(${table}) fail: ${e.message}`); return { success: false }; }
 });
 
@@ -921,7 +938,7 @@ ipcMain.handle('offline:queueAdd', async (_e, mutation) => {
 });
 
 ipcMain.handle('offline:queueGetAll', async () => {
-  try { return { success: true, data: sqliteStore.queueGetAll() }; }
+  try { return { success: true, data: sqliteStore.queueGetAll().filter(m => access.canTable(m.table)) }; }
   catch (e) { logger.logError('sqlite', `queueGetAll fail: ${e.message}`); return { success: false, data: [] }; }
 });
 
@@ -1272,7 +1289,6 @@ ipcMain.handle('app:runDiagnostics', async () => {
     { path: FRACTURE_FILE,  name: 'fractures.json' },
     { path: PENDING_FILE,   name: 'pending_sync.json' },
     { path: SETTINGS_FILE,  name: 'settings.json'  },
-    { path: AUTH_FILE,      name: 'auth.json'      },
   ];
 
   for (const f of dataFiles) {

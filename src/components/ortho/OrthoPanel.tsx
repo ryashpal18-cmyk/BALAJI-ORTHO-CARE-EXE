@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/businessDate";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,11 +21,11 @@ import { sendSMS } from "@/services/smsService";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => businessDate();
 const tomorrowStr = () => {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+  return businessDate(d);
 };
 
 function fmtDate(d?: string | null) {
@@ -464,7 +465,7 @@ export function OrthoPanel() {
     for (let i = -3; i < 14; i++) {
       const d = new Date();
       d.setDate(d.getDate() + i);
-      const ds = d.toISOString().slice(0, 10);
+      const ds = businessDate(d);
       const items = (followups || []).filter((c: any) => c.next_followup_date === ds);
       days.push({ date: ds, count: items.length, items });
     }

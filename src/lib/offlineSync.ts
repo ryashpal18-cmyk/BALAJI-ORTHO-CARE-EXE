@@ -1,3 +1,4 @@
+import { fetchCompleteTable, OPERATIONAL_TABLES } from "./completeFetch";
 // ─────────────────────────────────────────────────────────────────────────
 // Network status + background sync engine
 // ─────────────────────────────────────────────────────────────────────────
@@ -26,12 +27,10 @@ export async function isOnline(): Promise<boolean> {
   try {
     if (window.electron?.isOnline) {
       const res = await window.electron.isOnline();
-      lastKnownOnline = !!res?.online;
-      return lastKnownOnline;
+      return !!res?.online;
     }
   } catch {}
-  lastKnownOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
-  return lastKnownOnline;
+  return typeof navigator !== "undefined" ? navigator.onLine : true;
 }
 
 export function isOnlineSync(): boolean {
@@ -57,8 +56,8 @@ if (typeof window !== "undefined") {
     emitNetworkChange(really);
     if (really) {
       cLog.info("sync", "Internet aa gayi — sync + data download shuru");
-      runSync();
-      downloadAllDataToCache(); // ✅ Internet aate hi fresh data download karo
+      void runSync().catch(error => cLog.warn("sync", "Sync failed", error));
+      void downloadAllDataToCache(); // ✅ Internet aate hi fresh data download karo
     }
   });
   window.addEventListener("offline", () => {
@@ -76,208 +75,20 @@ if (typeof window !== "undefined") {
 let downloadInProgress = false;
 
 export async function downloadAllDataToCache(): Promise<void> {
-  if (downloadInProgress) return;
-  const online = typeof navigator !== "undefined" ? navigator.onLine : false;
-  if (!online) return;
-
+  if (downloadInProgress || !(await isOnline())) return;
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return; // Never interpret anonymous/RLS-empty results as an authoritative wipe.
   downloadInProgress = true;
-  cLog.info("sync", "Poora data PC mein download ho raha hai...");
-
   try {
-    // 1. Patients — sabse pehle (baaki sab iske upar depend karte hain)
-    const { data: patients } = await supabase
-      .from("patients")
-      .select("*")
-      .order("name");
-    if (patients && patients.length > 0) {
-      await cacheReplaceTable("patients", patients);
-      cLog.info("sync", `${patients.length} patients PC mein save ho gaye`);
-      // 🔒 SQLite mein naya data aa gaya — ab React Query ko batao ki
-      // "patients" wale saare cached query results (usePatients, aur
-      // useSearchPatients ke ["patients","search",...] keys, kyunki
-      // invalidate prefix-match karta hai) purane ho chuke hain. Isse
-      // OPD/Ortho search box agar same text pe already result dikha raha
-      // tha, wo turant refresh ho jaata hai — retype/remount/window-focus
-      // ka wait nahi karna padta.
-      queryClient.invalidateQueries({ queryKey: ["patients"] });
+    for (const table of OPERATIONAL_TABLES) {
+      try {
+        const select = ["billing", "appointments", "prescriptions", "physiotherapy_sessions", "xray_reports", "fracture_cases", "insurance_claims", "beds"].includes(table) ? "*, patients(*)" : "*";
+        const rows = await fetchCompleteTable(table, select);
+        await cacheReplaceTable(table, rows);
+      } catch (error) { cLog.warn("sync", `${table}: complete refresh failed; existing cache preserved`, error); }
     }
-
-    // 2. Billing — patient naam ke saath (joined)
-    const { data: billing } = await supabase
-      .from("billing")
-      .select("*, patients(name, mobile, address)")
-      .order("created_at", { ascending: false });
-    if (billing && billing.length > 0) {
-      await cacheReplaceTable("billing", billing);
-      cLog.info("sync", `${billing.length} bills PC mein save ho gaye`);
-    }
-
-    // 3. Appointments
-    const { data: appointments } = await supabase
-      .from("appointments")
-      .select("*, patients(name, mobile)")
-      .order("date", { ascending: false });
-    if (appointments && appointments.length > 0) {
-      await cacheReplaceTable("appointments", appointments);
-      cLog.info("sync", `${appointments.length} appointments PC mein save ho gaye`);
-    }
-
-    // 4. Prescriptions
-    const { data: prescriptions } = await supabase
-      .from("prescriptions")
-      .select("*, patients(name)")
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (prescriptions && prescriptions.length > 0) {
-      await cacheReplaceTable("prescriptions", prescriptions);
-      cLog.info("sync", `${prescriptions.length} prescriptions PC mein save ho gaye`);
-    }
-
-    // 5. Physiotherapy sessions
-    const { data: physio } = await supabase
-      .from("physiotherapy_sessions")
-      .select("*, patients(name)")
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (physio && physio.length > 0) {
-      await cacheReplaceTable("physiotherapy_sessions", physio);
-      cLog.info("sync", `${physio.length} physio sessions PC mein save ho gaye`);
-    }
-
-    // 6. Beds
-    const { data: beds } = await supabase
-      .from("beds")
-      .select("*, patients(name)")
-      .order("bed_number", { ascending: true });
-    if (beds && beds.length > 0) {
-      await cacheReplaceTable("beds", beds);
-      cLog.info("sync", `${beds.length} beds PC mein save ho gaye`);
-    }
-
-    // 7. ✅ Reports (X-Ray reports) — pehle missing tha, offline mein blank dikhta tha
-    const { data: reports } = await supabase
-      .from("xray_reports")
-      .select("*, patients(name, mobile)")
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (reports && reports.length > 0) {
-      await cacheReplaceTable("xray_reports", reports);
-      cLog.info("sync", `${reports.length} X-ray reports PC mein save ho gaye`);
-    }
-
-    // 8. ✅ Fracture cases — Ortho page offline ke liye
-    const { data: fractureCases } = await supabase
-      .from("fracture_cases")
-      .select("*, patients(name, mobile, age, gender)")
-      .order("created_at", { ascending: false })
-      .limit(300);
-    if (fractureCases && fractureCases.length > 0) {
-      await cacheReplaceTable("fracture_cases", fractureCases);
-      cLog.info("sync", `${fractureCases.length} fracture cases PC mein save ho gaye`);
-    }
-
-    // 9. ✅ Fracture X-rays — Ortho X-ray viewer offline ke liye
-    const { data: fractureXrays } = await supabase
-      .from("fracture_xrays" as any)
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (fractureXrays && fractureXrays.length > 0) {
-      await cacheReplaceTable("fracture_xrays", fractureXrays);
-      cLog.info("sync", `${fractureXrays.length} fracture X-rays PC mein save ho gaye`);
-    }
-
-    // 10. ✅ Hospitals — referral list offline ke liye
-    const { data: hospitals } = await supabase
-      .from("hospitals")
-      .select("*")
-      .order("name");
-    if (hospitals && hospitals.length > 0) {
-      await cacheReplaceTable("hospitals", hospitals);
-      cLog.info("sync", `${hospitals.length} hospitals PC mein save ho gaye`);
-    }
-
-    // 11. ✅ Stock movements — Inventory page offline ke liye
-    const { data: stockMoves } = await supabase
-      .from("stock_movements" as any)
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (stockMoves && stockMoves.length > 0) {
-      await cacheReplaceTable("stock_movements", stockMoves);
-      cLog.info("sync", `${stockMoves.length} stock movements PC mein save ho gaye`);
-    }
-
-    // 12. ✅ Audit logs — AuditLog page offline ke liye
-    const { data: auditLogs } = await supabase
-      .from("audit_logs" as any)
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (auditLogs && auditLogs.length > 0) {
-      await cacheReplaceTable("audit_logs", auditLogs);
-      cLog.info("sync", `${auditLogs.length} audit logs PC mein save ho gaye`);
-    }
-
-    // 13. ✅ Insurance claims — InsuranceClaims page offline ke liye
-    const { data: insuranceClaims } = await supabase
-      .from("insurance_claims" as any)
-      .select("*, patients(name, mobile)")
-      .order("created_at", { ascending: false })
-      .limit(300);
-    if (insuranceClaims && insuranceClaims.length > 0) {
-      await cacheReplaceTable("insurance_claims", insuranceClaims);
-      cLog.info("sync", `${insuranceClaims.length} insurance claims PC mein save ho gaye`);
-    }
-
-    // 14. ✅ Branches — Branches page offline ke liye
-    const { data: branches } = await supabase
-      .from("branches" as any)
-      .select("*")
-      .order("name");
-    if (branches && branches.length > 0) {
-      await cacheReplaceTable("branches", branches);
-      cLog.info("sync", `${branches.length} branches PC mein save ho gaye`);
-    }
-
-    // 15. ✅ Booking requests — BookingRequests page offline ke liye
-    const { data: bookingRequests } = await supabase
-      .from("booking_requests" as any)
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(300);
-    if (bookingRequests && bookingRequests.length > 0) {
-      await cacheReplaceTable("booking_requests", bookingRequests);
-      cLog.info("sync", `${bookingRequests.length} booking requests PC mein save ho gaye`);
-    }
-
-    // 16. ✅ Medicine entries + mapping — Patient Medicine / commission page offline ke liye
-    const { data: medicineEntries } = await supabase
-      .from("medicine_entries" as any)
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(1000);
-    if (medicineEntries && medicineEntries.length > 0) {
-      await cacheReplaceTable("medicine_entries", medicineEntries);
-      cLog.info("sync", `${medicineEntries.length} medicine entries PC mein save ho gaye`);
-    }
-
-    const { data: invoiceMedicineMapping } = await supabase
-      .from("invoice_medicine_mapping" as any)
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(2000);
-    if (invoiceMedicineMapping && invoiceMedicineMapping.length > 0) {
-      await cacheReplaceTable("invoice_medicine_mapping", invoiceMedicineMapping);
-      cLog.info("sync", `${invoiceMedicineMapping.length} medicine mappings PC mein save ho gaye`);
-    }
-
-    cLog.info("sync", "✅ Saara data PC mein save ho gaya — ab offline bhi kaam karega");
-  } catch (err) {
-    cLog.error("sync", "Data download mein error aaya", err);
-  } finally {
-    downloadInProgress = false;
-  }
+    void queryClient.invalidateQueries();
+  } finally { downloadInProgress = false; }
 }
 
 // ─── Sync engine ───
@@ -340,6 +151,16 @@ function stripEmbeddedRelations(payload: Record<string, any>) {
 
 async function applyMutation(m: QueuedMutation): Promise<void> {
   const table = m.table as any;
+  const latestQueue = await queueGetAll();
+  const parents = Object.entries(m.payload || {}).filter(([key, value]) =>
+    (key.endsWith("_id") || key === "caseId" || key === "patientId") && typeof value === "string" && value.startsWith("local_"));
+  if (parents.some(([, value]) => latestQueue.some(q => q.op === "insert" && q.tempId === value && q.id !== m.id)))
+    throw new Error("PENDING_PARENT_INSERT");
+  if (m.rowId?.startsWith("local_")) {
+    if (latestQueue.some(q => q.table === table && q.op === "insert" && q.tempId === m.rowId)) throw new Error("PENDING_PARENT_INSERT");
+    m = { ...m, rowId: m.rowId.slice(6) };
+  }
+
 
   if (m.op === "insert") {
     let payload = { ...m.payload };
@@ -359,7 +180,10 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     const { data, error } = await supabase.from(table).upsert(payload, { onConflict: "id" }).select().single();
     if (error) { console.error(`Insert failed — table: ${table}`); throw error; }
     if (m.tempId && data) {
-      await cacheReplaceRowKey(table, m.tempId, data, "id");
+      const remaining = (await queueGetAll()).filter(q => q.id !== m.id && q.table === table && (q.rowId === m.tempId || q.rowId === (data as any).id));
+      const local = (await cacheGetAll(table)).find(r => r.id === m.tempId);
+      if (remaining.some(q => q.op === "delete")) { await cacheDeleteRow(table, m.tempId); await cacheDeleteRow(table, (data as any).id); }
+      else await cacheReplaceRowKey(table, m.tempId, remaining.length && local ? { ...(data as any), ...local, id: (data as any).id, _pendingSync: true } : data, "id");
       // ✅ Isi row par pehle se pending koi update/delete mutation ho to
       // uska rowId bhi purane temp id se naye asli id par shift kar do —
       // warna wo mutation hamesha "PENDING_PARENT_INSERT" bol ke atka rahega.
@@ -376,7 +200,7 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     updatePayload = stripEmbeddedRelations(updatePayload);
     delete updatePayload._pendingSync;
     delete updatePayload._localOnly;
-    const { error } = await supabase.from(table).update(updatePayload).eq("id", m.rowId);
+    const { data: serverRow, error } = await supabase.from(table).update(updatePayload).eq("id", m.rowId).select().single();
     if (error) { console.error(`Update failed — table: ${table}`); throw error; }
     // 🚨 FIX: Update sync ho jaane ke baad local cache row abhi bhi
     // "_pendingSync: true" flagged reh jaata tha — isse wo row hamesha ke
@@ -384,8 +208,9 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     // aur kabhi bhi fresh nahi hota. Ab sync confirm hote hi flag hata dete
     // hain, taaki row wapas normal (non-pending) ban jaaye.
     const cachedRow = (await cacheGetAll(table)).find((r: any) => r.id === m.rowId);
-    if (cachedRow && cachedRow._pendingSync) {
-      const cleaned = { ...cachedRow };
+    const later = (await queueGetAll()).some(q => q.id !== m.id && q.table === table && (q.rowId === m.rowId || q.rowId === `local_${m.rowId}`));
+    if (!later && cachedRow && cachedRow._pendingSync) {
+      const cleaned = { ...cachedRow, ...(serverRow as any) };
       delete cleaned._pendingSync;
       await cacheUpsertRow(table, cleaned, "id");
     }
@@ -395,7 +220,7 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
 
   if (m.op === "delete") {
     if (!m.rowId) throw new Error("delete mutation missing rowId");
-    if (m.rowId.startsWith("local_")) { await cacheDeleteRow(table, m.rowId); return; }
+
     const { error } = await supabase.from(table).delete().eq("id", m.rowId);
     if (error) { console.error(`Delete failed — table: ${table}`); throw error; }
     return;
@@ -444,25 +269,43 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     return;
   }
 
+  if (m.op === "stock_adjust") {
+    const payload = stripLocalPrefixes(m.payload);
+    const id = (m.tempId || payload.id).replace(/^local_/, "");
+    const { data, error } = await supabase.rpc("adjust_stock_atomic" as any, {
+      p_id: id, p_medicine: payload.medicine_id, p_qty: payload.change_qty,
+      p_reason: payload.reason, p_note: payload.note, p_actor: payload.created_by,
+    } as any);
+    if (error) throw error;
+    await cacheReplaceRowKey("stock_movements", m.tempId!, { ...payload, id, _pendingSync: false });
+    const other = (await queueGetAll()).some(q => q.id !== m.id && q.op === "stock_adjust" && q.payload?.medicine_id === m.payload.medicine_id);
+    if (!other && data) await cacheUpsertRow("medicines", data, "id");
+    return;
+  }
   if (m.op === "xray_upload") {
-    const { caseId, patientId, fileName, fileBase64, mimeType } = m.payload;
-    const byteChars = atob(fileBase64);
-    const byteNumbers = new Array(byteChars.length);
-    for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
-    const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType || "image/jpeg" });
-    const ext = (fileName || "").split(".").pop() || "jpg";
-    const path = `${patientId}/${caseId}/${Date.now()}.${ext}`;
-    const { error: upErr } = await supabase.storage.from("xray-files").upload(path, blob, { upsert: false });
-    if (upErr) { console.error(`X-ray upload fail`); throw upErr; }
-    const { data: signed } = await supabase.storage.from("xray-files").createSignedUrl(path, 60 * 60 * 24 * 365);
-    const file_url = signed?.signedUrl || path;
-    const { error } = await supabase.from("fracture_xrays" as any).insert({ fracture_case_id: caseId, patient_id: patientId, file_url } as any);
-    if (error) { console.error(`X-ray DB insert fail`); throw error; }
+    const { fileName, fileBase64, mimeType } = m.payload;
+    const caseId = m.payload.caseId.replace(/^local_/, "");
+    const patientId = m.payload.patientId.replace(/^local_/, "");
+    let uploadId = m.payload.uploadId;
+    if (!uploadId) { uploadId = crypto.randomUUID(); await queueUpdate(m.id!, { payload: { ...m.payload, uploadId } }); }
+    const bytes = Uint8Array.from(atob(fileBase64), c => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: mimeType || "image/jpeg" });
+    const ext = (fileName || "jpg").split(".").pop().replace(/[^a-zA-Z0-9]/g, "") || "jpg";
+    const path = `${patientId}/${caseId}/${uploadId}.${ext}`;
+    const { error: upErr } = await supabase.storage.from("xray-files").upload(path, blob, { upsert: true });
+    if (upErr) throw upErr;
+    const { data: signed, error: signErr } = await supabase.storage.from("xray-files").createSignedUrl(path, 60 * 60 * 24 * 365);
+    if (signErr) throw signErr;
+    const row = { id: uploadId, fracture_case_id: caseId, patient_id: patientId, file_url: signed!.signedUrl };
+    const { error } = await supabase.from("fracture_xrays" as any).upsert(row, { onConflict: "id" });
+    if (error) throw error;
+    await cacheUpsertRow("fracture_xrays", row);
     return;
   }
 }
 
 export async function runSync(): Promise<{ synced: number; pending: number }> {
+  if ((window as any).electron?.checkAuth && !(await (window as any).electron.checkAuth()).valid) return { synced: 0, pending: 0 };
   if (syncing) return { synced: 0, pending: (await queueGetAll()).length };
 
   const online = typeof navigator !== "undefined" ? navigator.onLine : true;
@@ -479,7 +322,9 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
 
     if (queue.length > 0) console.info(`Sync shuru — ${queue.length} items pending`);
 
-    for (const m of queue) {
+    for (const snapshotItem of queue) {
+      const m = (await queueGetAll()).find(q => q.id === snapshotItem.id);
+      if (!m) continue;
       // 🚨 FIX: MAX_RETRIES constant define tha lekin kabhi enforce nahi hota
       // tha — ek permanently-failing mutation (jaise invalid mobile pe SMS,
       // ya deleted parent row) har 30 second mein dobara try hota rehta,
@@ -553,6 +398,7 @@ export function startAutoSync() {
 
   // ── Har 30 second mein sync check ────────────────────────────────────────
   setInterval(async () => {
+    if ((window as any).electron?.checkAuth && !(await (window as any).electron.checkAuth()).valid) return;
     const online = await isOnline();
     const wasOffline = !lastKnownOnline;
 
@@ -567,7 +413,7 @@ export function startAutoSync() {
     }
 
     // Online hai to har 30 sec mein pending queue sync karo
-    if (online) runSync();
+    if (online) void runSync().catch(error => cLog.warn("sync", "Sync failed", error));
   }, 30000);
 }
 

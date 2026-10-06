@@ -1,3 +1,6 @@
+import { readBranchTable } from "@/lib/branchData";
+import { useBranchContext } from "@/lib/branchContext";
+import { offlineInsert } from "@/lib/offlineQuery";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -31,6 +34,7 @@ const DOCTOR_QUALIFICATION = "M.S. Orthopaedics";
 
 export default function Prescription() {
   const navigate = useNavigate();
+  const { selectedBranchId } = useBranchContext();
   const [searchParams] = useSearchParams();
   const presetPatientId = searchParams.get("patientId");
 
@@ -48,39 +52,33 @@ export default function Prescription() {
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
 
-  // Agar patientId query param se aaya hai (PatientProfile se), seedha load karo
   useEffect(() => {
-    if (!presetPatientId) return;
-    (async () => {
-      const { data } = await supabase
-        .from("patients")
-        .select("id, name, mobile, age, gender")
-        .eq("id", presetPatientId)
-        .single();
-      if (data) setPatient(data as Patient);
-    })();
-  }, [presetPatientId]);
+    let active = true;
+    setPatient(null); setSavedId(null);
+    if (presetPatientId) void readBranchTable("patients", selectedBranchId).then(rows => {
+      if (active) setPatient(rows.find(p => p.id === presetPatientId) || null);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [presetPatientId, selectedBranchId]);
 
   useEffect(() => {
-    if (query.trim().length < 2) {
-      setResults([]);
-      setShowDrop(false);
-      return;
-    }
+    let active = true;
+    if (query.trim().length < 2) { setResults([]); setShowDrop(false); return; }
     const timer = setTimeout(async () => {
-      const { data } = await supabase
-        .from("patients")
-        .select("id, name, mobile, age, gender")
-        .ilike("name", `%${query}%`)
-        .limit(8);
-      setResults((data as Patient[]) || []);
-      setShowDrop(true);
+      try {
+        const rows = await readBranchTable("patients", selectedBranchId);
+        if (active) {
+          setResults(rows.filter(p => (p.name || "").toLowerCase().includes(query.trim().toLowerCase())).slice(0, 8));
+          setShowDrop(true);
+        }
+      } catch { if (active) setResults([]); }
     }, 300);
-    return () => clearTimeout(timer);
-  }, [query]);
+    return () => { active = false; clearTimeout(timer); };
+  }, [query, selectedBranchId]);
 
   const selectPatient = (p: Patient) => {
     setPatient(p);
+    setSavedId(null);
     setQuery("");
     setShowDrop(false);
   };
@@ -103,25 +101,18 @@ export default function Prescription() {
       return;
     }
     setSaving(true);
-    const { data, error } = await supabase
-      .from("prescriptions")
-      .insert({
-        patient_id: patient.id,
-        diagnosis: diagnosis.trim() || null,
-        medicines: medicinesToText() || null,
-        advice: advice.trim() || null,
+    try {
+      const data = await offlineInsert("prescriptions", {
+        patient_id: patient.id, diagnosis: diagnosis.trim() || null,
+        medicines: medicinesToText() || null, advice: advice.trim() || null,
         followup_date: followupDate || null,
-      })
-      .select()
-      .single();
+      });
+      toast({ title: "Prescription locally saved; sync pending" });
+      setSavedId(data.id);
+    } catch (error: any) {
+      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+    } finally { setSaving(false); }
 
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "✅ Prescription save ho gaya!" });
-      setSavedId(data?.id || null);
-    }
-    setSaving(false);
   };
 
   const handlePrint = () => window.print();

@@ -1,3 +1,6 @@
+import { fetchCompleteTable, OPERATIONAL_TABLES } from "./completeFetch";
+import { getLocalSnapshot, restoreLocalSnapshot } from "./offlineDb";
+import { businessDate } from "@/lib/businessDate";
 // ─────────────────────────────────────────────────────────────────────────
 // Data Backup system
 //
@@ -17,25 +20,7 @@ import { cacheGetAll } from "@/lib/offlineDb";
 import * as XLSX from "xlsx";
 
 // Tables jo backup mein shamil hoti hain — clinic ka pura operational data.
-const BACKUP_TABLES = [
-  "patients",
-  "appointments",
-  "billing",
-  "payments",
-  "beds",
-  "prescriptions",
-  "physiotherapy_sessions",
-  "fracture_cases",
-  "fracture_xrays",
-  "hospitals",
-  "medical_history",
-  "medicines",
-  "medicine_entries",
-  "invoice_medicine_mapping",
-  "xray_reports",
-  "report_payments",
-  "sms_logs",
-] as const;
+const BACKUP_TABLES = OPERATIONAL_TABLES;
 
 export const BACKUP_STORAGE_KEYS = {
   LAST_BACKUP_AT: "bocc_last_backup_at",
@@ -61,18 +46,36 @@ export function getLastBackupAt(): string | null {
   return localStorage.getItem(BACKUP_STORAGE_KEYS.LAST_BACKUP_AT);
 }
 
-async function fetchTable(table: string): Promise<any[]> {
-  const online = await isOnline();
-  if (online) {
-    try {
-      const { data, error } = await supabase.from(table as any).select("*");
-      if (error) throw error;
-      return (data || []) as any[];
-    } catch {
-      // network blip — fall back to whatever is cached locally
+/** Overlay pending local changes/deletes onto a complete server export. */
+export function mergeBackupTable(table: string, serverRows: any[], local: any, serverComplete = false) {
+  const byId = new Map(serverRows.map(row => [row.id, row]));
+  for (const row of local.cache[table] || []) {
+    if ((!serverComplete && !byId.has(row.id)) || row._pendingSync) {
+      if (row._pendingSync && String(row.id).startsWith("local_")) byId.delete(row.id.slice(6));
+      byId.set(row.id, row);
     }
   }
-  return cacheGetAll(table);
+  for (const mutation of local.queue || []) {
+    if (mutation.table !== table) continue;
+    if (mutation.op === "delete") { byId.delete(mutation.rowId); byId.delete(mutation.rowId?.replace(/^local_/, "")); }
+  }
+  return [...byId.values()];
+}
+function clinicalLocalStorage() {
+  const notes: Record<string, string> = {};
+  for (let i=0; i<localStorage.length; i++) {
+    const key = localStorage.key(i)!;
+    if (key.startsWith("ortho_visits_") || ["bocc_service_catalog","bocc_selected_branch","bocc_dash_modules","bocc_app_theme"].includes(key)) notes[key] = localStorage.getItem(key)!;
+  }
+  return notes;
+}
+export async function restoreBackup(json: string) {
+  const backup = JSON.parse(json);
+  if (backup.formatVersion !== 2 || !backup.tables || !Array.isArray(backup.localSnapshot?.queue)) throw new Error("Version 2 JSON backup required");
+  await restoreLocalSnapshot({ cache: backup.tables, queue: backup.localSnapshot.queue, meta: backup.localSnapshot.meta || [] });
+  for (const [key,value] of Object.entries(backup.localStorage || {})) {
+    if (key.startsWith("ortho_visits_") || ["bocc_service_catalog","bocc_selected_branch","bocc_dash_modules","bocc_app_theme"].includes(key)) localStorage.setItem(key, String(value));
+  }
 }
 
 export type BackupResult = {
@@ -82,6 +85,7 @@ export type BackupResult = {
   xlsxPath?: string;
   recordCounts: Record<string, number>;
   error?: string;
+  warnings?: string[];
 };
 
 /**
@@ -93,10 +97,28 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
   const recordCounts: Record<string, number> = {};
   const backupData: Record<string, any[]> = {};
 
+  const remote: Record<string, any[]> = {};
+  const coverage: Record<string, string> = {};
+  const warnings: string[] = [];
+  const { data: { session } } = await supabase.auth.getSession();
+  const online = !!session && await isOnline();
   for (const table of BACKUP_TABLES) {
-    const rows = await fetchTable(table);
-    backupData[table] = rows;
-    recordCounts[table] = rows.length;
+    try {
+      if (!online) throw new Error("offline");
+      remote[table] = await fetchCompleteTable(table);
+      coverage[table] = "complete-server-plus-local";
+    } catch (error: any) {
+      remote[table] = [];
+      coverage[table] = "local-cache-only";
+      warnings.push(`${table}: only local cache included (${error?.message || "fetch failed"})`);
+    }
+  }
+  // One main-process SQLite transaction captures every table and the queue consistently.
+  const localSnapshot = await getLocalSnapshot();
+  const localStorageSnapshot = clinicalLocalStorage();
+  for (const table of new Set([...BACKUP_TABLES, ...Object.keys(localSnapshot.cache)])) {
+    const rows = mergeBackupTable(table, remote[table] || [], localSnapshot, coverage[table] === "complete-server-plus-local");
+    backupData[table] = rows; recordCounts[table] = rows.length;
   }
 
   const now = new Date();
@@ -104,6 +126,9 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
   const baseName = `balaji_ortho_backup_${label}_${stamp}`;
 
   const fullJson = {
+    formatVersion: 2,
+    coverage, warnings, localSnapshot, localStorage: localStorageSnapshot,
+    attachments: "URLs and queued upload bytes only; separately copy existing image/storage files",
     generatedAt: now.toISOString(),
     label,
     clinic: "Balaji Ortho Care Center",
@@ -113,7 +138,7 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
 
   // Excel: ek sheet per table, taaki Dr Excel mein khol kar seedha dekh sakein.
   const wb = XLSX.utils.book_new();
-  for (const table of BACKUP_TABLES) {
+  for (const table of Object.keys(backupData)) {
     const rows = backupData[table];
     const sheet = rows.length
       ? XLSX.utils.json_to_sheet(rows)
@@ -134,7 +159,7 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
       }
 
       localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_BACKUP_AT, now.toISOString());
-      return { ok: true, mode: "electron", jsonPath: jsonRes.path, xlsxPath: xlsxRes.path, recordCounts };
+      return { ok: true, mode: "electron", jsonPath: jsonRes.path, xlsxPath: xlsxRes.path, recordCounts, warnings };
     }
   } catch (e: any) {
     return { ok: false, mode: "electron", recordCounts, error: e?.message || String(e) };
@@ -145,7 +170,7 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
     downloadBlob(new Blob([jsonString], { type: "application/json" }), `${baseName}.json`);
     downloadBlob(new Blob([xlsxArrayBuffer], { type: "application/octet-stream" }), `${baseName}.xlsx`);
     localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_BACKUP_AT, now.toISOString());
-    return { ok: true, mode: "browser", recordCounts };
+    return { ok: true, mode: "browser", recordCounts, warnings };
   } catch (e: any) {
     return { ok: false, mode: "browser", recordCounts, error: e?.message || String(e) };
   }
@@ -198,7 +223,7 @@ export async function getBackupFolderPath(): Promise<string | null> {
 let schedulerStarted = false;
 
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  return businessDate();
 }
 
 /**
@@ -212,6 +237,8 @@ export function startAutoBackupScheduler() {
   schedulerStarted = true;
 
   const checkAndRun = async () => {
+    const auth = await (window as any).electron?.checkAuth?.();
+    if (auth && (!auth.valid || auth.principal?.role !== "admin")) return;
     const online = await isOnline();
     if (!online) return; // backup ke liye fresh data chahiye; offline mein cache se ho sakta hai par safe side daily backup ke liye internet ka wait karte hain
 
@@ -236,7 +263,7 @@ export function startAutoBackupScheduler() {
   };
 
   // App start hone ke kuch der baad pehli check (taaki login/load slow na ho).
-  setTimeout(checkAndRun, 15000);
+  setTimeout(() => { void checkAndRun().catch(console.error); }, 15000);
   // Phir har ghante check karte rehna — Dr jab bhi app khula chhode, sahi din par backup ho jayega.
-  setInterval(checkAndRun, 60 * 60 * 1000);
+  setInterval(() => { void checkAndRun().catch(console.error); }, 60 * 60 * 1000);
 }

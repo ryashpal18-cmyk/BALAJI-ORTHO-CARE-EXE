@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/businessDate";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { offlineFetch, offlineInsert, offlineUpdate } from "@/lib/offlineQuery";
@@ -127,8 +128,8 @@ export function useFollowupsAround() {
       start.setDate(start.getDate() - 30);
       const end = new Date(today);
       end.setDate(end.getDate() + 30);
-      const startStr = start.toISOString().slice(0, 10);
-      const endStr = end.toISOString().slice(0, 10);
+      const startStr = businessDate(start);
+      const endStr = businessDate(end);
 
       const online = await isOnline();
       if (online) {
@@ -238,38 +239,12 @@ export type XrayUploadResult = {
  * isi file ko automatically Supabase par upload kar dega.
  */
 export async function uploadFractureXray(caseId: string, patientId: string, file: File): Promise<XrayUploadResult> {
-  const online = await isOnline();
-
-  if (online) {
-    try {
-      const ext = file.name.split(".").pop() || "jpg";
-      const path = `${patientId}/${caseId}/${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage
-        .from("xray-files")
-        .upload(path, file, { upsert: false });
-      if (upErr) throw upErr;
-      const { data: signed } = await supabase.storage
-        .from("xray-files")
-        .createSignedUrl(path, 60 * 60 * 24 * 365);
-      const file_url = signed?.signedUrl || path;
-      const { error } = await supabase.from("fracture_xrays" as any).insert({
-        fracture_case_id: caseId,
-        patient_id: patientId,
-        file_url,
-      } as any);
-      if (error) throw error;
-      return { ok: true, queued: false, file_url };
-    } catch {
-      // Network blip mid-upload — fall through to offline queue below so the
-      // doctor's work isn't lost; it'll retry automatically.
-    }
-  }
-
   const fileBase64 = await fileToBase64(file);
   await queueAdd({
     table: "fracture_xrays",
     op: "xray_upload",
-    payload: { caseId, patientId, fileName: file.name, fileBase64, mimeType: file.type },
+    payload: { caseId, patientId, uploadId: crypto.randomUUID(), fileName: file.name, fileBase64, mimeType: file.type },
   });
+  void import("@/lib/offlineSync").then(m => m.runSync()).catch(() => {});
   return { ok: true, queued: true };
 }

@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/businessDate";
 /**
  * PlasterSync — Ek baar chalao, kaam ho jaaye
  * Purane bills scan karo → plaster wale patients → OrthoPanel mein add karo
@@ -95,9 +96,8 @@ export default function PlasterSync() {
         processedPatients.add(patientId);
 
         const plasterSvc = getPlasterService(bill.service || "");
-        const billDate = (bill.created_at || "").split("T")[0] || new Date().toISOString().split("T")[0];
-        const nextFollowup = new Date(new Date(billDate).getTime() + 7 * 24 * 60 * 60 * 1000)
-          .toISOString().split("T")[0];
+        const billDate = businessDate(bill.created_at || "") || businessDate();
+        const nextFollowup = businessDate(new Date(billDate).getTime() + 7 * 24 * 60 * 60 * 1000);
 
         try {
           const { error: insertErr } = await supabase
