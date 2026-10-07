@@ -20,6 +20,7 @@ files:
   - logger.cjs
   - sqlite-store.cjs
   - access-control.cjs
+  - offline-login.cjs
   - auth-public-config.json
   - package.json
 

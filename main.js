@@ -7,7 +7,7 @@
 
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, dialog, Menu, net, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu, net, Notification, safeStorage } = require('electron');
 const path  = require('path');
 const fs    = require('fs');
 const https = require('https');
@@ -41,6 +41,8 @@ ipcMain.handle('auth:establish', async (_event, token) => {
   verifiedCloudToken = token;
   access.setPrincipal(verified); return { success: true, principal: verified };
 });
+// Offline admin sign-in (hash saved on this PC after a verified online login; no secret in source).
+require('./offline-login.cjs').register({ ipcMain, access, app, safeStorage });
 
 
 // Process-level crash/error handlers jitni jaldi ho sake set kar do, taaki

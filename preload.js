@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('electron', {
   establishSession: (token) => ipcRenderer.invoke('auth:establish', token),
   checkAuth: ()       => ipcRenderer.invoke('auth:check'),
   logout:    ()       => ipcRenderer.invoke('auth:logout'),
+  offlineLogin:    (data) => ipcRenderer.invoke('auth:offlineLogin', data),
+  rememberOffline: (data) => ipcRenderer.invoke('auth:rememberOffline', data),
 
   // ── Patient Operations ──────────────────────────────────────
   savePatient:     (data)   => ipcRenderer.invoke('db:savePatient', data),

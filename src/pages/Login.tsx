@@ -65,6 +65,7 @@ export default function Login() {
         if (!verified?.success) throw new Error("Desktop session verification failed");
       }
       if (profile.role === "admin") await migrateLegacyIndexedDbIfNeeded();
+      if (profile.role === "admin") { try { await bridge?.rememberOffline?.({ identifier: username, secret: password }); } catch { /* offline login is optional */ } }
       localStorage.setItem(STORAGE_KEYS.IS_LOGGED_IN, "true");
       localStorage.setItem(STORAGE_KEYS.USER_NAME, profile.displayName || username.trim());
       localStorage.setItem(STORAGE_KEYS.USER_ROLE, profile.role);
@@ -77,6 +78,24 @@ export default function Login() {
       clearLogin();
       await bridge?.logout?.().catch(() => {});
       await supabase.auth.signOut().catch(() => {});
+      const reason = String(error?.message || "");
+      const noInternet = (window as any).navigator?.onLine === false || error?.name === "AuthRetryableFetchError" || /failed to fetch|network|timed out|timeout|aborted|load failed/i.test(reason);
+      if (noInternet && bridge?.offlineLogin) {
+        try {
+          const offline = await bridge.offlineLogin({ identifier: username, secret: password });
+          if (offline?.success) {
+            localStorage.setItem(STORAGE_KEYS.IS_LOGGED_IN, "true");
+            localStorage.setItem(STORAGE_KEYS.USER_NAME, offline.displayName || username.trim());
+            localStorage.setItem(STORAGE_KEYS.USER_ROLE, "admin");
+            localStorage.setItem(STORAGE_KEYS.USER_PERMS, JSON.stringify([]));
+            setPassword("");
+            toast({ title: "Offline mode", description: "Internet nahi hai, offline login ho gaya. Internet aane par sync ke liye ek baar online login karein." });
+            navigate("/dashboard");
+            return;
+          }
+          if (offline?.error) { toast({ title: "Offline login failed", description: offline.error, variant: "destructive" }); return; }
+        } catch { /* fall through to the normal error below */ }
+      }
       toast({ title: "Login failed", description: error?.message || "Login ke liye internet aur valid account zaroori hai", variant: "destructive" });
     } finally {
       setLoading(false);
@@ -230,7 +249,7 @@ export default function Login() {
           <div style={{ background: "rgba(255,255,255,0.97)", padding: "24px 32px 28px" }}>
 
             <p style={{ fontSize: "12px", color: "#5a6a84", marginBottom: "16px" }}>
-              Admin: apna registered email bharein. Staff: username ya email bharein. Login ke liye internet zaroori hai.
+              Admin: apna registered email bharein. Staff: username ya email bharein. Admin ko pehli baar internet se login karna hoga; uske baad is computer par bina internet ke bhi login chalega. Staff login ke liye internet zaroori hai.
             </p>
 
             <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
