@@ -81,7 +81,7 @@ function authorize(channel, args, store) {
       assertCashEntryOpen(m.table, m.payload, store);
     }
   }
-  if (['auth:login','auth:check','auth:logout','auth:establish','auth:offlineLogin','app:isOnline','app:getVersion','log:rendererError'].includes(channel)) return;
+  if (['auth:login','auth:check','auth:logout','auth:establish','auth:offlineLogin','auth:offlineSetup','auth:offlineStatus','app:isOnline','app:getVersion','log:rendererError'].includes(channel)) return;
   const p = getPrincipal(); if (!p) throw new Error('Please log in');
   if (p.role === 'admin') return;
   if (channel === 'offline:refreshCashDays') return assertTable('cash_book_days');

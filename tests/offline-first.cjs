@@ -23,7 +23,7 @@ const windowMock={electron:{offline:bridge},addEventListener:noop};
 function load(file,names,deps={}){
  let source=fs.readFileSync(root+'/'+file,'utf8').replace(/^import[\s\S]*?from\s+["'][^"']+["'];?/gm,'').replaceAll('import.meta.env','({})');
  source=ts.transpile(source.replace(/\bexport\s+/g,''),{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS});
- const ctx={exports:{},console,window:windowMock,localStorage,navigator:{onLine:false},cLog:log,crypto:require('crypto').webcrypto,Blob,atob,setTimeout,setInterval,clearTimeout,clearInterval,...deps};
+ const ctx={ensureCloudSession:async()=>true,exports:{},console,window:windowMock,localStorage,navigator:{onLine:false},cLog:log,crypto:require('crypto').webcrypto,Blob,atob,setTimeout,setInterval,clearTimeout,clearInterval,...deps};
  vm.createContext(ctx);vm.runInContext(source+'\n;globalThis.api={'+names.join(',')+'};',ctx);return ctx.api;
 }
 const db=load('src/lib/offlineDb.ts',['cacheUpsertRowFromServer','cacheGetAll','cacheGetRow','cacheUpsertRow','cacheReplaceTable','cacheSetRows','cacheDeleteRow','cacheReplaceRowKey','queueAdd','queueGetAll','queueUpdate','queueRemove','queueRemapRowId','commitMutation','tempId','getLocalSnapshot','atomicStockAdjustment','MAX_SYNC_RETRIES']);
@@ -46,6 +46,11 @@ const offline=load('src/lib/offlineQuery.ts',['offlineInsert','offlineUpdate','o
  console.log('PASS local populated and empty screens return while network is stalled');
  let calls=0;const supabase={auth:{getSession:async()=>({data:{session:null}})},from:()=>({upsert:p=>({select:()=>({single:async()=>{calls++;return {data:p,error:null}}})})})};
  const sync=load('src/lib/offlineSync.ts',['runSync'],{...db,supabase,queryClient:{invalidateQueries:noop},navigator:{onLine:true}});
+ const disconnected=load('src/lib/offlineSync.ts',['runSync'],{...db,supabase,ensureCloudSession:async()=>false,navigator:{onLine:true}});
+ const beforeConnect=JSON.stringify(store.queueGetAll());
+ assert.equal((await disconnected.runSync()).pending,1);
+ assert.equal(calls,0);assert.equal(JSON.stringify(store.queueGetAll()),beforeConnect);
+ console.log('PASS missing cloud login preserves pending work and retry count without attempting upload');
  await sync.runSync();assert.equal(calls,1);assert.equal(store.queueGetAll().length,0);
  console.log('PASS retry succeeds automatically after more than eight failures');
  await offline.offlineInsert('patients',{id:require('crypto').randomUUID(),name:'Backoff test',branch_id:'branch-a'});

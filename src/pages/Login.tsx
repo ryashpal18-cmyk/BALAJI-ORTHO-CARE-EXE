@@ -12,6 +12,7 @@ import bg1 from "@/assets/dash-bg1.png";
 import bg2 from "@/assets/dash-bg2.png";
 import bg3 from "@/assets/dash-bg3.png";
 import { STORAGE_KEYS } from "@/lib/appConfig";
+import { displaySession, resetCloudConnection } from "@/lib/localSession";
 
 const BG_IMAGES = [bg1, bg2, bg3];
 
@@ -38,9 +39,47 @@ export default function Login() {
     return () => clearInterval(timer);
   }, []);
 
+  const desktop = !!(window as any).electron?.offlineStatus;
+  const [mode, setMode] = useState<"local" | "cloud">(desktop ? "local" : "cloud");
+  const [configured, setConfigured] = useState(true);
+  const [ready, setReady] = useState(!desktop);
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [remember, setRemember] = useState(true);
+  const [setupError, setSetupError] = useState("");
+
+  const enter = async (profile: any) => {
+    if (profile.role === "admin") await migrateLegacyIndexedDbIfNeeded();
+    displaySession(profile);
+    startAutoSync();
+    if (profile.role === "admin") startAutoBackupScheduler();
+    setPassword(""); setConfirmPassword("");
+    navigate(profile.role === "admin" ? "/dashboard" : profile.pages[0] || "/dashboard", { replace: true });
+  };
+
+  useEffect(() => {
+    if (!desktop) return;
+    let active = true;
+    const bridge = (window as any).electron;
+    void (async () => {
+      try {
+        const auth = await bridge.checkAuth();
+        if (!active) return;
+        if (auth.valid) { await enter(auth.principal); return; }
+        const status = await bridge.offlineStatus();
+        if (!active) return;
+        setConfigured(status.configured);
+        setUsername(status.email || "ryashpal18@gmail.com");
+        setReady(true);
+      } catch (error: any) {
+        if (active) { setSetupError(error.message || "Saved login unavailable"); setReady(true); }
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loading) return;
+    if (loading || !ready) return;
     setLoading(true);
     queryClient.clear();
     const bridge = (window as any).electron;
@@ -50,8 +89,16 @@ export default function Login() {
     };
     try {
       clearLogin();
+      resetCloudConnection();
+      if (desktop && mode === "local") {
+        const args = { identifier: username, secret: password, confirmSecret: confirmPassword, remember };
+        const result = configured ? await bridge.offlineLogin(args) : await bridge.offlineSetup(args);
+        if (!result?.success) throw new Error(result?.error || "Local login failed");
+        await enter(result.principal);
+        return;
+      }
       await bridge?.logout?.();
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: "local" });
       const email = username.includes("@") ? username.trim().toLowerCase() : `${username.trim().toLowerCase()}@staff.balajiclinic.local`;
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error || !data.session) throw error || new Error("Session missing");
@@ -60,48 +107,22 @@ export default function Login() {
         throw profileError || new Error("Account access missing; administrator se sampark karein");
       }
       if (bridge) {
-        if (!bridge.establishSession) throw new Error("Desktop app update required");
         const verified = await bridge.establishSession(data.session.access_token);
         if (!verified?.success) throw new Error("Desktop session verification failed");
       }
-      if (profile.role === "admin") await migrateLegacyIndexedDbIfNeeded();
-      if (profile.role === "admin") { try { await bridge?.rememberOffline?.({ identifier: username, secret: password }); } catch { /* offline login is optional */ } }
-      localStorage.setItem(STORAGE_KEYS.IS_LOGGED_IN, "true");
-      localStorage.setItem(STORAGE_KEYS.USER_NAME, profile.displayName || username.trim());
-      localStorage.setItem(STORAGE_KEYS.USER_ROLE, profile.role);
-      localStorage.setItem(STORAGE_KEYS.USER_PERMS, JSON.stringify(profile.pages));
-      startAutoSync();
-      if (profile.role === "admin") startAutoBackupScheduler();
-      setPassword("");
-      navigate(profile.role === "admin" ? "/dashboard" : profile.pages[0] || "/dashboard");
+      await enter(profile);
     } catch (error: any) {
       clearLogin();
-      await bridge?.logout?.().catch(() => {});
-      await supabase.auth.signOut().catch(() => {});
-      const reason = String(error?.message || "");
-      const noInternet = (window as any).navigator?.onLine === false || error?.name === "AuthRetryableFetchError" || /failed to fetch|network|timed out|timeout|aborted|load failed/i.test(reason);
-      if (noInternet && bridge?.offlineLogin) {
-        try {
-          const offline = await bridge.offlineLogin({ identifier: username, secret: password });
-          if (offline?.success) {
-            localStorage.setItem(STORAGE_KEYS.IS_LOGGED_IN, "true");
-            localStorage.setItem(STORAGE_KEYS.USER_NAME, offline.displayName || username.trim());
-            localStorage.setItem(STORAGE_KEYS.USER_ROLE, "admin");
-            localStorage.setItem(STORAGE_KEYS.USER_PERMS, JSON.stringify([]));
-            setPassword("");
-            toast({ title: "Offline mode", description: "Internet nahi hai, offline login ho gaya. Internet aane par sync ke liye ek baar online login karein." });
-            navigate("/dashboard");
-            return;
-          }
-          if (offline?.error) { toast({ title: "Offline login failed", description: offline.error, variant: "destructive" }); return; }
-        } catch { /* fall through to the normal error below */ }
+      // Do not erase remembered ownership or a working offline session on a cloud error.
+      if (mode === "cloud") {
+        await bridge?.logout?.().catch(() => {});
+        void supabase.auth.signOut({ scope: "local" }).catch(() => {});
       }
-      toast({ title: "Login failed", description: error?.message || "Login ke liye internet aur valid account zaroori hai", variant: "destructive" });
+      toast({ title: "Login failed", description: error?.message || "ID/password check karein", variant: "destructive" });
     } finally {
       setLoading(false);
     }
   };
-
   return (
     <div style={{
       minHeight: "100vh", width: "100%",
@@ -249,8 +270,13 @@ export default function Login() {
           <div style={{ background: "rgba(255,255,255,0.97)", padding: "24px 32px 28px" }}>
 
             <p style={{ fontSize: "12px", color: "#5a6a84", marginBottom: "16px" }}>
-              Admin: apna registered email bharein. Staff: username ya email bharein. Admin ko pehli baar internet se login karna hoga; uske baad is computer par bina internet ke bhi login chalega. Staff login ke liye internet zaroori hai.
+              {mode === "local" ? (configured ? "Admin login bina internet chalega. Data pehle is PC par save hoga; cloud connected hone par background mein sync hoga." : "Pehli baar is PC par admin banayein. Apna email aur password set karein; internet zaroori nahi hai. Yeh setup clinic owner apne trusted PC par karein.") : "Staff / cloud account: login ke liye internet zaroori hai."}
             </p>
+            {desktop && <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+              <button type="button" disabled={loading} onClick={() => setMode("local")} style={{ fontWeight: mode === "local" ? 700 : 400 }}>Admin — Offline</button>
+              <button type="button" disabled={loading} onClick={() => setMode("cloud")} style={{ fontWeight: mode === "cloud" ? 700 : 400 }}>Staff / Cloud</button>
+            </div>}
+            {setupError && <p role="alert" style={{ color: "#b91c1c" }}>{setupError}</p>}
 
             <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
               {/* Username */}
@@ -312,8 +338,17 @@ export default function Login() {
                 </div>
               </div>
 
+              {mode === "local" && !configured && <label style={{ fontSize: 12, fontWeight: 600 }}>
+                Password dobara dalein
+                <input aria-label="Confirm password" type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" required minLength={8}
+                  style={{ width: "100%", height: 42, border: "1px solid #d5dde8", borderRadius: 8, padding: 10, marginTop: 6 }} />
+              </label>}
+              {mode === "local" && <label style={{ fontSize: 12, color: "#334155" }}>
+                <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} /> Is PC par login yaad rakhein
+                <span style={{ display: "block", marginTop: 4 }}>Agli baar seedha app khulegi. Logout karne par password dobara lagega.</span>
+              </label>}
               {/* Sign In button */}
-              <button type="submit" disabled={loading}
+              <button type="submit" disabled={loading || !ready || (mode === "local" && !!setupError)}
                 style={{
                   width: "100%", height: "48px",
                   background: loading
@@ -342,7 +377,7 @@ export default function Login() {
                 ) : (
                   <>
                     <LogIn style={{ width: "17px", height: "17px" }} />
-                    Sign In
+                    {!ready ? "Saved login check ho raha hai…" : mode === "local" && !configured ? "Admin banayein aur shuru karein" : "Sign In"}
                   </>
                 )}
               </button>

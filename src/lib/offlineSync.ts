@@ -1,4 +1,5 @@
 import { fetchCompleteTable, OPERATIONAL_TABLES } from "./completeFetch";
+import { ensureCloudSession } from "./localSession";
 // ─────────────────────────────────────────────────────────────────────────
 // Network status + background sync engine
 // ─────────────────────────────────────────────────────────────────────────
@@ -76,6 +77,7 @@ let downloadInProgress = false;
 
 export async function downloadAllDataToCache(): Promise<void> {
   if (downloadInProgress || !(await isOnline())) return;
+  if (!(await ensureCloudSession())) return;
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return; // Never interpret anonymous/RLS-empty results as an authoritative wipe.
   downloadInProgress = true;
@@ -314,6 +316,13 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
 
   const online = typeof navigator !== "undefined" ? navigator.onLine : true;
   if (!online) return { synced: 0, pending: (await queueGetAll()).length };
+
+  if (!(await ensureCloudSession())) {
+    const pending = (await queueGetAll()).length;
+    emitSyncStatus(pending, "Cloud connection pending — data is saved on this PC");
+    return { synced: 0, pending };
+  }
+  if (syncing) return { synced: 0, pending: (await queueGetAll()).length };
 
   syncing = true;
   let synced = 0;

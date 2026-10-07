@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { cacheGetAll, cacheReplaceTable } from "./offlineDb";
 import { fetchCompleteTable } from "./completeFetch";
 import { isOnline } from "./offlineSync";
+import { ensureCloudSession } from "./localSession";
 export function inBranch(row: any, branch: string | null) { return !branch || row.branch_id === branch; }
 export async function readBranchTable(table: string, branch: string | null, select = "*") {
   const cached = await cacheGetAll(table);
@@ -17,6 +18,7 @@ async function refreshBranchTable(table: string, select: string) {
   refreshing.add(table);
   try {
     if (!(await isOnline())) return;
+    if (!(await ensureCloudSession())) return;
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     const rows = await fetchCompleteTable(table, select);

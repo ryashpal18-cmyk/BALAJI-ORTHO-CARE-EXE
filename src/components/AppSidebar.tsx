@@ -17,6 +17,7 @@ import {
 import { getCurrentRole, getCurrentPerms } from "@/lib/appConfig";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BranchSelector } from "@/components/BranchSelector";
+import { resetCloudConnection } from "@/lib/localSession";
 
 const ALL_MENU_ITEMS = [
   { title: "Dashboard",           url: "/dashboard",           icon: LayoutDashboard },
@@ -65,7 +66,9 @@ export function AppSidebar() {
   const handleLogout = async () => {
     queryClient.clear();
     await (window as any).electron?.logout?.();
-    await supabase.auth.signOut();
+    resetCloudConnection();
+    // Main-process logout is already durable; cloud revocation must not stall navigation.
+    void supabase.auth.signOut({ scope: "local" }).catch(() => {});
     localStorage.removeItem("isLoggedIn");
     localStorage.removeItem("userName");
     localStorage.removeItem("bocc_user_role");

@@ -15,6 +15,7 @@ import { businessDate } from "@/lib/businessDate";
 // ─────────────────────────────────────────────────────────────────────────
 
 import { supabase } from "@/integrations/supabase/client";
+import { ensureCloudSession } from "./localSession";
 import { isOnline } from "@/lib/offlineSync";
 import { cacheGetAll } from "@/lib/offlineDb";
 import * as XLSX from "xlsx";
@@ -101,7 +102,7 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
   const coverage: Record<string, string> = {};
   const warnings: string[] = [];
   const { data: { session } } = await supabase.auth.getSession();
-  const online = !!session && await isOnline();
+  const online = !!session && await isOnline() && await ensureCloudSession();
   for (const table of BACKUP_TABLES) {
     try {
       if (!online) throw new Error("offline");

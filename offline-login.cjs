@@ -1,113 +1,165 @@
-"use strict";
-// Offline admin sign-in.
-// The credential is NEVER stored in source code. After a successful, server-verified
-// cloud login the app keeps only a salted scrypt hash on this computer (additionally
-// encrypted with the Windows user's key via Electron safeStorage when available).
-// Every later successful online login refreshes that hash, so changing the password
-// in Supabase automatically updates offline login the next time you sign in online.
+'use strict';
+// Local owner setup on the clinic PC. No shared password in the application.
+// Hash verifies offline login. Sync credentials and remembered access are OS-encrypted.
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const MIN_SECRET = 8, MAX_SECRET = 256;
+const SCRYPT = { N: 32768, r: 8, p: 1, maxmem: 128 * 1024 * 1024 };
+const normalizeEmail = value => String(value || '').trim().toLowerCase();
+const deriveKey = (secret, salt) => new Promise((resolve, reject) =>
+  crypto.scrypt(secret, salt, 64, SCRYPT, (error, key) => error ? reject(error) : resolve(key)));
 
-const OFFLINE_SESSION_MS = 12 * 60 * 60 * 1000; // offline session length before re-login
-const MAX_FAILS = 5;                            // wrong attempts before a temporary lock
-const LOCK_MS = 15 * 60 * 1000;
-const MIN_SECRET = 8;                           // same minimum as cloud staff accounts
-const MAX_SECRET = 256;
-const SCRYPT = { N: 1 << 15, r: 8, p: 1, maxmem: 128 * 1024 * 1024 };
-const KEY_LEN = 64;
-
-function normalizeEmail(identifier) {
-  const v = String(identifier || '').trim().toLowerCase();
-  if (!v || v.length > 254) return '';
-  return v.includes('@') ? v : `${v}@staff.balajiclinic.local`; // same rule as Login.tsx
-}
-
-function deriveKey(secret, salt) {
-  return new Promise((resolve, reject) =>
-    crypto.scrypt(secret, salt, KEY_LEN, SCRYPT, (err, key) => (err ? reject(err) : resolve(key))));
-}
-
-function createStore({ file, safeStorage }) {
-  const canEncrypt = () => { try { return !!safeStorage && safeStorage.isEncryptionAvailable(); } catch { return false; } };
+function createOffline({ file, safeStorage, access, now = Date.now, fetchCloud, config, onCloudToken = () => {} }) {
+  let generation = 0, busy = false, connecting = null, retryAt = 0;
+  const encryptedAvailable = () => {
+    try { return !!safeStorage?.isEncryptionAvailable() && safeStorage.getSelectedStorageBackend?.() !== 'basic_text'; }
+    catch { return false; }
+  };
   function read() {
+    if (!fs.existsSync(file)) return null;
     try {
       const wrapper = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (wrapper.enc) {
-        if (!canEncrypt()) return null;
-        return JSON.parse(safeStorage.decryptString(Buffer.from(wrapper.data, 'base64')));
-      }
-      return wrapper.data;
-    } catch { return null; }
+      const record = wrapper.enc
+        ? JSON.parse(safeStorage.decryptString(Buffer.from(wrapper.data, 'base64')))
+        : wrapper.data; // Legacy plaintext hash requires manual login, never auto-restore.
+      if (!record?.email || !record.userId || Buffer.from(record.hash, 'base64').length !== 64 || Buffer.from(record.salt, 'base64').length !== 16) throw Error();
+      return { ...record, trustedStorage: wrapper.enc === true };
+    } catch { throw new Error('Saved login read nahi ho paya. Login file delete/reset na karein; recovery zaroori hai. Patient data unchanged hai.'); }
   }
   function write(record) {
-    const wrapper = canEncrypt()
-      ? { v: 1, enc: true, data: safeStorage.encryptString(JSON.stringify(record)).toString('base64') }
-      : { v: 1, enc: false, data: record };
+    if (!encryptedAvailable()) throw new Error('Windows secure storage available nahi hai. Windows user session unlock karke app dobara kholein.');
+    const { trustedStorage, ...data } = record;
+    const wrapper = { v: 2, enc: true, data: safeStorage.encryptString(JSON.stringify(data)).toString('base64') };
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(wrapper), { mode: 0o600 });
+    const fd = fs.openSync(tmp, 'w', 0o600);
+    try { fs.writeFileSync(fd, JSON.stringify(wrapper)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     fs.renameSync(tmp, file);
   }
-  return { read, write };
-}
-
-function createOffline({ file, safeStorage, access, now = () => Date.now() }) {
-  const store = createStore({ file, safeStorage });
-
-  // Called after a verified cloud login. Only an administrator principal may save.
-  async function remember(args) {
-    const principal = access.getPrincipal();
-    if (!principal || principal.role !== 'admin' || !principal.userId) return { success: false, reason: 'not-admin' };
-    const email = normalizeEmail(args && args.identifier);
-    const secret = args && args.secret;
-    if (!email || typeof secret !== 'string' || secret.length > MAX_SECRET) return { success: false, reason: 'invalid' };
-    if (secret.length < MIN_SECRET) return { success: false, reason: 'too-short' };
-    const salt = crypto.randomBytes(16);
-    const hash = await deriveKey(secret, salt);
-    store.write({
-      email, userId: principal.userId, displayName: principal.displayName || '',
-      salt: salt.toString('base64'), hash: hash.toString('base64'), fails: 0, lockUntil: 0,
-    });
-    return { success: true };
-  }
-
-  // Works without internet. Grants a time-limited administrator principal.
-  async function login(args) {
-    const fail = { success: false, error: 'Offline login nahi ho paya. ID/password check karein, ya pehle ek baar internet se login karein.' };
-    const record = store.read();
-    const email = normalizeEmail(args && args.identifier);
-    const secret = args && args.secret;
-    if (!record || !email || typeof secret !== 'string' || !secret || secret.length > MAX_SECRET) return fail;
-    if (record.lockUntil && record.lockUntil > now()) {
-      const minutes = Math.ceil((record.lockUntil - now()) / 60000);
-      return { success: false, error: `Bahut galat koshish. ${minutes} minute baad dobara try karein.` };
-    }
-    const expected = Buffer.from(record.hash, 'base64');
-    const actual = await deriveKey(secret, Buffer.from(record.salt, 'base64'));
-    const ok = email === record.email && expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
-    if (!ok) {
-      record.fails = (record.fails || 0) + 1;
-      if (record.fails >= MAX_FAILS) { record.fails = 0; record.lockUntil = now() + LOCK_MS; }
-      store.write(record);
-      return fail;
-    }
-    if (record.fails || record.lockUntil) { record.fails = 0; record.lockUntil = 0; store.write(record); }
-    const principal = {
-      userId: record.userId, role: 'admin', pages: [], displayName: record.displayName || '',
-      offline: true, expiresAt: now() + OFFLINE_SESSION_MS,
-    };
+  function grant(record) {
+    const principal = { userId: record.userId, role: 'admin', pages: [], displayName: record.email,
+      email: record.email, sessionKey: crypto.randomUUID(), localAdmin: true, offline: true, expiresAt: Number.MAX_SAFE_INTEGER };
     access.setPrincipal(principal);
-    return { success: true, displayName: principal.displayName };
+    return { success: true, principal };
   }
-
-  return { remember, login };
+  function status() {
+    const record = read();
+    return { configured: !!record, email: record?.email || '', secureStorage: encryptedAvailable() };
+  }
+  async function authenticate(args, setup = false) {
+    if (busy) return { success: false, error: 'Login chal raha hai. Ek pal ruk kar try karein.' };
+    busy = true;
+    const epoch = generation;
+    try {
+      let record = read();
+      const email = normalizeEmail(args?.identifier), secret = args?.secret;
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || typeof secret !== 'string' || secret.length < MIN_SECRET || secret.length > MAX_SECRET)
+        return { success: false, error: 'Sahi email aur kam se kam 8 characters ka password dalein.' };
+      if (setup) {
+        if (record || access.getPrincipal()) return { success: false, error: 'Admin pehle se configured hai. Existing login use karein.' };
+        if (args.confirmSecret !== secret) return { success: false, error: 'Dono passwords ek jaise hone chahiye.' };
+        const salt = crypto.randomBytes(16);
+        const hash = await deriveKey(secret, salt);
+        record = { email, userId: crypto.randomUUID(), salt: salt.toString('base64'), hash: hash.toString('base64') };
+      } else {
+        if (!record) return { success: false, error: 'Pehle is PC par admin setup karein.' };
+        if (record.lockUntil > now()) return { success: false, error: 'Bahut galat attempts. 15 minute baad try karein.' };
+        const actual = await deriveKey(secret, Buffer.from(record.salt, 'base64'));
+        if (epoch !== generation) return { success: false, error: 'Login cancel ho gaya.' };
+        if (email !== record.email || !crypto.timingSafeEqual(actual, Buffer.from(record.hash, 'base64'))) {
+          record.fails = (record.fails || 0) + 1;
+          if (record.fails >= 5) { record.fails = 0; record.lockUntil = now() + 15 * 60000; }
+          write(record);
+          return { success: false, error: 'ID ya password galat hai.' };
+        }
+      }
+      if (epoch !== generation) return { success: false, error: 'Login cancel ho gaya.' };
+      record.fails = 0; record.lockUntil = 0;
+      record.remember = args.remember !== false;
+      record.syncSecret = secret; // Only within OS-encrypted file, never returned to renderer.
+      write(record);
+      retryAt = 0; generation++;
+      onCloudToken(null);
+      return grant(record);
+    } finally { busy = false; }
+  }
+  function restore() {
+    if (access.getPrincipal()) return access.getPrincipal();
+    const record = read();
+    if (record?.trustedStorage && record.remember === true) return grant(record).principal;
+    return null;
+  }
+  function logout() {
+    generation++; retryAt = 0; onCloudToken(null); access.setPrincipal(null);
+    const record = read();
+    if (record) { record.remember = false; delete record.cloud; write(record); }
+  }
+  async function request(endpoint, options = {}) {
+    const response = await fetchCloud(config.url + endpoint, {
+      ...options, headers: { apikey: config.key, 'Content-Type': 'application/json', ...options.headers },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!response.ok) throw new Error('Cloud account/admin permission available nahi hai. PC par kaam chalta rahega.');
+    return response.json();
+  }
+  async function connect() {
+    if (!access.getPrincipal()?.localAdmin) return { success: false };
+    if (connecting) return connecting;
+    if (now() < retryAt) return { success: false, error: 'Cloud reconnect pending; PC data saved hai.' };
+    const epoch = generation;
+    connecting = (async () => {
+      try {
+        const record = read();
+        if (!record?.trustedStorage || !record.syncSecret || !fetchCloud) return { success: false };
+        let session = record.cloud;
+        if (!session || session.expires_at * 1000 < now() + 60000) {
+          session = await request('/auth/v1/token?grant_type=password', {
+            method: 'POST', body: JSON.stringify({ email: record.email, password: record.syncSecret }),
+          });
+        }
+        if (!session?.access_token || !session?.refresh_token) throw new Error('Cloud session unavailable');
+        const headers = { Authorization: `Bearer ${session.access_token}` };
+        const user = await request('/auth/v1/user', { headers });
+        const profile = await request('/functions/v1/session-access', { method: 'POST', headers });
+        if (normalizeEmail(user.email) !== record.email || profile.userId !== user.id || profile.role !== 'admin')
+          throw new Error('Isi email ka verified cloud admin chahiye. Local data upload nahi hua.');
+        if (epoch !== generation || !access.getPrincipal()?.localAdmin) return { success: false };
+        record.cloud = { access_token: session.access_token, refresh_token: session.refresh_token,
+          expires_at: session.expires_at || Math.floor(now() / 1000) + (session.expires_in || 3600) };
+        write(record); onCloudToken(session.access_token);
+        return { success: true, session: record.cloud };
+      } catch (error) {
+        if (epoch === generation) {
+          retryAt = now() + 60000; onCloudToken(null);
+          // An invalidated/rotated cloud token must not block recovery until its old expiry.
+          try { const record = read(); if (record?.cloud) { delete record.cloud; write(record); } } catch { /* Preserve unreadable credential for recovery. */ }
+        }
+        return { success: false, error: error.message };
+      }
+    })();
+    try { return await connecting; } finally { connecting = null; }
+  }
+  return { status, setup: args => authenticate(args, true), login: args => authenticate(args), restore, logout, connect };
 }
 
-function register({ ipcMain, access, app, safeStorage }) {
-  const offline = createOffline({ file: path.join(app.getPath('userData'), 'offline-admin.json'), safeStorage, access });
-  ipcMain.handle('auth:offlineLogin', (_event, args) => offline.login(args));
-  ipcMain.handle('auth:rememberOffline', (_event, args) => offline.remember(args));
+function register({ ipcMain, access, app, safeStorage, net, config, onCloudToken }) {
+  // Resolve after main.js changes userData; v2.0.46 captured the earlier path.
+  const legacyFile = path.join(app.getPath('userData'), 'offline-admin.json');
+  let offline;
+  const get = () => {
+    if (offline) return offline;
+    const file = path.join(app.getPath('userData'), 'offline-admin.json');
+    if (file !== legacyFile && !fs.existsSync(file) && fs.existsSync(legacyFile)) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.copyFileSync(legacyFile, file, fs.constants.COPYFILE_EXCL);
+    }
+    return offline = createOffline({ file, safeStorage, access, fetchCloud: (...args) => net.fetch(...args), config, onCloudToken });
+  };
+  ipcMain.handle('auth:offlineStatus', () => get().status());
+  ipcMain.handle('auth:offlineSetup', (_event, args) => get().setup(args));
+  ipcMain.handle('auth:offlineLogin', (_event, args) => get().login(args));
+  ipcMain.handle('auth:syncSession', () => get().connect());
+  return { restore: () => get().restore(), logout: () => get().logout() };
 }
-
 module.exports = { register, createOffline, normalizeEmail, MIN_SECRET };

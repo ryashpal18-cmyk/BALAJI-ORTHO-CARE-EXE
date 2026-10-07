@@ -1,6 +1,7 @@
 import { queryClient } from "./queryClient";
 import { withPaymentHistory } from "./paymentLedger";
 import { commitMutation } from "./offlineDb";
+import { ensureCloudSession } from "./localSession";
 // ─────────────────────────────────────────────────────────────────────────
 // Offline-aware query/mutation helpers
 // ─────────────────────────────────────────────────────────────────────────
@@ -38,6 +39,7 @@ function refreshLocalTable(table: string, fetcher: () => Promise<any[]>, idField
   refreshes.add(table);
   void (async () => {
     try {
+      if (!(await ensureCloudSession())) return;
       const before = JSON.stringify(await cacheGetAll(table));
       const rows = await fetcher();
       for (const row of rows) if (row?.[idField] !== undefined) await cacheUpsertRowFromServer(table, row, idField);

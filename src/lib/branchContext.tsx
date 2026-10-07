@@ -1,8 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { isOnline } from "@/lib/offlineSync";
-import { cacheGetAll } from "@/lib/offlineDb";
+import { offlineFetch } from "./offlineQuery";
 
 export interface Branch {
   id: string;
@@ -28,21 +27,15 @@ export function useBranches() {
     queryKey: ["branches"],
     staleTime: 60000,
     queryFn: async (): Promise<Branch[]> => {
-      const online = await isOnline();
-      if (online) {
-        try {
+      const rows = await offlineFetch<Branch>("branches", async () => {
           const { data, error } = await supabase
             .from("branches" as any)
             .select("*")
             .order("name", { ascending: true });
           if (error) throw error;
           return (data || []) as any;
-        } catch {
-          // offline ya network error — neeche cache se fallback
-        }
-      }
-      const cached = await cacheGetAll("branches");
-      return ((cached as any[]) || []).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+      });
+      return rows.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
     },
   });
 }

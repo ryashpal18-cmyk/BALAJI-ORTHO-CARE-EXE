@@ -17,11 +17,13 @@ const sqliteStore = require('./sqlite-store.cjs');
 const access = require('./access-control.cjs');
 const authPublicConfig = require('./auth-public-config.json');
 let verifiedCloudToken = null;
+let authGeneration = 0;
 // Register guards before any handlers, including raw renderer IPC aliases.
 const originalHandle = ipcMain.handle.bind(ipcMain);
 ipcMain.handle = (channel, fn) => originalHandle(channel, async (event, ...args) => {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Untrusted IPC sender");
   access.authorize(channel, args, sqliteStore);
+  if (['auth:logout','auth:offlineLogin','auth:offlineSetup'].includes(channel)) authGeneration++;
   return fn(event, ...args);
 });
 const originalOn = ipcMain.on.bind(ipcMain);
@@ -30,19 +32,23 @@ ipcMain.on = (channel, fn) => originalOn(channel, (event, ...args) => {
   catch (error) { logger.logWarn('auth', `IPC denied: ${channel}`); }
 });
 ipcMain.handle('auth:establish', async (_event, token) => {
+  if (access.getPrincipal()?.localAdmin) throw new Error('Use the local admin sync connection');
+  const epoch = authGeneration;
   if (typeof token !== 'string' || token.length > 8192) throw new Error('Invalid session');
   const response = await net.fetch(`${authPublicConfig.url}/functions/v1/session-access`, {
-    method: 'POST', headers: { Authorization: `Bearer ${token}`, apikey: authPublicConfig.key },
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, apikey: authPublicConfig.key }, signal: AbortSignal.timeout(12000),
   });
-  if (!response.ok) { if ([401,403].includes(response.status)) access.setPrincipal(null); throw new Error('Session verification failed; check function deployment'); }
+  if (!response.ok) { if (epoch === authGeneration && [401,403].includes(response.status)) access.setPrincipal(null); throw new Error('Session verification failed; check function deployment'); }
   const profile = await response.json();
   if (!['admin','staff'].includes(profile.role) || !Array.isArray(profile.pages)) throw new Error('Invalid access profile');
   const verified = { ...profile, expiresAt: Date.now() + 8 * 60 * 60 * 1000 };
+  if (epoch !== authGeneration || access.getPrincipal()?.localAdmin) throw new Error('Session changed during verification');
   verifiedCloudToken = token;
   access.setPrincipal(verified); return { success: true, principal: verified };
 });
-// Offline admin sign-in (hash saved on this PC after a verified online login; no secret in source).
-require('./offline-login.cjs').register({ ipcMain, access, app, safeStorage });
+// Local login and cloud sync are independent. A cloud outage never clears local access.
+const offlineAuth = require('./offline-login.cjs').register({ ipcMain, access, app, safeStorage, net,
+  config: authPublicConfig, onCloudToken: token => { verifiedCloudToken = token; } });
 
 
 // Process-level crash/error handlers jitni jaldi ho sake set kar do, taaki
@@ -652,8 +658,12 @@ function openWhatsAppWindow(url) {
 
 // Compatibility endpoint cannot grant a local administrator session.
 ipcMain.handle('auth:login', async () => ({ success: false, error: 'Use verified cloud sign-in' }));
-ipcMain.handle('auth:check', async () => ({ success: true, valid: !!access.getPrincipal(), principal: access.getPrincipal() }));
+ipcMain.handle('auth:check', async () => {
+  const principal = access.getPrincipal() || offlineAuth.restore();
+  return { success: true, valid: !!principal, principal };
+});
 ipcMain.handle('auth:logout', async () => {
+  offlineAuth.logout();
   verifiedCloudToken = null;
   access.setPrincipal(null);
   return { success: true };

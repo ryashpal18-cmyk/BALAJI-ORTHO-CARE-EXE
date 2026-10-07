@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { STORAGE_KEYS } from "@/lib/appConfig";
+import { displaySession } from "@/lib/localSession";
+import { startAutoSync } from "@/lib/offlineSync";
+import { startAutoBackupScheduler } from "@/lib/backup";
 function pageFor(path: string) {
   if (path.startsWith("/patient-profile/")) return "/opd";
   if (path.startsWith("/recovery-tracker/")) return "/ortho";
@@ -18,7 +21,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
         const bridge = (window as any).electron;
         if (bridge?.checkAuth) {
           let res = await bridge.checkAuth();
-          if (res.principal && navigator.onLine) {
+          if (res.principal && !res.principal.localAdmin && navigator.onLine) {
             try { const { data: { session } } = await supabase.auth.getSession(); if (session) await bridge.establishSession(session.access_token); }
             catch { /* A transport outage can use the bounded, previously verified desktop session. */ }
             res = await bridge.checkAuth();
@@ -28,6 +31,9 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
         else { const { data, error } = await supabase.functions.invoke("session-access"); if (error) throw error; profile = data; }
         if (live) {
           if (profile) {
+            displaySession(profile);
+            startAutoSync();
+            if (profile.role === "admin") startAutoBackupScheduler();
             localStorage.setItem(STORAGE_KEYS.USER_ROLE, profile.role);
             localStorage.setItem(STORAGE_KEYS.USER_PERMS, JSON.stringify(profile.pages || []));
           }

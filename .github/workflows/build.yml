@@ -50,6 +50,11 @@ jobs:
           done
       - name: Check TypeScript
         run: npm run typecheck
+      - name: Check offline admin login
+        run: |
+          node tests/offline-login.cjs
+          node tests/local-session.cjs
+          node tests/auth-01.cjs
       - name: Build React App
         run: npm run build
       - name: Build & Publish Setup EXE

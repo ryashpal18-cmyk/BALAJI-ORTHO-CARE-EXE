@@ -13,7 +13,9 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
   global: { fetch: boundedFetch },
   auth: {
     storage: localStorage,
-    persistSession: true,
+    // Desktop owner credentials/sessions live in OS-encrypted main-process storage.
+    // Never restore an unrelated stale renderer session before local owner verification.
+    persistSession: !(window as any).electron,
     autoRefreshToken: true,
   }
 });
