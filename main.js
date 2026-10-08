@@ -1095,27 +1095,8 @@ ipcMain.on('open-whatsapp', (_e, payload) => {
 });
 
 // ─── SMS — Main process se bhejo (CORS issue fix) ────────────────────────────
-ipcMain.handle('app:sendSMS', async (_e, { apiUrl, apiKey, deviceId, mobile, message }) => {
-  try {
-    const digits = mobile.replace(/\D/g, '');
-    const num = digits.startsWith('91') ? digits : `91${digits}`;
-    const res = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-      },
-      body: JSON.stringify({ deviceId, recipients: [num], message }),
-    });
-    if (res.ok) {
-      return { ok: true };
-    }
-    const errText = await res.text().catch(() => res.status);
-    return { ok: false, error: `TextBee ${res.status}: ${errText}` };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-});
+const sendDurableSMS = require('./sms-outbox.cjs').createSmsSender({ store: sqliteStore });
+ipcMain.handle('app:sendSMS', async (_e, input) => sendDurableSMS(input));
 
 // ─── KNOWN ERROR PATTERNS — module-level (diagnostics + live notification dono use karte hain) ─
 // Har pattern mein: regex, error name, source file, root cause, fix

@@ -61,6 +61,7 @@ jobs:
           node tests/offline-first.cjs
           node tests/deep-audit.cjs
           node tests/audit-26.cjs
+          node tests/sms-offline.cjs
       - name: Build React App
         run: npm run build
       - name: Build & Publish Setup EXE

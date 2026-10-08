@@ -9,7 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { cLog } from "@/lib/clientLogger";
 import { isValidMobile } from "@/lib/utils";
 import { queryClient } from "@/lib/queryClient";
-import { queueGetAll, queueRemove, queueUpdate, queueRemapRowId, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetAll, backupCacheToDisk, QueuedMutation, MAX_SYNC_RETRIES } from "./offlineDb";
+import { commitMutation, queueGetAll, queueRemove, queueUpdate, queueRemapRowId, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetAll, backupCacheToDisk, QueuedMutation, MAX_SYNC_RETRIES } from "./offlineDb";
 
 
 declare global {
@@ -254,31 +254,22 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
 
     cLog.info("sync", `SMS bhej raha hai — patient: ${patientName}, type: ${smsType}`);
 
-    // ✅ Electron IPC use karo — direct fetch() Electron mein CORS fail karta hai
+    // Upgrade legacy queued messages in place; preserve their recipient/content.
+    const messageId = m.payload.messageId || crypto.randomUUID();
+    if (!m.payload.messageId) await queueUpdate(m.id!, { payload: { ...m.payload, messageId } });
     const electron = (window as any).electron;
-    const apiUrl   = import.meta.env.VITE_TEXTBEE_API_URL;
-    const apiKey   = import.meta.env.VITE_TEXTBEE_API_KEY;
-    const deviceId = import.meta.env.VITE_TEXTBEE_DEVICE_ID;
-
-    if (!electron?.sendSMS) {
-      throw new Error("Electron SMS handler nahi mila — retry hoga");
-    }
-
-    const result = await electron.sendSMS({ apiUrl, apiKey, deviceId, mobile, message });
+    if (!electron?.sendSMS) throw new Error("Electron SMS handler unavailable");
+    const result = await electron.sendSMS({ requestId: messageId,
+      apiUrl: import.meta.env.VITE_TEXTBEE_API_URL, apiKey: import.meta.env.VITE_TEXTBEE_API_KEY,
+      deviceId: import.meta.env.VITE_TEXTBEE_DEVICE_ID, mobile, message });
     if (!result?.ok) {
+      if (result?.uncertain) await queueUpdate(m.id!, { payload: { ...m.payload, messageId, deliveryState: "unconfirmed" } });
       throw new Error(result?.error || "SMS gateway fail");
     }
-
-    // Log update karo Supabase mein
-    try {
-      await supabase.from("sms_logs" as any).insert({
-        patient_name: patientName,
-        mobile,
-        message,
-        status:   "sent",
-        sms_type: smsType,
-      } as any);
-    } catch { cLog.warn("sync", "SMS gaya par log save nahi hua"); }
+    // Gateway acceptance is journaled by main before returning. Log persistence/retries never resend it.
+    const row = { id: messageId, patient_name: patientName, mobile, message,
+      status: "sent", sms_type: smsType, sent_at: result.acceptedAt || new Date().toISOString() };
+    await commitMutation({ table: "sms_logs", op: "insert", tempId: messageId, payload: row }, row);
     return;
   }
 
@@ -325,19 +316,13 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
   const online = typeof navigator !== "undefined" ? navigator.onLine : true;
   if (!online) return { synced: 0, pending: (await queueGetAll()).length };
 
-  if (!(await ensureCloudSession())) {
-    const pending = (await queueGetAll()).length;
-    emitSyncStatus(pending, "Cloud connection pending — data is saved on this PC");
-    return { synced: 0, pending };
-  }
-  if (syncing) return { synced: 0, pending: (await queueGetAll()).length };
-
   syncing = true;
   let synced = 0;
   let lastError: string | undefined;
 
   try {
     emitSyncStatus((await queueGetAll()).length);
+    const drain = async (sms: boolean) => {
     const blocked = new Set<string>();
     let queue = await queueGetAll();
     queue = queue.sort((a, b) => (a.id || 0) - (b.id || 0));
@@ -346,7 +331,7 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
 
     for (const snapshotItem of queue) {
       const m = (await queueGetAll()).find(q => q.id === snapshotItem.id);
-      if (!m) continue;
+      if (!m || (m.op === "sms") !== sms) continue;
       const key = `${m.table}::${(m.rowId || m.tempId || String(m.id)).replace(/^local_/, "")}`;
       if (blocked.has(key)) continue;
       // Never abandon durable work after a fixed number of failed requests.
@@ -371,6 +356,18 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
         lastError = msg;
       }
     }
+
+    };
+    const outcomes = await Promise.allSettled([
+      drain(true),
+      (async () => {
+        if (!(await ensureCloudSession())) { lastError = "Cloud connection pending — data is saved on this PC"; return; }
+        await drain(false);
+      })(),
+    ]);
+
+    const failed = outcomes.find(o => o.status === "rejected");
+    if (failed?.status === "rejected") throw failed.reason;
 
     if (synced > 0) {
       console.info(`✅ Sync complete — ${synced} items upload ho gaye`);

@@ -19,6 +19,7 @@ files:
   - preload.js
   - logger.cjs
   - sqlite-store.cjs
+  - sms-outbox.cjs
   - access-control.cjs
   - offline-login.cjs
   - auth-public-config.json

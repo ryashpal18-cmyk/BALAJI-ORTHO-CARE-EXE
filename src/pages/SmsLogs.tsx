@@ -7,7 +7,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { MessageSquare } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { cacheGetAll, queueGetAll, onQueueChange } from "@/lib/offlineDb";
+import { smsLogRows } from "@/lib/smsLogRows";
 
 type SmsLog = {
   id: string;
@@ -17,23 +18,28 @@ type SmsLog = {
   status: string | null;
   sms_type: string | null;
   sent_at: string | null;
+  last_error?: string;
 };
 
 export default function SmsLogs() {
   const [logs, setLogs] = useState<SmsLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
-    (async () => {
-      const { data, error } = await supabase
-        .from("sms_logs" as any)
-        .select("*")
-        .order("sent_at", { ascending: false })
-        .limit(500);
-      if (!error) setLogs((data || []) as any);
-      setLoading(false);
-    })();
+    let live = true;
+    const refresh = async () => {
+      try {
+        const [cached, pending] = await Promise.all([cacheGetAll("sms_logs"), queueGetAll()]);
+        if (live) { setLogs(smsLogRows(cached, pending)); setLoadError(""); }
+      } catch { if (live) setLoadError("SMS records load nahi hue. Pending data clear na karein."); }
+      finally { if (live) setLoading(false); }
+    };
+    void refresh();
+    const off = onQueueChange(() => { void refresh(); });
+    const timer = setInterval(refresh, 5000);
+    return () => { live = false; off(); clearInterval(timer); };
   }, []);
 
   const filtered = useMemo(() => {
@@ -57,9 +63,11 @@ export default function SmsLogs() {
         </div>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">All Sent SMS ({logs.length})</CardTitle>
+            <CardTitle className="text-base">SMS Outbox & History ({logs.length})</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            {loadError && <p role="alert" className="text-destructive">{loadError}</p>}
+            <p className="text-xs text-muted-foreground">Sent = gateway accepted; phone delivery confirmation nahi. Delivery unconfirmed ho to gateway check kiye bina dobara na bhejein.</p>
             <Input
               placeholder="Search by name, mobile, type, status..."
               value={search}
@@ -89,8 +97,9 @@ export default function SmsLogs() {
                       <TableCell><Badge variant="outline">{l.sms_type || "general"}</Badge></TableCell>
                       <TableCell>
                         <Badge variant={l.status === "sent" ? "default" : "destructive"}>
-                          {l.status || "—"}
+                          {l.status === "sent" ? "Gateway accepted" : l.status || "—"}
                         </Badge>
+                        {l.last_error && <p className="text-xs text-muted-foreground">{l.last_error}</p>}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-xs">
                         {l.sent_at ? new Date(l.sent_at).toLocaleString("en-IN") : "—"}
