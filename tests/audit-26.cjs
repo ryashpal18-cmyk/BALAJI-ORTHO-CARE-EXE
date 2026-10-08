@@ -31,7 +31,7 @@ const db=load('src/lib/offlineDb.ts',['cacheUpsertRowFromServer','cacheGetAll','
 const payment=load('src/lib/paymentLedger.ts',['paymentHistory','withPaymentHistory','collectionRows']);
 const offline=load('src/lib/offlineQuery.ts',['offlineInsert','offlineUpdate','offlineDelete'],{...db,...payment,isOnline:async()=>false,runSync:noop});
 
-const read=f=>fs.readFileSync(root+'/'+f,'utf8');
+const read=f=>fs.readFileSync(root+'/'+f,'utf8').replace(/\r\n/g,'\n');
 function expression(file,name){const sf=ts.createSourceFile(file,read(file),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let out;function walk(n){if(ts.isVariableDeclaration(n)&&n.name.getText(sf)===name&&n.initializer)out=n.initializer.getText(sf);ts.forEachChild(n,walk)}walk(sf);assert.ok(out,name);return out}
 function ev(code,deps={}){const c={console,Date,URL,...deps};vm.runInNewContext(ts.transpile('globalThis.out=('+code+');',{target:ts.ScriptTarget.ES2022}),c);return c.out}
 const uid=()=>require('crypto').randomUUID(),reset=()=>{for(const m of store.queueGetAll())store.queueRemove(m.id)};
