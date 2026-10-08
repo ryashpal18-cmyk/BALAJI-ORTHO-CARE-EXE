@@ -156,11 +156,11 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
           {/* ── TOP HEADER ── */}
           <header
-            className="no-print"
+            className="no-print flex-wrap lg:flex-nowrap"
             style={{
-              height: "56px",
+              minHeight: "56px",
               display: "flex", alignItems: "center", justifyContent: "space-between",
-              padding: "0 20px", gap: "16px",
+              padding: "8px 12px", gap: "8px",
               background: "linear-gradient(135deg, rgba(13,35,81,0.94) 0%, rgba(30,87,176,0.90) 55%, rgba(14,124,74,0.86) 100%)",
               backdropFilter: "blur(16px)",
               borderBottom: "1px solid rgba(255,255,255,0.12)",
@@ -169,11 +169,11 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             }}
           >
             {/* Left */}
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: 1, minWidth: 0 }}>
               <SidebarTrigger style={{ color: "rgba(255,255,255,0.90)" }} />
 
               {/* Search */}
-              <div style={{ position: "relative", width: "280px" }} ref={wrapRef} className="hidden sm:block">
+              <div style={{ position: "relative", width: "280px", maxWidth: "100%", minWidth: 0 }} ref={wrapRef} className="hidden sm:block">
                 <Search style={{
                   position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)",
                   width: "15px", height: "15px", color: "rgba(255,255,255,0.60)", zIndex: 1,
@@ -247,7 +247,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
 
             {/* Right */}
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap", maxWidth: "100%" }}>
               {/* ── Global Quick Action: New Patient Admission (har page se accessible) ── */}
               <button
                 onClick={() => navigate("/opd")}
@@ -262,9 +262,10 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                   boxShadow: "0 2px 10px rgba(224,62,62,0.35)",
                 }}
                 title="New Patient Admission"
+                aria-label="New Patient Admission"
               >
                 <UserPlus style={{ width: "15px", height: "15px" }} />
-                <span className="hidden md:inline">New Patient Admission</span>
+                <span className="hidden xl:inline">New Patient Admission</span>
               </button>
 
               {/* Slide dots */}

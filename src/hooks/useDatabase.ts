@@ -285,7 +285,9 @@ export function useBeds() {
         if (error) throw error;
         return data as any[] || [];
       });
-      return [...rows].sort((a: any, b: any) => Number(a.bed_number) - Number(b.bed_number));
+      const patients = await cacheGetAll("patients");
+      return rows.map((bed: any) => ({ ...bed, patients: patients.find(p => p.id === bed.patient_id) || null }))
+        .sort((a: any, b: any) => String(a.bed_number).localeCompare(String(b.bed_number), undefined, { numeric: true }));
     },
   });
 }
@@ -294,7 +296,10 @@ export function useUpdateBed() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, ...updates }: { id: string } & Record<string, any>) => offlineUpdate("beds", id, updates),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["beds"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["beds"] });
+      qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
+    },
   });
 }
 
