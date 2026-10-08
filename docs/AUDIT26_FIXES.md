@@ -22,7 +22,7 @@ These changes address the two v2.0.47 audit reports. They do not delete clinic r
 
 - TypeScript and Vite production build.
 - Existing auth, local session, offline login, local persistence, receipt ledger, inventory, backup, RLS and cashbook test suites.
-- `node tests/audit-26.cjs`: 28 focused checks covering the findings and atomic batch authorization rollback. Some UI wiring checks are static; the remainder exercise source functions with temporary SQLite or mocked services.
+- `node tests/audit-26.cjs`: 29 focused checks covering the findings and atomic batch authorization rollback. Some UI wiring checks are static; the remainder exercise source functions with temporary SQLite or mocked services.
 - SQL regression tests run on PGlite, not the production database.
 - New data-integrity regression suites also gate the Windows release workflow.
 

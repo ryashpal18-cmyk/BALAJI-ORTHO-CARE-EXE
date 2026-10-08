@@ -63,6 +63,22 @@ export default function Reports() {
   }, [incomingState]);
   const savedAiReports = reports?.filter((r: any) => r.report_data) || [];
 
+  const openReport = async (report: any) => {
+    try {
+      const url = await refreshClinicalUrl(report.file_url);
+      if (/^data:image\/(jpeg|png|webp);base64,/.test(url)) {
+        setViewerInitialImage({ src: url, name: report.report_type || 'X-Ray', patientName: report.patients?.name });
+        setXrayViewerOpen(true);
+      } else if (url.startsWith('data:application/pdf;base64,')) {
+        const link = document.createElement('a');
+        link.href = url; link.download = `report-${report.id}.pdf`;
+        document.body.appendChild(link); link.click(); link.remove();
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (e: any) { toast({ title: 'Report unavailable', description: e.message, variant: 'destructive' }); }
+  };
+
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.patient_id || !file) {
@@ -215,8 +231,7 @@ export default function Reports() {
                       {r.file_url && (
                         <a href={r.file_url} target="_blank" rel="noopener noreferrer" onClick={async e => {
                           e.preventDefault();
-                          try { window.open(await refreshClinicalUrl(r.file_url!), "_blank", "noopener,noreferrer"); }
-                          catch { toast({ title: "Report link unavailable", description: "Connect to the internet and check access.", variant: "destructive" }); }
+                          await openReport(r);
                         }}>
                           <Button variant="ghost" size="icon" className="h-8 w-8"><Download className="h-4 w-4" /></Button>
                         </a>
