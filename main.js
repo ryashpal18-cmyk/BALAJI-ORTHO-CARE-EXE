@@ -898,6 +898,12 @@ ipcMain.handle('backup:writeSnapshot', async (_e, tables) => {
 // ke through main-process SQLite file se baat karta hai. Har handler
 // try/catch mein hai taaki kisi ek query fail hone se poora app na gire.
 
+ipcMain.handle('offline:commitBatch', async (_e, items) => {
+  try {
+    const data = sqliteStore.authorizedBatch(items, item => access.authorize('offline:commitMutation', [item], sqliteStore), access.getPrincipal()?.userId || null);
+    return { success: true, data };
+  } catch (e) { return { success: false, error: e.message }; }
+});
 ipcMain.handle('offline:commitMutation', async (_e, { mutation, row, idField }) => {
   try { return { success: true, data: sqliteStore.commitMutation({ ...mutation, ownerUserId: access.getPrincipal()?.userId || null }, row, idField) }; }
   catch (e) { return { success: false, error: e.message }; }
@@ -2010,84 +2016,10 @@ ipcMain.handle('safety:openSnapshotFolder', async () => {
 // ye handler purani IndexedDB files (agar kisi PC pe legacy se pade hain)
 // AUR ab wala SQLite offline_cache.db (naya main storage) — dono delete
 // karta hai, phir app restart karta hai — sab automatic, user kuch nahi karta.
-ipcMain.handle('app:nuclearIndexedDBReset', async () => {
-  try {
-    logger.logInfo('nuclear-reset', 'Nuclear offline-store reset shuru...');
-
-    // ── Step 1: legacy IndexedDB folder path nikalo (purane installs ke liye) ──
-    const userDataPath  = app.getPath('userData');
-    const idbPaths = [
-      path.join(userDataPath, 'IndexedDB'),
-      path.join(userDataPath, 'Default', 'IndexedDB'),
-      path.join(userDataPath, 'Local Storage'),
-      path.join(userDataPath, 'Session Storage'),
-      path.join(userDataPath, 'blob_storage'),
-      path.join(userDataPath, 'Cache'),
-      path.join(userDataPath, 'Code Cache'),
-      path.join(userDataPath, 'GPUCache'),
-    ];
-
-    const deleted = [];
-    const failed  = [];
-
-    for (const p of idbPaths) {
-      if (fs.existsSync(p)) {
-        try {
-          fs.rmSync(p, { recursive: true, force: true });
-          deleted.push(p);
-          logger.logInfo('nuclear-reset', `Deleted: ${p}`);
-        } catch (e) {
-          failed.push(`${p}: ${e.message}`);
-          logger.logWarn('nuclear-reset', `Delete fail: ${p} — ${e.message}`);
-        }
-      }
-    }
-
-    // ── Step 2: naya SQLite offline store (offline_cache.db + -wal/-shm) reset karo ──
-    try {
-      sqliteStore.close(); // pehle file handle release karo, warna delete lock error dega
-      const sqlitePaths = [
-        path.join(BACKUP_DIR, 'offline_cache.db'),
-        path.join(BACKUP_DIR, 'offline_cache.db-wal'),
-        path.join(BACKUP_DIR, 'offline_cache.db-shm'),
-      ];
-      for (const p of sqlitePaths) {
-        if (fs.existsSync(p)) {
-          try {
-            fs.rmSync(p, { force: true });
-            deleted.push(p);
-            logger.logInfo('nuclear-reset', `Deleted: ${p}`);
-          } catch (e) {
-            failed.push(`${p}: ${e.message}`);
-            logger.logWarn('nuclear-reset', `Delete fail: ${p} — ${e.message}`);
-          }
-        }
-      }
-    } catch (e) {
-      logger.logWarn('nuclear-reset', `SQLite reset step fail: ${e.message}`);
-    }
-
-    logger.logInfo('nuclear-reset', `Reset complete — Deleted: ${deleted.length}, Failed: ${failed.length}`);
-    logger.logInfo('nuclear-reset', 'App 2 second mein restart hoga...');
-
-    // ── Step 3: 2 second baad restart ──
-    setTimeout(() => {
-      app.relaunch();
-      app.exit(0);
-    }, 2000);
-
-    return {
-      success: true,
-      deleted: deleted.length,
-      failed:  failed.length,
-      failedPaths: failed,
-      userDataPath,
-    };
-  } catch (e) {
-    logger.logError('nuclear-reset', `Nuclear reset fail: ${e.message}`);
-    return { success: false, error: e.message };
-  }
-});
+ipcMain.handle('app:nuclearIndexedDBReset', async () => ({
+  success: false,
+  error: 'Data protection: storage reset is disabled. Export a full backup and use diagnostics; no patient, bill or queue was deleted.',
+}));
 
 // ═══════════════════════════════════════════════════════════════
 //  APP LIFECYCLE

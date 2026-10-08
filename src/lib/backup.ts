@@ -240,8 +240,6 @@ export function startAutoBackupScheduler() {
   const checkAndRun = async () => {
     const auth = await (window as any).electron?.checkAuth?.();
     if (auth && (!auth.valid || auth.principal?.role !== "admin")) return;
-    const online = await isOnline();
-    if (!online) return; // backup ke liye fresh data chahiye; offline mein cache se ho sakta hai par safe side daily backup ke liye internet ka wait karte hain
 
     const today = todayStr();
 

@@ -37,24 +37,9 @@ export default function MedicineMaster() {
         if (error) throw error;
         return (data as any) || [];
       });
-      setMedicines(rows.length ? rows : [
-        { id: "med1", name: "Tab Aconex SP", rate: 68.72 },
-        { id: "med2", name: "Tab Calcikem K27", rate: 135.73 },
-        { id: "med3", name: "Tab Cefnex 200 LB", rate: 150.20 },
-        { id: "med4", name: "SYP Unisure D3 Nano", rate: 48.54 },
-        { id: "med5", name: "Tab Cytocal + D3", rate: 126.89 },
-        { id: "med6", name: "Cap Raquil DSR", rate: 118.94 },
-      ]);
-    } catch {
-      // dono online aur cache fail — default list dikhao taaki billing na ruke
-      setMedicines([
-        { id: "med1", name: "Tab Aconex SP", rate: 68.72 },
-        { id: "med2", name: "Tab Calcikem K27", rate: 135.73 },
-        { id: "med3", name: "Tab Cefnex 200 LB", rate: 150.20 },
-        { id: "med4", name: "SYP Unisure D3 Nano", rate: 48.54 },
-        { id: "med5", name: "Tab Cytocal + D3", rate: 126.89 },
-        { id: "med6", name: "Cap Raquil DSR", rate: 118.94 },
-      ]);
+      setMedicines(rows);
+    } catch (e: any) {
+      toast({ title: 'Medicines load failed', description: e.message, variant: 'destructive' });
     }
     setLoading(false);
   };

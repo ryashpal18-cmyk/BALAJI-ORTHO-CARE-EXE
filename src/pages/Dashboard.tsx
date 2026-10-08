@@ -354,7 +354,7 @@ export default function Dashboard() {
                   <div className="text-xs p-2 rounded bg-primary/10 flex justify-between">
                     <span>New Status:</span>
                     <span className="font-bold">
-                      {parseFloat(qpPaid) >= Number(qpBill.amount) ? "✅ Paid" :
+                      {parseFloat(qpPaid) >= netBillAmount(qpBill) ? "✅ Paid" :
                        parseFloat(qpPaid) > 0 ? "🟡 Partial" : "🔴 Pending"}
                     </span>
                   </div>
@@ -449,8 +449,8 @@ export default function Dashboard() {
                 {/* Due preview */}
                 <div className="flex justify-between items-center p-2 rounded-lg border border-dashed">
                   <span className="text-xs font-medium text-muted-foreground">Due Amount</span>
-                  <span className={`text-sm font-bold ${(editServices.reduce((sum,s) => sum+(parseFloat(s.amount)||0),0) - (parseFloat(editPaid)||0)) > 0 ? "text-destructive" : "text-success"}`}>
-                    ₹{Math.max(editServices.reduce((sum,s) => sum+(parseFloat(s.amount)||0),0) - (parseFloat(editPaid)||0), 0).toLocaleString()}
+                  <span className={`text-sm font-bold ${(editServices.reduce((sum,s) => sum+(parseFloat(s.amount)||0),0) - Number(editBill.discount || 0) - (parseFloat(editPaid)||0)) > 0 ? "text-destructive" : "text-success"}`}>
+                    ₹{Math.max(editServices.reduce((sum,s) => sum+(parseFloat(s.amount)||0),0) - Number(editBill.discount || 0) - (parseFloat(editPaid)||0), 0).toLocaleString()}
                   </span>
                 </div>
 

@@ -1,3 +1,4 @@
+import { invoiceNumber } from "@/lib/invoiceNumber";
 import { netBillAmount } from "@/lib/billAmounts";
 import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { businessDate } from "@/lib/businessDate";
@@ -154,7 +155,7 @@ function buildInvoiceHTML(bill: any, logoUrl: string = "/images/logo.png") {
   const patientName = escapeHtml((bill.patients as any)?.name || "Patient");
   const patientAge = (bill.patients as any)?.age || "—";
   const patientGender = (bill.patients as any)?.gender || "—";
-  const invoiceNo = `INV-${bill.id.slice(0, 8).toUpperCase()}`;
+  const invoiceNo = invoiceNumber(bill.id);
   const _dateObj = bill.created_at ? new Date(bill.created_at) : new Date();
   const date = (!bill.created_at || isNaN(_dateObj.getTime()) ? new Date() : _dateObj).toLocaleDateString("en-IN", {
     day: "2-digit",
@@ -430,7 +431,7 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
       .from(container)
       .outputPdf("blob");
 
-    const invoiceNo = `INV-${bill.id.slice(0, 8).toUpperCase()}`;
+    const invoiceNo = invoiceNumber(bill.id);
     const fileName = `${String(bill.patient_id).replace(/^local_/, "")}/${invoiceNo}-${Date.now()}.pdf`;
 
     // PDF upload sirf online ho tab karo — offline ho to silently skip
@@ -534,7 +535,7 @@ export default function Billing() {
       const paid = Number((bill as any).amount_paid || 0);
       acc.total += amount;
       acc.received += paid;
-      acc.pending += Math.max(amount - paid, 0);
+      acc.pending += Math.max(amount - Number((bill as any).discount || 0) - paid, 0);
       return acc;
     },
     { total: 0, received: 0, pending: 0 },
@@ -597,7 +598,7 @@ const filteredPatients = useMemo(() => {
     setServices((prev) => prev.map((s, i) => (i === idx ? { ...s, [field]: safeValue } : s)));
   };
 
-  const totalAmount = services.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
+  const totalAmount = services.filter(s => s.name.trim() && s.amount.trim()).reduce((sum, s) => sum + Number(s.amount), 0);
   const paidNum = parseFloat(amountPaid) || 0;
   const discountNum = parseFloat(discountAmount) || 0;
   const dueAmount = Math.max(totalAmount - discountNum - paidNum, 0);
@@ -633,7 +634,13 @@ const filteredPatients = useMemo(() => {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    const validServices = services.filter((s) => s.name && s.amount);
+    if (services.some(s => (s.name.trim() || s.amount.trim()) && (!s.name.trim() || !s.amount.trim()))) {
+      toast({ title: 'हर service का नाम और रकम भरें', variant: 'destructive' }); return;
+    }
+    const validServices = services.filter((s) => s.name.trim() && s.amount.trim());
+    if (validServices.some(s => !Number.isFinite(Number(s.amount)) || Number(s.amount) < 0) || paidNum < 0 || discountNum < 0 || discountNum > totalAmount) {
+      toast({ title: 'रकम और discount जाँचें', variant: 'destructive' }); return;
+    }
     if (!selectedPatient || validServices.length === 0) {
       toast({
         title: "Error",
@@ -653,7 +660,7 @@ const filteredPatients = useMemo(() => {
         status,
         amount_paid: paidNum,
         payment_mode: paymentMode || null,
-        discount: discountNum || null,
+        discount: discountNum,
         // 🔒 FIX: created_at yahin lock karo — offline din/din-raat use hone
         // par bill agle din sync ho to bhi Supabase apna "now()" laga ke
         // aaj ki date na de de, isliye asli banaye jaane ka time bhejte hain.
@@ -722,7 +729,7 @@ const filteredPatients = useMemo(() => {
 
       // Bill save hone ke baad patient ko SMS bhejo (try-catch se wrap - crash nahi hoga)
       if (mobile && result?.id) {
-        const invoiceNo = `INV-${result.id.slice(0, 8).toUpperCase()}`;
+        const invoiceNo = invoiceNumber(result.id);
         const date = new Date().toLocaleDateString("en-IN");
         const due = Math.max(totalAmount - discountNum - paidNum, 0);
         // PDF URL agar already generate hua ho to include karo
@@ -766,7 +773,7 @@ const filteredPatients = useMemo(() => {
       patientName,
       netBillAmount(bill),
       Number((bill as any).amount_paid || 0),
-      `INV-${bill.id.slice(0, 8).toUpperCase()}`,
+      invoiceNumber(bill.id),
       safeDate(bill.created_at),
       freshPdfUrl || null,
     );
@@ -789,7 +796,13 @@ const filteredPatients = useMemo(() => {
   const handleEditSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingBill) return;
-    const validServices = services.filter((s) => s.name && s.amount);
+    if (services.some(s => (s.name.trim() || s.amount.trim()) && (!s.name.trim() || !s.amount.trim()))) {
+      toast({ title: 'हर service का नाम और रकम भरें', variant: 'destructive' }); return;
+    }
+    const validServices = services.filter((s) => s.name.trim() && s.amount.trim());
+    if (validServices.some(s => !Number.isFinite(Number(s.amount)) || Number(s.amount) < 0) || paidNum < 0 || discountNum < 0 || discountNum > totalAmount) {
+      toast({ title: 'रकम और discount जाँचें', variant: 'destructive' }); return;
+    }
     if (validServices.length === 0) {
       toast({
         title: "Error",
@@ -810,7 +823,7 @@ const filteredPatients = useMemo(() => {
         status,
         amount_paid: paidNum,
         payment_mode: paymentMode || null,
-        discount: discountNum || null,
+        discount: discountNum,
       } as any);
 
       const updatedBill = {
@@ -820,7 +833,7 @@ const filteredPatients = useMemo(() => {
         status,
         amount_paid: paidNum,
         payment_mode: paymentMode,
-        discount: discountNum || null,
+        discount: discountNum,
       };
       // ✅ FIX: Edit save pe bhi PDF auto-generate nahi — white screen aati thi
       // PDF sirf manual button se generate hogi
@@ -834,7 +847,7 @@ const filteredPatients = useMemo(() => {
           patientName,
           Math.max(newTotal - discountNum, 0),
           paidNum,
-          `INV-${editingBill.id.slice(0, 8).toUpperCase()}`,
+          invoiceNumber(editingBill.id),
           safeDate(editingBill.created_at),
           (updatedBill as any).invoice_pdf_url || null,
         );

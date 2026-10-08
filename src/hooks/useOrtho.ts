@@ -2,7 +2,7 @@ import { businessDate } from "@/lib/businessDate";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { offlineFetch, offlineFetchScoped, offlineInsert, offlineUpdate } from "@/lib/offlineQuery";
-import { cacheGetAll, queueAdd, cacheUpsertRow } from "@/lib/offlineDb";
+import { cacheGetAll, queueAdd, cacheUpsertRow, commitMutation } from "@/lib/offlineDb";
 import { isOnline } from "@/lib/offlineSync";
 
 export type FractureCase = {
@@ -146,7 +146,7 @@ export function useFractureXrays(caseId?: string) {
           .eq("fracture_case_id", caseId).order("image_date", { ascending: false });
         if (error) throw error;
         return data || [];
-      }, cached => cached.filter(x => x.fracture_case_id === caseId)
+      }, cached => cached.filter(x => x.fracture_case_id?.replace(/^local_/, "") === caseId.replace(/^local_/, "")).map(x => ({ ...x, file_url: x._localFileUrl || x.file_url }))
         .sort((a, b) => (b.image_date || "").localeCompare(a.image_date || "")));
 
     },
@@ -179,13 +179,16 @@ export type XrayUploadResult = {
  * koi error nahi dikhata. Internet wapas aane par background sync engine
  * isi file ko automatically Supabase par upload kar dega.
  */
-export async function uploadFractureXray(caseId: string, patientId: string, file: File): Promise<XrayUploadResult> {
+export async function uploadClinicalFile(table: 'fracture_xrays' | 'xray_reports', patientId: string, file: File, caseId?: string, reportType = 'X-Ray'): Promise<XrayUploadResult> {
+  if (!/^(image\/(jpeg|png|webp)|application\/pdf)$/.test(file.type)) throw new Error('JPEG, PNG, WebP या PDF चुनें');
   const fileBase64 = await fileToBase64(file);
-  await queueAdd({
-    table: "fracture_xrays",
-    op: "xray_upload",
-    payload: { caseId, patientId, uploadId: crypto.randomUUID(), fileName: file.name, fileBase64, mimeType: file.type },
-  });
-  void import("@/lib/offlineSync").then(m => m.runSync()).catch(() => {});
-  return { ok: true, queued: true };
+  const uploadId = crypto.randomUUID();
+  const localUrl = `data:${file.type};base64,${fileBase64}`;
+  const row = { id: uploadId, patient_id: patientId, ...(caseId ? { fracture_case_id: caseId, image_date: businessDate() } : { report_type: reportType, uploaded_at: new Date().toISOString() }), created_at: new Date().toISOString(), file_url: localUrl, _localFileUrl: localUrl, _pendingSync: true };
+  await commitMutation({ table, op: 'xray_upload', tempId: uploadId, payload: { caseId, patientId, uploadId, fileName: file.name, fileBase64, mimeType: file.type, reportType, imageDate: caseId ? businessDate() : undefined, created_at: row.created_at } }, row);
+  void import('@/lib/offlineSync').then(m => m.runSync()).catch(() => {});
+  return { ok: true, queued: true, file_url: localUrl };
+}
+export async function uploadFractureXray(caseId: string, patientId: string, file: File): Promise<XrayUploadResult> {
+  return uploadClinicalFile('fracture_xrays', patientId, file, caseId);
 }

@@ -13,6 +13,7 @@ export function SyncStatusBadge() {
   // atka hua hai aur review kiya ja sake.
   const [stuck, setStuck]       = useState(0);
   const [syncing, setSyncing]   = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [justSynced, setJustSynced] = useState(false);
 
   useEffect(() => {
@@ -26,9 +27,11 @@ export function SyncStatusBadge() {
 
     const offQueue = onQueueChange((count) => setPending(count));
     const offSync  = onSyncStatus((s) => {
+      setSyncError(s.lastError || null);
+      if (s.lastError) setJustSynced(false);
       setSyncing(s.syncing);
       setPending(s.pending);
-      if (!s.syncing && s.pending === 0) {
+      if (!s.syncing && s.pending === 0 && !s.lastError) {
         setJustSynced(true);
         setTimeout(() => setJustSynced(false), 3000);
       }
@@ -46,6 +49,7 @@ export function SyncStatusBadge() {
     try { setStuck(await queueStuckCount()); setPending(await queueCount()); } catch { /* silent */ }
   }
 
+  if (syncError) return <button className="text-xs text-amber-700" title={syncError} onClick={() => void runSync().catch(() => {})}>PC पर सुरक्षित · Cloud sync बाकी ({pending})</button>;
   // Online + kuch pending nahi + sync nahi chal raha = badge dikhao hi mat
   if (online && pending === 0 && !syncing && !justSynced) return null;
 
@@ -89,6 +93,7 @@ export function SyncStatusBadge() {
     </div>
   );
 
+  if (syncError) return <button className="text-xs text-amber-700" title={syncError} onClick={() => void runSync().catch(() => {})}>PC पर सुरक्षित · Cloud sync बाकी ({pending})</button>;
   // Online + pending items — tap to retry
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>

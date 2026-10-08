@@ -1,3 +1,4 @@
+import { invoiceNumber } from "@/lib/invoiceNumber";
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -43,34 +44,6 @@ export default function PatientProfile() {
     if (!id) return;
     setLoading(true);
     try {
-      const online = navigator.onLine;
-      // 🚨 FIX: Agar patient abhi tak Supabase pe sync nahi hua (id "local_"
-      // se shuru hoti hai), to online query karne ka koi fayda nahi — "local_"
-      // ek valid UUID nahi hai, Supabase error dega aur patient details
-      // khaali dikhengi. Aise records ke liye seedha cache se hi dhoondo.
-      const isLocalOnly = id.startsWith("local_");
-
-      if (online && !isLocalOnly) {
-        try {
-          const [pRes, bRes, physioRes, xrayRes, medRes] = await Promise.all([
-            supabase.from("patients").select("*").eq("id", id).single(),
-            supabase.from("billing").select("*").eq("patient_id", id).order("created_at", { ascending: false }),
-            supabase.from("physiotherapy_sessions").select("*").eq("patient_id", id).order("created_at", { ascending: false }),
-            supabase.from("xray_reports").select("*").eq("patient_id", id).order("created_at", { ascending: false }),
-            supabase.from("patient_medicines").select("*, medicines(name, unit)").eq("patient_id", id).order("created_at", { ascending: false }),
-          ]);
-          setPatient(pRes.data);
-          setBills(bRes.data    || []);
-          setPhysio(physioRes.data  || []);
-          setXrays(xrayRes.data     || []);
-          setMedicines(medRes.data  || []);
-          setLoading(false);
-          return;
-        } catch (err) {
-          cLog.warn("PatientProfile", "Online fetch fail — cache try karega", err);
-        }
-      }
-
       // Offline fallback — cache se lo
       const [cachedPatients, cachedBills, cachedPhysio, cachedXrays, cachedMed] = await Promise.all([
         cacheGetAll("patients"),
@@ -80,12 +53,12 @@ export default function PatientProfile() {
         cacheGetAll("patient_medicines"),
       ]);
 
-      const pat = cachedPatients.find((p: any) => p.id === id) || null;
+      const pat = cachedPatients.find((p: any) => p.id.replace(/^local_/, "") === id.replace(/^local_/, "")) || null;
       setPatient(pat);
-      setBills(cachedBills.filter((b: any) => b.patient_id === id).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
-      setPhysio(cachedPhysio.filter((s: any) => s.patient_id === id).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
-      setXrays(cachedXrays.filter((r: any) => r.patient_id === id));
-      setMedicines(cachedMed.filter((m: any) => m.patient_id === id));
+      setBills(cachedBills.filter((b: any) => b.patient_id?.replace(/^local_/, "") === id.replace(/^local_/, "")).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+      setPhysio(cachedPhysio.filter((s: any) => s.patient_id?.replace(/^local_/, "") === id.replace(/^local_/, "")).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+      setXrays(cachedXrays.filter((r: any) => r.patient_id?.replace(/^local_/, "") === id.replace(/^local_/, "")));
+      setMedicines(cachedMed.filter((m: any) => m.patient_id?.replace(/^local_/, "") === id.replace(/^local_/, "")));
       cLog.info("PatientProfile", `Offline cache se data liya — patient: ${id}`);
     } catch (err) {
       cLog.error("PatientProfile", "Data fetch poora fail", err);
@@ -95,7 +68,7 @@ export default function PatientProfile() {
     }
   };
 
-  useEffect(() => { fetchData(); }, [id]);
+  useEffect(() => { void fetchData(); const timer = setInterval(fetchData, 5000); return () => clearInterval(timer); }, [id]);
 
   const startEdit = () => {
     setEditName(patient?.name    || "");
@@ -130,9 +103,9 @@ export default function PatientProfile() {
     }
   };
 
-  const totalBilled = bills.reduce((s, b) => s + Number(b.amount       || 0), 0);
+  const totalBilled = bills.reduce((s, b) => s + Math.max(Number(b.amount || 0) - Number(b.discount || 0), 0), 0);
   const totalPaid   = bills.reduce((s, b) => s + Number(b.amount_paid  || 0), 0);
-  const totalDue    = totalBilled - totalPaid;
+  const totalDue = bills.reduce((s,b) => s + Math.max(Number(b.amount || 0) - Number(b.discount || 0) - Number(b.amount_paid || 0), 0), 0);
 
   if (loading) return <DashboardLayout><div className="p-8 text-center text-muted-foreground">Loading...</div></DashboardLayout>;
   if (!patient) return <DashboardLayout><div className="p-8 text-center">Patient not found</div></DashboardLayout>;
@@ -294,7 +267,7 @@ export default function PatientProfile() {
                       const services = String(b.service || "").split("|").map((s: string) => s.split(":")[0].trim()).filter(Boolean).join(", ");
                       return (
                         <tr key={b.id} className="hover:bg-muted/20">
-                          <td className="p-3 font-mono text-xs">INV-{b.id.slice(0,8).toUpperCase()}</td>
+                          <td className="p-3 font-mono text-xs">{invoiceNumber(b.id)}</td>
                           <td className="p-3 max-w-[160px] truncate text-xs text-muted-foreground">{services}</td>
                           <td className="p-3 text-xs">{new Date(b.created_at).toLocaleDateString("en-IN")}</td>
                           <td className="p-3 text-right font-medium">₹{amt.toLocaleString("en-IN")}</td>

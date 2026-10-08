@@ -1,3 +1,6 @@
+import { useRef } from "react";
+import { cacheGetAll, commitBatch } from "@/lib/offlineDb";
+import { runSync } from "@/lib/offlineSync";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +25,7 @@ interface BookingRequest {
 }
 
 export default function BookingRequests() {
+  const processing = useRef(new Set<string>());
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -57,39 +61,38 @@ export default function BookingRequests() {
 
   // Confirm karne par seedha appointments table me bhi daal do (patient pehle se ho to use karo, nahi to naya banao)
   const confirmAndCreateAppointment = async (req: BookingRequest) => {
+    if (processing.current.has(req.id)) return;
+    processing.current.add(req.id);
     try {
-      let patientId: string | null = null;
-      const online = await isOnline();
-      if (online) {
-        try {
-          const { data: existingPatients } = await supabase
-            .from("patients").select("id").eq("mobile", req.mobile).limit(1);
-          if (existingPatients?.length) {
-            patientId = existingPatients[0].id;
-          }
-        } catch { /* offline ya network error — neeche naya patient offline banega */ }
-      }
-      if (!patientId) {
-        const newPatient = await offlineInsert("patients", { name: req.patient_name, mobile: req.mobile });
-        patientId = newPatient.id;
-      }
-      await offlineInsert("appointments", {
-        patient_id: patientId,
-        date: req.preferred_date,
-        time_slot: req.preferred_time,
-        notes: req.reason,
-        status: "Scheduled",
-      });
-      await updateStatus.mutateAsync({ id: req.id, status: "Confirmed" });
-    } catch {
-      toast({ title: "Appointment banane me dikkat aayi", variant: "destructive" });
-    }
+      const [patients, branches, requests, appointments] = await Promise.all(['patients','branches','booking_requests','appointments'].map(cacheGetAll));
+      if (requests.find(r => r.id === req.id)?.status === 'Confirmed') return;
+      const mobile = req.mobile.replace(/\D/g,'').slice(-10);
+      const patient = patients.find(p => (p.mobile || '').replace(/\D/g,'').slice(-10) === mobile);
+      const patientId = patient?.id || req.id;
+      const branch = patient?.branch_id || localStorage.getItem('bocc_selected_branch') || (branches.filter(b => b.is_active).length === 1 ? branches.find(b => b.is_active)?.id : null);
+      if (!branch) throw new Error('पहले branch चुनें');
+      const items: any[] = [];
+      const add = (table: string, row: any) => items.push({ mutation: { table, op: 'insert', tempId: row.id, payload: row }, row });
+      if (!patient) add('patients', { id: patientId, name: req.patient_name, mobile, branch_id: branch, created_at: new Date().toISOString(), _pendingSync: true });
+      if (!appointments.some(a => a.id.replace(/^local_/, '') === req.id.replace(/^local_/, ''))) add('appointments', { id: req.id, patient_id: patientId, branch_id: branch, date: req.preferred_date, time_slot: req.preferred_time, notes: req.reason, status: 'Scheduled', created_at: new Date().toISOString(), _pendingSync: true });
+      items.push({ mutation: { table: 'booking_requests', op: 'update', rowId: req.id, payload: { status: 'Confirmed' } }, row: { status: 'Confirmed' } });
+      await commitBatch(items); void runSync().catch(() => {});
+      void queryClient.invalidateQueries();
+      toast({ title: 'Appointment PC पर सुरक्षित है' });
+    } catch (e: any) {
+      toast({ title: 'Appointment save failed', description: e.message, variant: 'destructive' });
+    } finally { processing.current.delete(req.id); }
   };
 
-  const copyBookingLink = () => {
-    const link = `${window.location.origin}${window.location.pathname}#/book-appointment`;
-    navigator.clipboard.writeText(link);
-    toast({ title: "Booking link copy ho gaya — patients ko WhatsApp/SMS kar sakte ho" });
+  const copyBookingLink = async () => {
+    try {
+      const configured = import.meta.env.VITE_PUBLIC_BOOKING_URL;
+      const base = configured || (window.location.protocol === 'https:' ? window.location.origin + window.location.pathname : '');
+      if (!base || new URL(base).protocol !== 'https:') throw new Error('Public booking website URL अभी configured नहीं है।');
+      const link = base.split('#')[0] + '#/book-appointment';
+      await navigator.clipboard.writeText(link);
+      toast({ title: 'Booking link copied' });
+    } catch (e: any) { toast({ title: 'Link copy नहीं हुआ', description: e.message, variant: 'destructive' }); }
   };
 
   const pending = requests.filter((r) => r.status === "Pending");

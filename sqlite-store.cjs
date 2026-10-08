@@ -89,6 +89,8 @@ function cacheGetAll(table) {
 }
 
 function cacheGetRow(table, rowId) {
+  rowId = metaGet('alias:' + table + ':' + rowId) || rowId;
+  if (String(rowId).startsWith('local_') && getDb().prepare('SELECT 1 FROM table_cache WHERE _key=?').get(`${table}::${String(rowId).slice(6)}`)) rowId = String(rowId).slice(6);
   const r = getDb().prepare(`SELECT data FROM table_cache WHERE _key = ?`).get(`${table}::${rowId}`);
   return r ? JSON.parse(r.data) : undefined;
 }
@@ -112,7 +114,9 @@ function cacheSetRows(table, rows, idField) {
 function cacheReplaceTable(table, rows, idField) {
   const del = getDb().prepare(`DELETE FROM table_cache WHERE table_name = ?`);
   const runAll = getDb().transaction(() => {
-    const pending = cacheGetAll(table).filter(row => row._pendingSync);
+    const previous = cacheGetAll(table);
+    rows = rows.map(row => { const old = previous.find(r => r[idField] === row[idField]); return old?._localFileUrl ? { ...row, _localFileUrl: old._localFileUrl } : row; });
+    const pending = previous.filter(row => row._pendingSync);
     const pendingIds = new Set(pending.flatMap(row => [String(row[idField]), String(row[idField]).replace(/^local_/, '')]));
     const deleted = new Set(queueGetAll().filter(m => m.table === table && m.op === 'delete').flatMap(m => [m.rowId, m.rowId?.replace(/^local_/, '')]));
     const combined = [...pending, ...rows.filter(row => !pendingIds.has(String(row[idField])))].filter(row => !deleted.has(row[idField]));
@@ -129,7 +133,7 @@ function cacheMergeServer(table, row, idField = 'id') {
     if (queueGetAll().some(m => m.table === table && [m.rowId,m.tempId].some(v => v && v.replace(/^local_/, '') === id))) return;
     const existing = cacheGetRow(table, row[idField]) || cacheGetRow(table, 'local_' + id);
     if (existing?._pendingSync) return;
-    cacheUpsertRow(table, row, idField);
+    cacheUpsertRow(table, { ...existing, ...row }, idField);
   })();
 }
 
@@ -149,6 +153,26 @@ function cacheReplaceRowKey(table, oldId, newRow, idField) {
   const runAll = getDb().transaction(() => {
     getDb().prepare(`DELETE FROM table_cache WHERE _key = ?`).run(`${table}::${oldId}`);
     cacheUpsertRow(table, newRow, idField);
+    const newId = newRow[idField];
+    if (oldId !== newId) {
+      metaSet('alias:' + table + ':' + oldId, newId);
+      const referenceKeys = { patients: ['patient_id','patientId'], fracture_cases: ['fracture_case_id','caseId'], medicines: ['medicine_id'], medicine_entries: ['entry_id'], billing: ['billing_id'], branches: ['branch_id'] }[table] || [];
+      const remap = value => {
+        if (!value || typeof value !== 'object') return value;
+        const out = { ...value };
+        for (const key of referenceKeys) if (out[key] === oldId) out[key] = newId;
+        return out;
+      };
+      for (const item of getDb().prepare('SELECT * FROM table_cache').all()) {
+        const row = JSON.parse(item.data), mapped = remap(row);
+        if (JSON.stringify(row) !== JSON.stringify(mapped)) cacheUpsertRow(item.table_name, mapped, 'id');
+      }
+      for (const mutation of queueGetAll()) {
+        const patch = { payload: remap(mutation.payload) };
+        if (mutation.table === table && mutation.rowId === oldId) patch.rowId = newId;
+        queueUpdate(mutation.id, patch);
+      }
+    }
   });
   runAll();
 }
@@ -282,6 +306,28 @@ function close() {
   }
 }
 
+function cascadeLocalDelete(table, rowId) {
+  const keys = { patients: ['patient_id','patientId'], billing: ['billing_id'], fracture_cases: ['fracture_case_id','caseId'], medicine_entries: ['entry_id'] }[table] || [];
+  for (const item of getDb().prepare('SELECT * FROM table_cache').all()) {
+    const child = JSON.parse(item.data);
+    if (keys.some(k => child[k] === rowId)) cascadeLocalDelete(item.table_name, child.id);
+  }
+  for (const m of queueGetAll()) {
+    if ((m.table === table && (m.rowId === rowId || m.tempId === rowId)) || keys.some(k => m.payload?.[k] === rowId)) queueRemove(m.id);
+  }
+  cacheDeleteRow(table, rowId);
+}
+function authorizedBatch(items, authorize, ownerUserId) {
+  if (!Array.isArray(items) || !items.length || items.length > 500) throw new Error('Invalid transaction');
+  return getDb().transaction(() => items.map(item => {
+    authorize(item);
+    return commitMutation({ ...item.mutation, ownerUserId }, item.row, item.idField);
+  }))();
+}
+function commitBatch(items) {
+  if (!Array.isArray(items) || !items.length || items.length > 500) throw new Error('Invalid transaction');
+  return getDb().transaction(() => items.map(({mutation,row,idField}) => commitMutation(mutation,row,idField)))();
+}
 function commitMutation(mutation, row, idField = 'id') {
   return getDb().transaction(() => {
     let saved = row;
@@ -290,7 +336,7 @@ function commitMutation(mutation, row, idField = 'id') {
       if (!existing) throw new Error('Record not available locally; refresh before editing');
       saved = { ...existing, ...row, [idField]: mutation.rowId, _pendingSync: true };
     }
-    if (mutation.op === 'delete') cacheDeleteRow(mutation.table, mutation.rowId);
+    if (mutation.op === 'delete') cascadeLocalDelete(mutation.table, mutation.rowId);
     else cacheUpsertRow(mutation.table, saved, idField);
     queueAdd(mutation);
     return saved;
@@ -333,7 +379,7 @@ function adjustStock(args) {
   })();
 }
 module.exports = {
-  commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
+  authorizedBatch, commitBatch, commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
   init, close,
   cacheGetAll, cacheGetRow, cacheSetRows, cacheReplaceTable, cacheUpsertRow, cacheDeleteRow, cacheReplaceRowKey,
   queueAdd, queueGetAll, queueRemove, queueUpdate,

@@ -234,17 +234,10 @@ export default function SettingsPage() {
   };
 
   const handleNuclearReset = async () => {
-    const confirmed = window.confirm(
-      "⚠️ Offline Storage Nuclear Reset\n\n" +
-      "Ye app ki local cache files delete karke restart karega.\n" +
-      "Aapka asli data (patients, bills) SAFE rahega — Supabase aur C:\\Balaji_Health_Backup\\ mein hai.\n\n" +
-      "App 2 second mein band hokar dobara khulega.\n\n" +
-      "Kya aap sure hain?"
-    );
-    if (!confirmed) return;
     setNuclearRunning(true);
     try {
-      await (window as any).electron?.nuclearIndexedDBReset?.();
+      const result = await (window as any).electron?.nuclearIndexedDBReset?.();
+      if (!result?.success) throw new Error(result?.error || "Storage reset disabled to protect offline data");
       // App restart ho jaayega — ye code nahi chalega
     } catch (e: any) {
       toast({ title: "Reset Error", description: e?.message || "Reset fail hua", variant: "destructive" });

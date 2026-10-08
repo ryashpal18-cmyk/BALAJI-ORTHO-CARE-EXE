@@ -32,6 +32,7 @@ function electronOffline() {
   const w = window as any;
   return w.electron?.offline as
     | {
+        commitBatch?: (items: any[]) => Promise<any>;
         refreshCashDays?: () => Promise<any>;
         commitMutation: (mutation: any, row: any, idField: string) => Promise<any>;
         snapshot: () => Promise<any>;
@@ -183,7 +184,7 @@ export async function cacheUpsertRowFromServer(table: string, row: any, idField 
   const pending = await queueGetAll();
   if (pending.some(m => m.table === table && [m.rowId,m.tempId].some(v => v?.replace(/^local_/, "") === id))) return;
   const existing = await cacheGetRow(table, row[idField]);
-  if (!existing?._pendingSync) await cacheUpsertRow(table, row, idField);
+  if (!existing?._pendingSync) await cacheUpsertRow(table, { ...existing, ...row }, idField);
 }
 
 export async function cacheUpsertRow(table: string, row: any, idField = "id") {
@@ -546,5 +547,12 @@ export async function atomicStockAdjustment(args: any) {
   const bridge = electronOffline();
   if (!bridge) throw new Error("Stock adjustment requires the desktop app");
   const res = await bridge.adjustStock({ ...args, id: tempId() });
+  assertSuccess(res); notifyQueueChanged(); return res.data;
+}
+
+export async function commitBatch(items: { mutation: any; row: any; idField?: string }[]) {
+  const bridge = electronOffline();
+  if (!bridge?.commitBatch) throw new Error('Atomic storage unavailable; update the desktop app before saving');
+  const res = await bridge.commitBatch(items);
   assertSuccess(res); notifyQueueChanged(); return res.data;
 }

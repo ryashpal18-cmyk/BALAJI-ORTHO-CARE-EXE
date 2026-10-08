@@ -1,3 +1,5 @@
+import { useIsAdmin } from "@/hooks/useIsAdmin";
+import { cacheGetAll } from "@/lib/offlineDb";
 import { businessDate } from "@/lib/businessDate";
 import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -11,8 +13,6 @@ import { toast } from "@/hooks/use-toast";
 import { Lock, Pill, Printer, Download, FileDown, Search } from "lucide-react";
 import * as XLSX from "xlsx";
 
-const ADMIN_PASS = "Aarya@2026";
-const SESSION_KEY = "medCommissionUnlocked";
 
 interface Entry {
   id: string;
@@ -31,7 +31,7 @@ const monthStart = () => {
 };
 
 export default function MedicineCommission() {
-  const [unlocked, setUnlocked] = useState(false);
+  const { isAdmin: unlocked, loading: authLoading } = useIsAdmin();
   const [pass, setPass] = useState("");
   const [err, setErr] = useState("");
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -41,21 +41,17 @@ export default function MedicineCommission() {
   const [searchMed, setSearchMed] = useState("");
 
   useEffect(() => {
-    if (sessionStorage.getItem(SESSION_KEY) === "1") setUnlocked(true);
-  }, []);
-
-  useEffect(() => {
-    if (!unlocked) return;
-    supabase
-      .from("medicine_entries")
-      .select("*, invoice_medicine_mapping(medicine_name, rate)")
-      .gte("date", from)
-      .lte("date", to)
-      .order("date", { ascending: false })
-      .then(({ data, error }) => {
-        if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
-        setEntries((data as any) || []);
-      });
+    if (!unlocked) { setEntries([]); return; }
+    let cancelled = false;
+    async function refresh() {
+      try {
+        const [entries, mappings] = await Promise.all([cacheGetAll('medicine_entries'), cacheGetAll('invoice_medicine_mapping')]);
+        if (!cancelled) setEntries(entries.filter(e => (e.date || businessDate(e.created_at)) >= from && (e.date || businessDate(e.created_at)) <= to)
+          .map(e => ({ ...e, date: e.date || businessDate(e.created_at), invoice_medicine_mapping: mappings.filter(m => m.entry_id === e.id) })) as Entry[]);
+      } catch (e: any) { if (!cancelled) toast({ title: 'Load failed', description: e.message, variant: 'destructive' }); }
+    }
+    void refresh(); const timer = setInterval(refresh, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
   }, [unlocked, from, to]);
 
   const filtered = useMemo(() => {
@@ -90,16 +86,6 @@ export default function MedicineCommission() {
     }));
   }, [filtered]);
 
-  const handleUnlock = () => {
-    if (pass === ADMIN_PASS) {
-      sessionStorage.setItem(SESSION_KEY, "1");
-      setUnlocked(true);
-      setErr("");
-    } else {
-      setErr("Invalid Password");
-    }
-  };
-
   const exportExcel = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(
@@ -122,35 +108,7 @@ export default function MedicineCommission() {
 
   const handlePrint = () => window.print();
 
-  if (!unlocked) {
-    return (
-      <DashboardLayout>
-        <Dialog open>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Lock className="h-5 w-5" /> Admin Access Required
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-2">
-              <Label>Password</Label>
-              <Input
-                type="password"
-                value={pass}
-                onChange={(e) => setPass(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
-                autoFocus
-              />
-              {err && <p className="text-sm text-destructive">{err}</p>}
-            </div>
-            <DialogFooter>
-              <Button onClick={handleUnlock}>Unlock</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </DashboardLayout>
-    );
-  }
+  if (!unlocked) return <DashboardLayout><p>{authLoading ? 'Checking access…' : 'Administrator access required'}</p></DashboardLayout>;
 
   return (
     <DashboardLayout>

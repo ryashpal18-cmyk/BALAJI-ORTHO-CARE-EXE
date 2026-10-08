@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 /** Renew persisted private links, including legacy public storage URLs. */
 export async function refreshClinicalUrl(value: string): Promise<string> {
+  if (/^data:(image\/(jpeg|png|webp)|application\/pdf);base64,/.test(value)) return value;
   const url = new URL(value);
   const match = url.pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/(invoices|prescriptions|reports|xray-files)\/(.+)$/);
   if (!match) throw new Error("Unsupported clinical file URL");

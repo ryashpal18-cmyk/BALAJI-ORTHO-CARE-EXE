@@ -1,4 +1,7 @@
-import { useState, useEffect } from "react";
+import { businessDate } from "@/lib/businessDate";
+import { runSync } from "@/lib/offlineSync";
+import { invoiceNumber, legacyInvoiceNumbers } from "@/lib/invoiceNumber";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -8,16 +11,9 @@ import { toast } from "@/hooks/use-toast";
 import { Pill, Search, Save, Trash2, Plus, User, FileText } from "lucide-react";
 import { offlineFetch, offlineFetchScoped, offlineInsert, offlineDelete } from "@/lib/offlineQuery";
 import { isOnline } from "@/lib/offlineSync";
-import { cacheGetAll } from "@/lib/offlineDb";
+import { cacheGetAll, commitBatch, tempId } from "@/lib/offlineDb";
 
-const DEFAULT_MEDICINES = [
-  { id: "med1", name: "Tab Aconex SP",      rate: 68.72  },
-  { id: "med2", name: "Tab Calcikem K27",    rate: 135.73 },
-  { id: "med3", name: "Tab Cefnex 200 LB",   rate: 150.20 },
-  { id: "med4", name: "SYP Unisure D3 Nano", rate: 48.54  },
-  { id: "med5", name: "Tab Cytocal + D3",    rate: 126.89 },
-  { id: "med6", name: "Cap Raquil DSR",      rate: 118.94 },
-];
+const DEFAULT_MEDICINES: any[] = [];
 
 export default function PatientMedicine() {
   const [searchParams] = useSearchParams();
@@ -29,12 +25,14 @@ export default function PatientMedicine() {
   const [selectedBill, setSelectedBill] = useState<any>(null);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
+  const entryRequest = useRef(0);
+  const [entryReady, setEntryReady] = useState(false);
   const [existingEntry, setExistingEntry] = useState<any>(null);
 
   // Fetch patients
   useEffect(() => {
     offlineFetch<any>("patients", async () => {
-      const { data, error } = await supabase.from("patients").select("id, name, mobile").order("name");
+      const { data, error } = await supabase.from("patients").select("*").order("name");
       if (error) throw error;
       return data || [];
     }).then((list) => {
@@ -53,7 +51,7 @@ export default function PatientMedicine() {
     const invoiceId = searchParams.get("invoiceId");
     if (!invoiceId || bills.length === 0) return;
     const found = bills.find((b: any) => 
-      `INV-${b.id.slice(0,8).toUpperCase()}` === invoiceId
+      invoiceNumber(b.id) === invoiceId
     );
     if (found) setSelectedBill(found);
   }, [bills, searchParams]);
@@ -92,41 +90,24 @@ export default function PatientMedicine() {
   }, [selectedBill]);
 
   const loadExistingEntry = async (bill: any) => {
-    const invoiceNo = `INV-${bill.id.slice(0, 8).toUpperCase()}`;
-    const online = await isOnline();
-    let data: any = null;
-
-    if (online) {
-      try {
-        const res = await supabase
-          .from("medicine_entries" as any)
-          .select("*, invoice_medicine_mapping(*)")
-          .eq("invoice_no", invoiceNo)
-          .maybeSingle();
-        data = res.data;
-      } catch { /* offline ya network error — neeche cache se fallback */ }
-    }
-
-    if (!data) {
-      // Offline fallback — local cache se dhoondo (isi device par bana entry milega)
-      const entries = await cacheGetAll("medicine_entries");
-      const entry = (entries as any[]).find((e) => e.invoice_no === invoiceNo);
-      if (entry) {
-        const mappings = await cacheGetAll("invoice_medicine_mapping");
-        const mapping = (mappings as any[]).filter((m) => m.entry_id === entry.id);
-        data = { ...entry, invoice_medicine_mapping: mapping };
+    const request = ++entryRequest.current; setEntryReady(false);
+    try {
+      const [entries, mappings, allBills] = await Promise.all([cacheGetAll('medicine_entries'), cacheGetAll('invoice_medicine_mapping'), cacheGetAll('billing')]);
+      const aliases = legacyInvoiceNumbers(bill.id);
+      const matches = entries.filter(e => aliases.includes(e.invoice_no));
+      const exact = matches.filter(e => e.invoice_no === invoiceNumber(bill.id));
+      const selected = exact.length ? exact : matches;
+      if (selected.length > 1 || selected.some(e => e.invoice_no !== invoiceNumber(bill.id) && allBills.filter(b => legacyInvoiceNumbers(b.id).includes(e.invoice_no)).length !== 1)) {
+        throw new Error('पुराना invoice number एक से अधिक bills से मेल खाता है। Entry को review करें; कोई data बदला नहीं गया।');
       }
-    }
-
-    if (data) {
-      setExistingEntry(data);
-      const mapping = (data as any).invoice_medicine_mapping || [];
-      const newChecked: Record<string, boolean> = {};
-      mapping.forEach((m: any) => { newChecked[m.medicine_id] = true; });
-      setChecked(newChecked);
-    } else {
-      setExistingEntry(null);
-      setChecked({});
+      if (request !== entryRequest.current) return;
+      const entry = selected[0];
+      const mapping = entry ? mappings.filter(m => m.entry_id === entry.id) : [];
+      setExistingEntry(entry ? { ...entry, invoice_medicine_mapping: mapping } : null);
+      setChecked(Object.fromEntries(mapping.map(m => [m.medicine_id, true])));
+      setEntryReady(true);
+    } catch (e: any) {
+      if (request === entryRequest.current) toast({ title: 'Entry load failed', description: e.message, variant: 'destructive' });
     }
   };
 
@@ -143,42 +124,26 @@ export default function PatientMedicine() {
       toast({ title: "Bill select karo pehle", variant: "destructive" }); return;
     }
     setSaving(true);
-    const invoiceNo = `INV-${selectedBill.id.slice(0, 8).toUpperCase()}`;
+    const invoiceNo = invoiceNumber(selectedBill.id);
 
     try {
-      // Delete existing entry if any (offline-safe — net na ho to queue me chala jaayega)
-      if (existingEntry) {
-        const mapping = (existingEntry as any).invoice_medicine_mapping || [];
-        for (const m of mapping) {
-          await offlineDelete("invoice_medicine_mapping", m.id);
+      if (!entryReady || !selectedPatient || selectedBill.patient_id.replace(/^local_/, '') !== selectedPatient.id.replace(/^local_/, '')) throw new Error('Select and load the matching patient bill before saving');
+      const items: any[] = [];
+      const entryId = existingEntry?.id || tempId();
+      for (const m of existingEntry?.invoice_medicine_mapping || []) items.push({ mutation: { table: 'invoice_medicine_mapping', op: 'delete', rowId: m.id }, row: null });
+      if (!chosen.length) {
+        if (existingEntry) items.push({ mutation: { table: 'medicine_entries', op: 'delete', rowId: entryId }, row: null });
+      } else {
+        const entry = { id: entryId, invoice_no: invoiceNo, patient_name: selectedPatient.name, total_amount: total, commission,
+          date: existingEntry?.date || businessDate(), created_at: existingEntry?.created_at || new Date().toISOString(), _pendingSync: true };
+        items.push({ mutation: { table: 'medicine_entries', op: existingEntry ? 'update' : 'insert', ...(existingEntry ? { rowId: entryId } : { tempId: entryId }), payload: entry }, row: entry });
+        for (const m of chosen) {
+          const row = { id: tempId(), entry_id: entryId, medicine_id: m.id, medicine_name: m.name, rate: m.rate, _pendingSync: true };
+          items.push({ mutation: { table: 'invoice_medicine_mapping', op: 'insert', tempId: row.id, payload: row }, row });
         }
-        await offlineDelete("medicine_entries", existingEntry.id);
       }
-
-      if (chosen.length === 0) {
-        toast({ title: "✅ Medicine entry clear ho gayi!" });
-        setExistingEntry(null);
-        setSaving(false);
-        return;
-      }
-
-      // Create new entry (offline-safe)
-      const entry = await offlineInsert("medicine_entries", {
-        invoice_no: invoiceNo,
-        patient_name: selectedPatient.name,
-        total_amount: total,
-        commission,
-      });
-
-      for (const m of chosen) {
-        await offlineInsert("invoice_medicine_mapping", {
-          entry_id: entry.id,
-          medicine_id: m.id,
-          medicine_name: m.name,
-          rate: m.rate,
-        });
-      }
-
+      if (items.length) await commitBatch(items);
+      void runSync().catch(() => {});
       const online = await isOnline();
       toast({
         title: online ? "✅ Saved!" : "📥 Offline save ho gaya — net aane par sync hoga",
@@ -229,7 +194,7 @@ export default function PatientMedicine() {
               {filteredPatients.map(p => (
                 <button
                   key={p.id}
-                  onClick={() => { setSelectedPatient(p); setSelectedBill(null); setChecked({}); }}
+                  onClick={() => { ++entryRequest.current; setEntryReady(false); setExistingEntry(null); setSelectedPatient(p); setSelectedBill(null); setChecked({}); }}
                   className={`w-full text-left px-4 py-2.5 text-sm hover:bg-accent transition-colors ${selectedPatient?.id === p.id ? "bg-primary/10 font-semibold text-primary" : ""}`}
                 >
                   {p.name}
@@ -254,7 +219,7 @@ export default function PatientMedicine() {
               ) : bills.length === 0 ? (
                 <p className="p-4 text-sm text-center text-muted-foreground">Koi bill nahi hai</p>
               ) : bills.map(b => {
-                const invoiceNo = `INV-${b.id.slice(0, 8).toUpperCase()}`;
+                const invoiceNo = invoiceNumber(b.id);
                 return (
                   <button
                     key={b.id}
@@ -318,7 +283,7 @@ export default function PatientMedicine() {
                 </div>
 
                 <div className="p-3 border-t">
-                  <Button onClick={handleSave} disabled={saving} className="w-full">
+                  <Button onClick={handleSave} disabled={saving || !entryReady} className="w-full">
                     <Save className="h-4 w-4 mr-2" />
                     {saving ? "Saving..." : existingEntry ? "Update Karo" : "Save Karo"}
                   </Button>

@@ -1,3 +1,5 @@
+import { uploadClinicalFile } from "@/hooks/useOrtho";
+import { useQueryClient } from "@tanstack/react-query";
 import { refreshClinicalUrl } from "@/lib/clinicalFiles";
 import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -34,6 +36,7 @@ function printSavedAiReport(savedReport: any) {
 }
 
 export default function Reports() {
+  const queryClient = useQueryClient();
   const { data: reports, isLoading } = useXrayReports();
   const { data: patients } = usePatients();
   const addReport = useAddXrayReport();
@@ -68,19 +71,9 @@ export default function Reports() {
     }
     setUploading(true);
     try {
-      const filePath = `${form.patient_id}/${Date.now()}_${file.name}`;
-      const { error: uploadError } = await supabase.storage.from("xray-files").upload(filePath, file);
-      if (uploadError) throw uploadError;
-
-      const { data: urlData, error: signError } = await supabase.storage.from("xray-files").createSignedUrl(filePath, 86400);
-      if (signError || !urlData?.signedUrl) throw signError || new Error("Cannot create report link");
-
-      await addReport.mutateAsync({
-        patient_id: form.patient_id,
-        file_url: urlData.signedUrl,
-        report_type: form.report_type,
-      });
-      toast({ title: "Success", description: "Report uploaded!" });
+      await uploadClinicalFile('xray_reports', form.patient_id, file, undefined, form.report_type);
+      void queryClient.invalidateQueries({ queryKey: ['xray_reports'] });
+      toast({ title: 'Report PC पर सुरक्षित है', description: 'Internet आने पर background में sync होगा' });
       setForm({ patient_id: "", report_type: "X-Ray" });
       setFile(null);
       setOpen(false);

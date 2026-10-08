@@ -52,7 +52,7 @@ export default function RevenueDashboard() {
 
     const outstanding = all
       .filter((b: any) => ["Pending", "Partial"].includes(b.status))
-      .reduce((s: number, b: any) => s + Math.max(Number(b.amount || 0) - Number(b.amount_paid || 0), 0), 0);
+      .reduce((s: number, b: any) => s + Math.max(Number(b.amount || 0) - Number(b.discount || 0) - Number(b.amount_paid || 0), 0), 0);
 
     // Daily revenue — last 30 days
     const dailyRevenue = days.map((d) => {
@@ -95,7 +95,7 @@ export default function RevenueDashboard() {
         id: b.id,
         patient_id: b.patient_id,
         name: b.patients?.name || "Patient",
-        due: Math.max(Number(b.amount || 0) - Number(b.amount_paid || 0), 0),
+        due: Math.max(Number(b.amount || 0) - Number(b.discount || 0) - Number(b.amount_paid || 0), 0),
       }))
       .filter((d) => d.due > 0)
       .sort((a, b) => b.due - a.due)

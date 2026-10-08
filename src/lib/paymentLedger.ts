@@ -38,3 +38,17 @@ export function collectionRows(bills: any[]) {
     id: receipt.id, bill_id: bill.id, created_at: receipt.paid_at, amount_paid: receipt.amount,
     payment_mode: receipt.payment_mode, legacy_collection: !!receipt.legacy })));
 }
+
+export function normalizeBill(changes: any, existing: any = {}) {
+  const result = { ...changes };
+  if ('discount' in result || !('id' in existing)) result.discount = Number(result.discount ?? 0);
+  const bill = { ...existing, ...result };
+  for (const key of ['amount','amount_paid','discount']) {
+    const value = Number(bill[key] ?? 0);
+    if (!Number.isFinite(value) || value < 0) throw new Error('Amount, payment and discount must be non-negative numbers');
+  }
+  if (Number(bill.discount || 0) > Number(bill.amount || 0)) throw new Error('Discount cannot exceed bill amount');
+  const net = Number(bill.amount || 0) - Number(bill.discount || 0);
+  result.status = Number(bill.amount_paid || 0) >= net ? 'Paid' : Number(bill.amount_paid || 0) > 0 ? 'Partial' : 'Pending';
+  return result;
+}

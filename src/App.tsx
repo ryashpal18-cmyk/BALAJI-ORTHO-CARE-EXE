@@ -99,8 +99,8 @@ const App = () => {
 
   // ── App resume / inactivity ke baad PIN lock check ──
   useEffect(() => {
-    if (!isPinEnabled()) return;
     if (shouldShowLock()) setLocked(true);
+    const timer = setInterval(() => { if (shouldShowLock()) setLocked(true); }, 1000);
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
@@ -108,11 +108,12 @@ const App = () => {
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", handleVisibility); };
   }, []);
 
   // har user interaction par "last active" timestamp refresh karo
   const trackActivity = useCallback(() => {
+    if (shouldShowLock()) { setLocked(true); return; }
     if (!locked) markActive();
   }, [locked]);
 

@@ -1,3 +1,4 @@
+import { normalizeBill } from "./paymentLedger";
 import { fetchCompleteTable, OPERATIONAL_TABLES } from "./completeFetch";
 import { ensureCloudSession } from "./localSession";
 // ─────────────────────────────────────────────────────────────────────────
@@ -173,7 +174,7 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     return;
   }
   if (m.op === "insert") {
-    let payload = { ...m.payload };
+    let payload = table === "billing" ? normalizeBill(m.payload) : { ...m.payload };
     // ✅ tempId ab "local_<real-uuid>" hai — prefix hata ke wahi UUID
     // Supabase pe bhi id ke roop mein use karo (naya generate mat karo).
     if (m.tempId) {
@@ -189,7 +190,11 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     // ke baad), to same id pe dobara likhega, duplicate row nahi banega.
     const { data, error } = table === "cash_book_days"
       ? await supabase.rpc("save_cash_day" as any, { p_id: payload.id, p_event: payload } as any)
-      : await supabase.from(table).upsert(payload, { onConflict: "id" }).select().single();
+      : await (async () => {
+          const inserted = await supabase.from(table).upsert(payload, { onConflict: 'id', ignoreDuplicates: true }).select().maybeSingle();
+          if (inserted.error || inserted.data) return inserted;
+          return supabase.from(table).select('*').eq('id', payload.id).single();
+        })();
     if (error) { console.error(`Insert failed — table: ${table}`); throw error; }
     if (m.tempId && data) {
       const remaining = (await queueGetAll()).filter(q => q.id !== m.id && q.table === table && (q.rowId === m.tempId || q.rowId === (data as any).id));
@@ -208,8 +213,10 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
   if (m.op === "update") {
     if (!m.rowId) throw new Error("update mutation missing rowId");
     if (m.rowId.startsWith("local_")) throw new Error("PENDING_PARENT_INSERT");
-    let updatePayload = stripLocalPrefixes({ ...m.payload });
+    const cachedBill = table === "billing" ? (await cacheGetAll(table)).find(r => r.id === m.rowId) : null;
+    let updatePayload = stripLocalPrefixes(table === "billing" ? normalizeBill(m.payload, cachedBill || {}) : { ...m.payload });
     updatePayload = stripEmbeddedRelations(updatePayload);
+    delete updatePayload.id; // The mutation rowId owns identity; stale local IDs must not update the PK.
     delete updatePayload._pendingSync;
     delete updatePayload._localOnly;
     const { data: serverRow, error } = await supabase.from(table).update(updatePayload).eq("id", m.rowId).select().single();
@@ -290,7 +297,7 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
   }
   if (m.op === "xray_upload") {
     const { fileName, fileBase64, mimeType } = m.payload;
-    const caseId = m.payload.caseId.replace(/^local_/, "");
+    const caseId = (m.payload.caseId || "reports").replace(/^local_/, "");
     const patientId = m.payload.patientId.replace(/^local_/, "");
     let uploadId = m.payload.uploadId;
     if (!uploadId) { uploadId = crypto.randomUUID(); await queueUpdate(m.id!, { payload: { ...m.payload, uploadId } }); }
@@ -302,10 +309,11 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     if (upErr) throw upErr;
     const { data: signed, error: signErr } = await supabase.storage.from("xray-files").createSignedUrl(path, 60 * 60 * 24 * 365);
     if (signErr) throw signErr;
-    const row = { id: uploadId, fracture_case_id: caseId, patient_id: patientId, file_url: signed!.signedUrl };
-    const { error } = await supabase.from("fracture_xrays" as any).upsert(row, { onConflict: "id" });
+    const row = { id: uploadId, ...(m.table === 'fracture_xrays' ? { fracture_case_id: caseId, ...(m.payload.imageDate ? { image_date: m.payload.imageDate } : {}) } : { report_type: m.payload.reportType || 'X-Ray' }), patient_id: patientId, file_url: signed!.signedUrl, ...(m.payload.created_at ? { created_at: m.payload.created_at } : {}) };
+    const { error } = await supabase.from(m.table as any).upsert(row as any, { onConflict: "id" });
     if (error) throw error;
-    await cacheUpsertRow("fracture_xrays", row);
+    const existing = (await cacheGetAll(m.table)).find(r => r.id === uploadId);
+    await cacheUpsertRow(m.table, { ...row, ...(existing?._localFileUrl ? { _localFileUrl: existing._localFileUrl } : {}) });
     return;
   }
 }

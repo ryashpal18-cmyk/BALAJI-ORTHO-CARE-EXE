@@ -32,7 +32,7 @@ function printDailyReport(
   const rows = bills
     .map((bill) => {
       const paid = Number(bill.amount_paid || 0);
-      const due = Math.max(Number(bill.amount || 0) - paid, 0);
+      const due = Math.max(Number(bill.amount || 0) - Number((bill as any).discount || 0) - paid, 0);
       const name = bill.patients?.name || "—";
       const mobile = bill.patients?.mobile || "";
       return `<tr>
@@ -127,7 +127,7 @@ export default function CashTally() {
       const paid = Number((bill as any).amount_paid || 0);
       acc.total += amount;
       acc.received += paid;
-      acc.pending += Math.max(amount - paid, 0);
+      acc.pending += Math.max(amount - Number((bill as any).discount || 0) - paid, 0);
       return acc;
     },
     { total: 0, received: 0, pending: 0 },
@@ -266,7 +266,7 @@ export default function CashTally() {
                     )}
                     {filteredBills.map((bill) => {
                       const paid = Number((bill as any).amount_paid || 0);
-                      const due = Math.max(Number(bill.amount || 0) - paid, 0);
+                      const due = Math.max(Number(bill.amount || 0) - Number((bill as any).discount || 0) - paid, 0);
                       return (
                         <tr key={bill.id} className="border-b">
                           <td className="py-2">

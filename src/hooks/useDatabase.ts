@@ -363,7 +363,7 @@ export function useXrayReports() {
         return data as any[] || [];
       });
       // Also filter offline records — ortho fracture X-rays ko exclude karo
-      const filtered = rows.filter((r: any) => !r.notes?.includes("[ortho:"));
+      const filtered = rows.filter((r: any) => !r.notes?.includes("[ortho:")).map(r => ({ ...r, file_url: r._localFileUrl || r.file_url }));
       return [...filtered].sort((a: any, b: any) => (b.uploaded_at || "").localeCompare(a.uploaded_at || ""));
     },
   });

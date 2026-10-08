@@ -1,3 +1,5 @@
+import { cacheGetAll } from "@/lib/offlineDb";
+import { offlineInsert } from "@/lib/offlineQuery";
 import { businessDate } from "@/lib/businessDate";
 /**
  * PlasterSync — Ek baar chalao, kaam ho jaaye
@@ -47,12 +49,7 @@ export default function PlasterSync() {
     try {
       // 1. Saare bills fetch karo
       addLog("📋 Saare bills fetch ho rahe hain...");
-      const { data: bills, error: billErr } = await supabase
-        .from("billing" as any)
-        .select("id, patient_id, service, created_at, patients(id, name, mobile)")
-        .order("created_at", { ascending: false });
-
-      if (billErr) throw new Error("Bills fetch fail: " + billErr.message);
+      const bills = await cacheGetAll('billing');
       addLog(`✅ ${bills?.length || 0} bills mile`);
 
       // 2. Plaster wale bills filter karo
@@ -60,9 +57,7 @@ export default function PlasterSync() {
       addLog(`🔍 ${plasterBills.length} bills mein plaster service mili`);
 
       // 3. Existing fracture cases fetch karo (duplicate avoid ke liye)
-      const { data: existingCases } = await supabase
-        .from("fracture_cases" as any)
-        .select("patient_id, plaster_status");
+      const existingCases = await cacheGetAll('fracture_cases');
       const activePatients = new Set(
         ((existingCases || []) as any[])
           .filter((c: any) => c.plaster_status === "Active")
@@ -100,9 +95,7 @@ export default function PlasterSync() {
         const nextFollowup = businessDate(new Date(billDate).getTime() + 7 * 24 * 60 * 60 * 1000);
 
         try {
-          const { error: insertErr } = await supabase
-            .from("fracture_cases" as any)
-            .insert({
+          await offlineInsert("fracture_cases", {
               patient_id: patientId,
               patient_type: "fracture",
               body_part: "Unknown",
@@ -116,7 +109,7 @@ export default function PlasterSync() {
               doctor_notes: `Auto-migrated from billing (Bill ID: ${bill.id})`,
             });
 
-          if (insertErr) throw insertErr;
+
           added++;
           addLog(`✅ Added: ${patientName} — ${plasterSvc} (${billDate})`);
         } catch (e: any) {

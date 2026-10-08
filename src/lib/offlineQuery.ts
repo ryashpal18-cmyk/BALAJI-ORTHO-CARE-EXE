@@ -1,5 +1,5 @@
 import { queryClient } from "./queryClient";
-import { withPaymentHistory } from "./paymentLedger";
+import { withPaymentHistory, normalizeBill } from "./paymentLedger";
 import { commitMutation } from "./offlineDb";
 import { ensureCloudSession } from "./localSession";
 // ─────────────────────────────────────────────────────────────────────────
@@ -64,7 +64,12 @@ export async function offlineInsert(table: string, payload: any, opts: { idField
   const idField = opts.idField || "id";
   const rowId = payload[idField] || tempId();
   return serialize(`${table}::${rowId}`, async () => {
-    let row = { created_at: new Date().toISOString(), ...payload, [idField]: rowId, _pendingSync: true };
+    if (table === "billing") payload = normalizeBill(payload);
+    let row: any = { created_at: new Date().toISOString(), ...payload, [idField]: rowId, _pendingSync: true };
+    if (row.patient_id) {
+      const patient = await cacheGetRow('patients', row.patient_id);
+      if (patient) row.patient_id = patient.id;
+    }
     if (["patients", "billing", "appointments"].includes(table) && !row.branch_id) {
       const parent = row.patient_id ? await cacheGetRow("patients", row.patient_id) : null;
       const branches = (await cacheGetAll("branches")).filter(b => b.is_active);
@@ -80,13 +85,16 @@ export async function offlineUpdate(table: string, rowId: string, updates: any, 
   return serialize(`${table}::${rowId}`, async () => {
     const existing = await cacheGetRow(table, rowId);
     if (!existing) throw new Error("Record not available locally; refresh before editing");
-    let changes = { ...updates };
+    rowId = existing.id || rowId;
+    let changes = table === "billing" ? normalizeBill(updates, existing) : { ...updates };
     if (table === "billing") changes = withPaymentHistory(existing, changes, tempId().slice(6), new Date().toISOString());
     const saved = await commitMutation({ table, op: "update", rowId, payload: changes }, changes, opts.idField || "id");
     syncLater(); return saved;
   });
 }
 export async function offlineDelete(table: string, rowId: string) {
+  const existing = await cacheGetRow(table, rowId);
+  rowId = existing?.id || rowId;
   await serialize(`${table}::${rowId}`, () => commitMutation({ table, op: "delete", rowId }, null));
   syncLater();
 }

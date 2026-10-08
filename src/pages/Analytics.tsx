@@ -33,7 +33,7 @@ function useAnalyticsData() {
       if (online) {
         try {
           const [billsRes, patientsRes, physioRes] = await Promise.all([
-            supabase.from("billing").select("amount, amount_paid, status, created_at, service, payment_mode"),
+            supabase.from("billing").select("amount, discount, amount_paid, status, created_at, service, payment_mode"),
             supabase.from("patients").select("id, created_at"),
             supabase.from("physiotherapy_sessions").select("id, created_at"),
           ]);
@@ -89,7 +89,7 @@ function useAnalyticsData() {
         .reduce((sum: number, b: any) => sum + Number(b.amount_paid || 0), 0);
 
       const pendingDues = bills.reduce((sum: number, b: any) => {
-        const due = Number(b.amount || 0) - Number(b.amount_paid || 0);
+        const due = Number(b.amount || 0) - Number(b.discount || 0) - Number(b.amount_paid || 0);
         return sum + Math.max(due, 0);
       }, 0);
 

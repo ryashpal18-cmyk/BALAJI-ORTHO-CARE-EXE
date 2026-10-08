@@ -17,7 +17,7 @@ import { useNavigate } from "react-router-dom";
 import { useAddPatient, useSearchPatients, useAddPrescription, usePatients, useDeletePatient } from "@/hooks/useDatabase";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { cacheGetAll } from "@/lib/offlineDb";
+import { cacheGetAll, cacheUpsertRowFromServer } from "@/lib/offlineDb";
 import { isOnline } from "@/lib/offlineSync";
 import { offlineUpdate } from "@/lib/offlineQuery";
 import { cLog } from "@/lib/clientLogger";
@@ -111,57 +111,39 @@ export default function OPD() {
     ? villageOptions.filter((v) => v.toLowerCase().includes(regForm.address.toLowerCase())).slice(0, 8)
     : villageOptions.slice(0, 8);
 
-  // Auto-search patient by mobile number
+  const mobileRequest = useRef(0);
+  const registering = useRef(false);
+  // Local lookup is immediate; late cloud results never replace a newer input.
   const handleMobileChange = async (mobile: string) => {
-    setRegForm(p => ({ ...p, mobile }));
-    setExistingPatient(null);
-    setMobileSearchStatus("idle");
-
-    const cleanMobile = mobile.replace(/\D/g, "");
-    if (cleanMobile.length >= 10) {
-      setMobileSearchStatus("searching");
-      try {
-        let patient: any = null;
-
-        // Pehle online try karo
-        const online = await isOnline();
-        if (online) {
-          try {
-            const { data, error } = await supabase
-              .from("patients")
-              .select("*")
-              .or(`mobile.eq.${cleanMobile},mobile.eq.+91${cleanMobile},mobile.ilike.%${cleanMobile.slice(-10)}%`)
-              .limit(1);
-            if (!error && data && data.length > 0) patient = data[0];
-          } catch (e) { cLog.warn('OPD', 'Supabase mobile search fail — cache try karega', e); }
+    const request = ++mobileRequest.current;
+    setRegForm(p => ({ ...p, mobile })); setExistingPatient(null);
+    const digits = mobile.replace(/\D/g, '').slice(-10);
+    if (digits.length !== 10) { setMobileSearchStatus('idle'); return; }
+    setMobileSearchStatus('searching');
+    const apply = (patient: any, background = false) => {
+      if (request !== mobileRequest.current || registering.current) return;
+      setExistingPatient(patient);
+      setMobileSearchStatus(patient ? 'found' : 'new');
+      if (patient) setRegForm(p => ({ mobile, name: background ? (p.name || patient.name || '') : patient.name || '',
+        age: background ? (p.age || String(patient.age || '')) : String(patient.age || ''),
+        gender: background ? (p.gender || patient.gender || '') : patient.gender || '',
+        address: background ? (p.address || patient.address || '') : patient.address || '' }));
+    };
+    try {
+      const cached = await cacheGetAll('patients');
+      const patient = cached.find(p => (p.mobile || '').replace(/\D/g, '').slice(-10) === digits);
+      apply(patient || null);
+      if (!patient) void (async () => {
+        if (!(await isOnline())) return;
+        const { data, error } = await supabase.from('patients').select('*').ilike('mobile', '%' + digits).limit(1);
+        if (!error && data?.[0]) {
+          // Store the full row before offering Update & Continue.
+          await cacheUpsertRowFromServer('patients', data[0]);
+          apply(data[0], true);
         }
-
-        // Offline ya online mein nahi mila — cache mein dhundo
-        if (!patient) {
-          const cached = await cacheGetAll("patients");
-          const last10 = cleanMobile.slice(-10);
-          patient = cached.find((p: any) => {
-            const m = (p.mobile || "").replace(/\D/g, "");
-            return m === cleanMobile || m === last10 || m.endsWith(last10);
-          }) || null;
-        }
-
-        if (patient) {
-          setExistingPatient(patient);
-          setRegForm({
-            mobile,
-            name: patient.name || "",
-            age: patient.age?.toString() || "",
-            gender: patient.gender || "",
-            address: patient.address || "",
-          });
-          setMobileSearchStatus("found");
-        } else {
-          setMobileSearchStatus("new");
-        }
-      } catch {
-        setMobileSearchStatus("new");
-      }
+      })().catch(() => {});
+    } catch (e: any) {
+      if (request === mobileRequest.current) { setMobileSearchStatus('idle'); toast({ title: 'Patient lookup failed', description: e.message, variant: 'destructive' }); }
     }
   };
 
@@ -193,19 +175,24 @@ export default function OPD() {
       return;
     }
 
+    if (registering.current) return;
+    const digits = regForm.mobile.replace(/\D/g, '');
+    if (!/^(?:91)?[6-9]\d{9}$/.test(digits) || !regForm.name.trim()) {
+      toast({ title: 'सही नाम और 10 अंकों का मोबाइल भरें', variant: 'destructive' }); return;
+    }
+    registering.current = true; ++mobileRequest.current;
     try {
       let patientId = existingPatient?.id;
 
       if (existingPatient) {
         // Update existing patient details if changed (offline-safe)
-        try {
-          await offlineUpdate("patients", existingPatient.id, {
+        await offlineUpdate("patients", existingPatient.id, {
             name: regForm.name,
             age: regForm.age ? parseInt(regForm.age) : null,
             gender: regForm.gender || null,
             address: regForm.address || null,
           });
-        } catch (e) { cLog.warn('OPD', 'Patient update fail', e); }
+
         toast({ title: "✅ Patient Found", description: `${regForm.name} already registered — details updated` });
       } else {
         // Create new patient
@@ -231,7 +218,7 @@ export default function OPD() {
       setMobileSearchStatus("idle");
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
-    }
+    } finally { registering.current = false; }
   };
 
   const savePrescription = async () => {
