@@ -1,3 +1,4 @@
+import { saveBillOffline } from "@/lib/saveBillOffline";
 import { useBranchContext } from "@/lib/branchContext";
 import { readBranchTable } from "@/lib/branchData";
 import { businessDayStart, businessDayEnd } from "@/lib/businessDate";
@@ -138,38 +139,7 @@ export function useReportPayments() {
 export function useAddBill() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (bill: any) => {
-      // 🚨 FIX: pehle patient ka naam sirf onSuccess mein, sirf in-memory
-      // (react-query cache) ke liye attach hota tha — IndexedDB (disk) mein
-      // kabhi save nahi hota tha. Isliye app restart ya offline reload ke
-      // baad us bill ka patient naam gayab dikhta tha. Ab yahan, save hone
-      // SE PEHLE hi patient info payload mein jod dete hain — taaki disk pe
-      // bhi hamesha ke liye save ho jaaye.
-      let payload = { ...bill };
-      if (!payload.patients && payload.patient_id) {
-        try {
-          const cachedPatients = await cacheGetAll("patients");
-          const p = cachedPatients.find((p: any) => p.id === payload.patient_id);
-          if (p) {
-            payload.patients = { name: p.name || "", mobile: p.mobile || "", address: p.address || "" };
-          } else if (typeof navigator !== "undefined" && navigator.onLine) {
-            // 🚨 FIX (strict offline-first): cache mein nahi mila to yahan
-            // AWAIT karke Supabase call se UI ko block nahi karte. Insert
-            // turant proceed karta hai; naam background mein resolve hoke
-            // billing cache mein patch ho jaata hai jab tak result aaye.
-            supabase
-              .from("patients")
-              .select("name, mobile, address")
-              .eq("id", payload.patient_id)
-              .single()
-              .then(({ data }) => {
-                if (data) payload.patients = { name: data.name || "", mobile: data.mobile || "", address: data.address || "" };
-              }, () => { /* refresh will retry patient lookup */ });
-          }
-        } catch { /* silently ignore */ }
-      }
-      return offlineInsert("billing", payload);
-    },
+    mutationFn: saveBillOffline,
     onSuccess: async (newBill: any) => {
       // ["billing", "all"] cache mein seedha inject karo
       qc.setQueryData(["billing", "all"], (old: any[] | undefined) => {

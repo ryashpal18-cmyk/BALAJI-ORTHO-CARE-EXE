@@ -49,7 +49,7 @@ export default function DueAmount() {
   const dueBills = useMemo(() => {
     return bills
       .map((bill: any) => {
-        const total = Number(bill.amount) || 0;
+        const total = Math.max(Number(bill.amount || 0) - Number(bill.discount || 0), 0);
         const paid = Number(bill.amount_paid) || 0;
         const due = Math.max(total - paid, 0);
         return { ...bill, _total: total, _paid: paid, _due: due };
@@ -96,7 +96,7 @@ export default function DueAmount() {
   const handleSaveEdit = async () => {
     if (!editTarget) return;
     const paidNum = Number(editPaid);
-    if (Number.isNaN(paidNum) || paidNum < 0) {
+    if (!Number.isFinite(paidNum) || paidNum < 0) {
       toast({ title: "Sahi amount daalo", variant: "destructive" });
       return;
     }
@@ -107,7 +107,7 @@ export default function DueAmount() {
     try {
       await updateBill.mutateAsync({
         id: editTarget.id,
-        amount: editTarget._total,
+        amount: Number(editTarget.amount),
         amount_paid: paidNum,
         status: paidNum >= editTarget._total ? "Paid" : "Partial",
       });
@@ -123,7 +123,7 @@ export default function DueAmount() {
     try {
       await updateBill.mutateAsync({
         id: bill.id,
-        amount: bill._total,
+        amount: Number(bill.amount),
         amount_paid: bill._total,
         status: "Paid",
       });
@@ -142,8 +142,9 @@ export default function DueAmount() {
     setSendingId(bill.id + "_sms");
     const msg = getDueMessage(bill.patients?.name || "Patient", bill._total, bill._paid, bill._due);
     try {
-      await sendSMS(mobile, msg, bill.patients?.name || "", "due_reminder");
-      toast({ title: "SMS bhej diya ✓" });
+      const result = await sendSMS(mobile, msg, bill.patients?.name || "", "due_reminder");
+      if (!result.ok) throw new Error(result.error || "SMS queue save failed");
+      toast({ title: result.queued ? "SMS PC par queue mein saved — net par bheja jayega" : "SMS gateway ne accept kiya" });
     } catch {
       toast({ title: "SMS bhejne me dikkat hui", variant: "destructive" });
     } finally {

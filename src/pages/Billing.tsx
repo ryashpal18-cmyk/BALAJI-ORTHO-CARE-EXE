@@ -62,7 +62,7 @@ import * as XLSX from "xlsx";
 // html2pdf: dynamic import only when needed (top-level import causes Electron crash)
 import { openWhatsAppWeb } from "@/pages/WhatsApp";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
-import { sendSMS } from "@/services/smsService";
+
 import { getServiceCatalog, learnServiceItems } from "@/lib/appConfig";
 import { useAddFractureCase } from "@/hooks/useOrtho";
 
@@ -481,6 +481,7 @@ export default function Billing() {
   const [discountAmount, setDiscountAmount] = useState("");
   const [paymentMode, setPaymentMode] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const creatingBill = useRef(false);
   const [rangeMode, setRangeMode] = useState("today");
   const [fromDate, setFromDate] = useState(toLocalDateInput(new Date()));
   const [toDate, setToDate] = useState(toLocalDateInput(new Date()));
@@ -649,6 +650,8 @@ const filteredPatients = useMemo(() => {
       });
       return;
     }
+    if (creatingBill.current) return;
+    creatingBill.current = true;
     setIsSending(true);
     try {
       const serviceStr = validServices.map((s) => `${s.name}:${s.amount}`).join("|");
@@ -667,7 +670,7 @@ const filteredPatients = useMemo(() => {
         created_at: new Date().toISOString(),
       } as any);
 
-      toast({ title: "✅ Bill Saved", description: "Bill successfully save ho gaya" });
+      toast({ title: "✅ Bill Saved", description: result.smsQueued ? "Bill aur SMS queue PC par save ho gaye" : "Bill saved. Valid mobile nahi hai, isliye SMS queue nahi hua." });
 
       // Jo bhi items type kiye the, unhe catalog mein yaad kar lo
       learnServiceItems(validServices.map((s) => ({ name: s.name, amount: parseFloat(s.amount) || 0 })));
@@ -714,33 +717,6 @@ const filteredPatients = useMemo(() => {
       // ✅ FIX: PDF auto-generate nahi karo — white screen aati thi
       // PDF sirf tab generate hogi jab user manually PDF/WhatsApp button dabaye
 
-      // Patient naam result mein nahi aaya to patients cache se lo
-      let patient = result.patients as any;
-      if (!patient?.name && selectedPatient) {
-        try {
-          const { cacheGetAll } = await import("@/lib/offlineDb");
-          const cachedPatients = await cacheGetAll("patients");
-          const found = cachedPatients.find((p: any) => p.id === selectedPatient);
-          if (found) patient = found;
-        } catch (e) { cLog.warn('billing', 'Patient cache lookup fail', e); }
-      }
-      const patientName = patient?.name || "Patient";
-      const mobile = patient?.mobile || "";
-
-      // Bill save hone ke baad patient ko SMS bhejo (try-catch se wrap - crash nahi hoga)
-      if (mobile && result?.id) {
-        const invoiceNo = invoiceNumber(result.id);
-        const date = new Date().toLocaleDateString("en-IN");
-        const due = Math.max(totalAmount - discountNum - paidNum, 0);
-        // PDF URL agar already generate hua ho to include karo
-        const pdfUrl = (result as any).invoice_pdf_url || null;
-        const pdfLine = pdfUrl
-          ? `\n📄 बिल PDF: ${pdfUrl}`
-          : "";
-        const smsMsg = `नमस्ते ${patientName} जी 🙏\n\nBalaji Ortho Care Center\n\n📋 बिल नंबर: ${invoiceNo}\n📅 दिनांक: ${date}\n💰 कुल राशि: ₹${Math.max(totalAmount - discountNum, 0)}\n✅ जमा: ₹${paidNum}\n❗ बकाया: ₹${due}${pdfLine}\n\n🌐 हमारी वेबसाइट: https://balaji-health-hub.lovable.app\n\nधन्यवाद 🙏`;
-        sendSMS(mobile, smsMsg, patientName, "bill_saved");
-      }
-
       setSelectedPatient("");
       setServices([{ name: "", amount: "" }]);
       setAmountPaid("");
@@ -750,6 +726,7 @@ const filteredPatients = useMemo(() => {
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
+      creatingBill.current = false;
       setIsSending(false);
     }
   };

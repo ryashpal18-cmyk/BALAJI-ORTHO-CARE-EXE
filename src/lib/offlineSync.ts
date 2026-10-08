@@ -155,7 +155,7 @@ function stripEmbeddedRelations(payload: Record<string, any>) {
 async function applyMutation(m: QueuedMutation): Promise<void> {
   const table = m.table as any;
   const latestQueue = await queueGetAll();
-  const parents = Object.entries(m.payload || {}).filter(([key, value]) =>
+  const parents = (m.op === "sms" ? [] : Object.entries(m.payload || {})).filter(([key, value]) =>
     (key.endsWith("_id") || key === "caseId" || key === "patientId") && typeof value === "string" && value.startsWith("local_"));
   if (parents.some(([, value]) => latestQueue.some(q => q.op === "insert" && q.tempId === value && q.id !== m.id)))
     throw new Error("PENDING_PARENT_INSERT");
