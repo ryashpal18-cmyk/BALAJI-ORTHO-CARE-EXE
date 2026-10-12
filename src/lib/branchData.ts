@@ -1,5 +1,5 @@
 import { queryClient } from "./queryClient";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, usesApiSync } from "@/integrations/supabase/client";
 import { cacheGetAll, cacheReplaceTable } from "./offlineDb";
 import { fetchCompleteTable } from "./completeFetch";
 import { isOnline } from "./offlineSync";
@@ -19,10 +19,10 @@ async function refreshBranchTable(table: string, select: string) {
   try {
     if (!(await isOnline())) return;
     if (!(await ensureCloudSession())) return;
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+
     const rows = await fetchCompleteTable(table, select);
     const before = JSON.stringify(await cacheGetAll(table));
+    if (usesApiSync() && rows.length === 0 && (await cacheGetAll(table)).length > 0) return;
     await cacheReplaceTable(table, rows);
     lastRefresh.set(table, Date.now());
     if (before !== JSON.stringify(await cacheGetAll(table))) void queryClient.invalidateQueries();

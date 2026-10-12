@@ -101,8 +101,7 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
   const remote: Record<string, any[]> = {};
   const coverage: Record<string, string> = {};
   const warnings: string[] = [];
-  const { data: { session } } = await supabase.auth.getSession();
-  const online = !!session && await isOnline() && await ensureCloudSession();
+  const online = await isOnline() && await ensureCloudSession();
   for (const table of BACKUP_TABLES) {
     try {
       if (!online) throw new Error("offline");

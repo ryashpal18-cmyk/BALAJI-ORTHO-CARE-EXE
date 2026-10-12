@@ -258,8 +258,8 @@ function initFiles() {
   if (!fs.existsSync(SETTINGS_FILE)) writeJSON(SETTINGS_FILE, {
     centerName:  'Balaji Ortho Care Center',
     doctorName:  'Dr. S. S. Rathore',
-    supabaseUrl: 'https://idcxmeczzfnipmybikue.supabase.co',
-    supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkY3htZWN6emZuaXBteWJpa3VlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzODc4OTIsImV4cCI6MjA5MDk2Mzg5Mn0.WdbFTPLnUC5U3YFL6Y8dgWETit-aFspgf8RA-A6HaFc',
+    supabaseUrl: authPublicConfig.url,
+    supabaseKey: authPublicConfig.key,
     autoSync:    true
   });
   // Legacy auth.json is no longer trusted or exported. Remove plaintext credentials.
@@ -376,7 +376,7 @@ function supabaseInsert(supabaseUrl, supabaseKey, table, rows) {
       headers: {
         'Content-Type':   'application/json',
         'apikey':         supabaseKey,
-        'Authorization':  `Bearer ${supabaseKey}`,
+        ...(supabaseKey.startsWith('sb_publishable_') ? {} : { Authorization: `Bearer ${supabaseKey}` }),
         'Prefer':         'resolution=merge-duplicates',
         'Content-Length': Buffer.byteLength(body),
       },
@@ -417,7 +417,7 @@ function supabaseFetchAll(supabaseUrl, supabaseKey, table) {
       method:   'GET',
       headers: {
         'apikey':        supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
+        ...(supabaseKey.startsWith('sb_publishable_') ? {} : { Authorization: `Bearer ${supabaseKey}` }),
         'Range-Unit':    'items',
         'Range':         '0-9999',   // ek baar mein 10,000 tak rows — clinic scale ke liye kaafi
       },
@@ -443,7 +443,7 @@ function supabaseFetchAll(supabaseUrl, supabaseKey, table) {
 let isCloudBackingUp = false;
 async function runDirectCloudBackup() {
   if (isCloudBackingUp) return;
-  const settings = readJSON(SETTINGS_FILE, {});
+  const settings = { ...readJSON(SETTINGS_FILE, {}), supabaseUrl: authPublicConfig.url, supabaseKey: authPublicConfig.key };
   if (!settings.supabaseUrl || !settings.supabaseKey) return;
 
   const isOnline = await checkInternet();
@@ -480,7 +480,7 @@ let isSyncing = false;
 
 async function runAutoSync() {
   if (isSyncing) return;
-  const settings = readJSON(SETTINGS_FILE, {});
+  const settings = { ...readJSON(SETTINGS_FILE, {}), supabaseUrl: authPublicConfig.url, supabaseKey: authPublicConfig.key };
   if (!settings.autoSync || !settings.supabaseUrl || !settings.supabaseKey) return;
 
   const isOnline = await checkInternet();
@@ -949,11 +949,12 @@ ipcMain.handle('offline:cacheReplaceTable', async (_e, { table, rows, idField })
 ipcMain.handle('offline:refreshCashDays', async () => {
   const userId = access.getPrincipal()?.userId;
   const token = verifiedCloudToken;
-  if (!token || !userId) throw new Error('Verified cloud session required');
+  const localAdmin = !!access.getPrincipal()?.localAdmin;
+  if (!userId || (!localAdmin && !token)) throw new Error('Verified PC access required');
   const rows = [];
   for (let offset=0; ; ) {
     const response = await net.fetch(`${authPublicConfig.url}/rest/v1/cash_book_days?select=*&order=id&limit=500&offset=${offset}`, {
-      headers: { Authorization: `Bearer ${token}`, apikey: authPublicConfig.key }, signal: AbortSignal.timeout(20000),
+      headers: { apikey: authPublicConfig.key, ...(!localAdmin ? { Authorization: `Bearer ${token}` } : {}) }, signal: AbortSignal.timeout(20000),
     });
     if (!response.ok) throw new Error('Cash-day refresh unavailable');
     const batch = await response.json();
@@ -962,6 +963,7 @@ ipcMain.handle('offline:refreshCashDays', async () => {
     rows.push(...batch); offset += batch.length;
   }
   if (access.getPrincipal()?.userId !== userId || verifiedCloudToken !== token) throw new Error('Session changed during refresh');
+  if (localAdmin && rows.length === 0 && sqliteStore.cacheGetAll('cash_book_days').length > 0) throw new Error('API returned no visible cash days; cache preserved');
   sqliteStore.cacheReplaceTable('cash_book_days',rows,'id');
   return {success:true};
 });
@@ -1386,7 +1388,7 @@ ipcMain.handle('app:runDiagnostics', async () => {
   lines.push('[3] RECORD COUNT SUMMARY (Supabase se live)');
   lines.push(sep);
   try {
-    const settings = readJSON(SETTINGS_FILE, {});
+    const settings = { ...readJSON(SETTINGS_FILE, {}), supabaseUrl: authPublicConfig.url, supabaseKey: authPublicConfig.key };
     const supabaseUrl = settings.supabaseUrl;
     const supabaseKey = settings.supabaseKey;
     const pending = readJSON(PENDING_FILE);
@@ -1401,7 +1403,7 @@ ipcMain.handle('app:runDiagnostics', async () => {
             path: urlObj.pathname + urlObj.search,
             headers: {
               'apikey': supabaseKey,
-              'Authorization': `Bearer ${supabaseKey}`,
+              ...(supabaseKey.startsWith('sb_publishable_') ? {} : { Authorization: `Bearer ${supabaseKey}` }),
               'Prefer': 'count=exact',
               'Range': '0-0',
             },
@@ -1485,7 +1487,7 @@ ipcMain.handle('app:runDiagnostics', async () => {
     lines.push(ok('Internet: CONNECTED'));
     // Supabase ping
     try {
-      const settings  = readJSON(SETTINGS_FILE, {});
+      const settings = { ...readJSON(SETTINGS_FILE, {}), supabaseUrl: authPublicConfig.url, supabaseKey: authPublicConfig.key };
       if (settings.supabaseUrl && settings.supabaseKey) {
         const pingUrl = `${settings.supabaseUrl}/rest/v1/`;
         const result  = await new Promise((resolve) => {

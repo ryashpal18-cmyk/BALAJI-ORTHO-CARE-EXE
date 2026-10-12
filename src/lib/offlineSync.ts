@@ -5,7 +5,7 @@ import { ensureCloudSession } from "./localSession";
 // Network status + background sync engine
 // ─────────────────────────────────────────────────────────────────────────
 
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, usesApiSync } from "@/integrations/supabase/client";
 import { cLog } from "@/lib/clientLogger";
 import { isValidMobile } from "@/lib/utils";
 import { queryClient } from "@/lib/queryClient";
@@ -79,14 +79,17 @@ let downloadInProgress = false;
 export async function downloadAllDataToCache(): Promise<void> {
   if (downloadInProgress || !(await isOnline())) return;
   if (!(await ensureCloudSession())) return;
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return; // Never interpret anonymous/RLS-empty results as an authoritative wipe.
+  // ensureCloudSession accepts the verified local owner API mode too.
   downloadInProgress = true;
   try {
     for (const table of OPERATIONAL_TABLES) {
       try {
         const select = ["billing", "appointments", "prescriptions", "physiotherapy_sessions", "xray_reports", "fracture_cases", "insurance_claims", "beds"].includes(table) ? "*, patients(*)" : "*";
         const rows = await fetchCompleteTable(table, select);
+        if (usesApiSync() && rows.length === 0 && (await cacheGetAll(table)).length > 0) {
+          cLog.warn("sync", `${table}: API returned no visible rows; local cache preserved`);
+          continue;
+        }
         await cacheReplaceTable(table, rows);
       } catch (error) { cLog.warn("sync", `${table}: complete refresh failed; existing cache preserved`, error); }
     }

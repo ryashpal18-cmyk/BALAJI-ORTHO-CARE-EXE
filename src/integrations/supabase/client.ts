@@ -1,21 +1,26 @@
 import { boundedFetch } from "@/lib/boundedFetch";
-// Pointing to shared external Supabase project (idcxmeczzfnipmybikue)
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = "https://idcxmeczzfnipmybikue.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkY3htZWN6emZuaXBteWJpa3VlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzODc4OTIsImV4cCI6MjA5MDk2Mzg5Mn0.WdbFTPLnUC5U3YFL6Y8dgWETit-aFspgf8RA-A6HaFc";
-
-// Import the supabase client like this:
-// import { supabase } from "@/integrations/supabase/client";
-
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+const url = import.meta.env.VITE_SUPABASE_URL;
+const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+if (!url || !key) throw new Error('Supabase URL/API key missing in .env');
+const authenticatedClient = createClient<Database>(url, key, {
   global: { fetch: boundedFetch },
-  auth: {
-    storage: localStorage,
-    // Desktop owner credentials/sessions live in OS-encrypted main-process storage.
-    // Never restore an unrelated stale renderer session before local owner verification.
-    persistSession: !(window as any).electron,
-    autoRefreshToken: true,
+  auth: { storage: localStorage, persistSession: !(window as any).electron, autoRefreshToken: true }
+});
+// The owner API client never inherits a staff/old-project Auth token.
+const apiClient = createClient<Database>(url, key, {
+  global: { fetch: boundedFetch },
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+});
+let apiMode = false;
+export function setCloudAccessMode(api: boolean) { apiMode = api; }
+export function usesApiSync() { return apiMode; }
+export const supabase = new Proxy(authenticatedClient, {
+  get(_, prop) {
+    const client = prop === 'auth' || !apiMode ? authenticatedClient : apiClient;
+    const value = Reflect.get(client, prop);
+    return typeof value === 'function' ? value.bind(client) : value;
   }
 });

@@ -1,20 +1,17 @@
 const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict'),ts=require('typescript');
 let source=fs.readFileSync(require('path').join(__dirname,'../src/lib/localSession.ts'),'utf8').replace(/^import.*$/gm,'');
 source=ts.transpile(source.replace(/\bexport\s+/g,''),{target:ts.ScriptTarget.ES2022});
-let auth={valid:true,principal:{localAdmin:true,sessionKey:'first'}},calls=0,sets=0,reply={success:false};
-const ctx={window:{electron:{checkAuth:async()=>auth,syncSession:async()=>{calls++;return typeof reply==='function'?reply():reply}}},
- supabase:{auth:{getSession:async()=>({data:{session:{}}}),setSession:async()=>{sets++;return {error:null}}}},Date};
+let auth={valid:true,principal:{localAdmin:true}},mode=false,session=null,calls=0;
+const ctx={window:{electron:{checkAuth:async()=>auth,syncSession:async()=>{throw Error('password sync forbidden')}}},
+ setCloudAccessMode:value=>{mode=value},supabase:{auth:{getSession:async()=>{calls++;return {data:{session}}}}}};
 vm.createContext(ctx);vm.runInContext(source+';globalThis.api={ensureCloudSession,resetCloudConnection}',ctx);
 (async()=>{
- assert.equal(await ctx.api.ensureCloudSession(),false);assert.equal(sets,0);
- reply={success:true,session:{access_token:'test',refresh_token:'test',expires_at:Date.now()/1000+3600}};
- assert.equal(await ctx.api.ensureCloudSession(),true);assert.equal(sets,1);
- const count=calls;assert.equal(await ctx.api.ensureCloudSession(),true);assert.equal(calls,count);
- auth={valid:false};assert.equal(await ctx.api.ensureCloudSession(),false);
- auth={valid:true,principal:{localAdmin:true,sessionKey:'second'}};
- let release;reply=()=>new Promise(r=>{release=r});
- const p=ctx.api.ensureCloudSession();await new Promise(setImmediate);
- auth={valid:false};release({success:true,session:{access_token:'late',refresh_token:'late'}});
- assert.equal(await p,false);assert.equal(sets,1,'late sync cannot install a session after logout');
- console.log('PASS renderer cloud gate: disconnected, authenticated, bounded reuse, session change and logout race');
+ assert.equal(await ctx.api.ensureCloudSession(),true);assert.equal(mode,true);assert.equal(calls,0);
+ auth={valid:false};assert.equal(await ctx.api.ensureCloudSession(),false);assert.equal(mode,false);
+ auth={valid:true,principal:{localAdmin:false}};
+ assert.equal(await ctx.api.ensureCloudSession(),false);assert.equal(mode,false);
+ session={access_token:'staff'};assert.equal(await ctx.api.ensureCloudSession(),true);assert.equal(mode,false);
+ auth={valid:true,principal:{localAdmin:true}};await ctx.api.ensureCloudSession();assert.equal(mode,true);
+ ctx.api.resetCloudConnection();assert.equal(mode,false);
+ console.log('PASS local API sync without cloud password; logged-out and staff access remain gated');
 })().catch(e=>{console.error(e);process.exitCode=1});

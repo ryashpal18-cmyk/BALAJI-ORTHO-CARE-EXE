@@ -11,7 +11,7 @@ const deriveKey = (secret, salt) => new Promise((resolve, reject) =>
   crypto.scrypt(secret, salt, 64, SCRYPT, (error, key) => error ? reject(error) : resolve(key)));
 
 function createOffline({ file, safeStorage, access, now = Date.now, fetchCloud, config, onCloudToken = () => {} }) {
-  let generation = 0, busy = false, connecting = null, retryAt = 0;
+  let generation = 0, busy = false;
   const encryptedAvailable = () => {
     try { return !!safeStorage?.isEncryptionAvailable() && safeStorage.getSelectedStorageBackend?.() !== 'basic_text'; }
     catch { return false; }
@@ -77,9 +77,10 @@ function createOffline({ file, safeStorage, access, now = Date.now, fetchCloud, 
       if (epoch !== generation) return { success: false, error: 'Login cancel ho gaya.' };
       record.fails = 0; record.lockUntil = 0;
       record.remember = args.remember !== false;
-      record.syncSecret = secret; // Only within OS-encrypted file, never returned to renderer.
+      delete record.syncSecret; // Local password is never a cloud credential.
+      delete record.cloud;
       write(record);
-      retryAt = 0; generation++;
+      generation++;
       onCloudToken(null);
       return grant(record);
     } finally { busy = false; }
@@ -91,54 +92,20 @@ function createOffline({ file, safeStorage, access, now = Date.now, fetchCloud, 
     return null;
   }
   function logout() {
-    generation++; retryAt = 0; onCloudToken(null); access.setPrincipal(null);
+    generation++; onCloudToken(null); access.setPrincipal(null);
     const record = read();
     if (record) { record.remember = false; delete record.cloud; write(record); }
   }
-  async function request(endpoint, options = {}) {
-    const response = await fetchCloud(config.url + endpoint, {
-      ...options, headers: { apikey: config.key, 'Content-Type': 'application/json', ...options.headers },
-      signal: AbortSignal.timeout(12000),
-    });
-    if (!response.ok) throw new Error('Cloud account/admin permission available nahi hai. PC par kaam chalta rahega.');
-    return response.json();
-  }
   async function connect() {
     if (!access.getPrincipal()?.localAdmin) return { success: false };
-    if (connecting) return connecting;
-    if (now() < retryAt) return { success: false, error: 'Cloud reconnect pending; PC data saved hai.' };
-    const epoch = generation;
-    connecting = (async () => {
-      try {
-        const record = read();
-        if (!record?.trustedStorage || !record.syncSecret || !fetchCloud) return { success: false };
-        let session = record.cloud;
-        if (!session || session.expires_at * 1000 < now() + 60000) {
-          session = await request('/auth/v1/token?grant_type=password', {
-            method: 'POST', body: JSON.stringify({ email: record.email, password: record.syncSecret }),
-          });
-        }
-        if (!session?.access_token || !session?.refresh_token) throw new Error('Cloud session unavailable');
-        const headers = { Authorization: `Bearer ${session.access_token}` };
-        const user = await request('/auth/v1/user', { headers });
-        const profile = await request('/functions/v1/session-access', { method: 'POST', headers });
-        if (normalizeEmail(user.email) !== record.email || profile.userId !== user.id || profile.role !== 'admin')
-          throw new Error('Isi email ka verified cloud admin chahiye. Local data upload nahi hua.');
-        if (epoch !== generation || !access.getPrincipal()?.localAdmin) return { success: false };
-        record.cloud = { access_token: session.access_token, refresh_token: session.refresh_token,
-          expires_at: session.expires_at || Math.floor(now() / 1000) + (session.expires_in || 3600) };
-        write(record); onCloudToken(session.access_token);
-        return { success: true, session: record.cloud };
-      } catch (error) {
-        if (epoch === generation) {
-          retryAt = now() + 60000; onCloudToken(null);
-          // An invalidated/rotated cloud token must not block recovery until its old expiry.
-          try { const record = read(); if (record?.cloud) { delete record.cloud; write(record); } } catch { /* Preserve unreadable credential for recovery. */ }
-        }
-        return { success: false, error: error.message };
-      }
-    })();
-    try { return await connecting; } finally { connecting = null; }
+    const record = read();
+    if (!record?.trustedStorage || !config?.url || !config?.key) return { success: false, error: 'API configuration missing' };
+    // Migrate old encrypted records without deleting ownership or patient data.
+    if (record.syncSecret || record.cloud) {
+      delete record.syncSecret; delete record.cloud; write(record);
+    }
+    onCloudToken(null);
+    return { success: true, mode: 'api' };
   }
   return { status, setup: args => authenticate(args, true), login: args => authenticate(args), restore, logout, connect };
 }
