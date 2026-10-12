@@ -364,7 +364,7 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
     const outcomes = await Promise.allSettled([
       drain(true),
       (async () => {
-        if (!(await ensureCloudSession())) { lastError = "Cloud connection pending — data is saved on this PC"; return; }
+        if (!(await ensureCloudSession())) { lastError = "Settings → Cloud Sync में cloud connection जोड़ें; pending data PC पर सुरक्षित है"; return; }
         await drain(false);
       })(),
     ]);

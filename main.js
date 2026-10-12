@@ -50,6 +50,16 @@ ipcMain.handle('auth:establish', async (_event, token) => {
 const offlineAuth = require('./offline-login.cjs').register({ ipcMain, access, app, safeStorage, net,
   config: authPublicConfig, onCloudToken: token => { verifiedCloudToken = token; } });
 
+let cloudSync;
+const getCloudSync = () => cloudSync ||= require('./cloud-sync.cjs').createCloudSync({
+  file: path.join(app.getPath('userData'), 'cloud-sync-session.json'), safeStorage, access,
+  config: authPublicConfig, fetchCloud: (...args) => net.fetch(...args),
+  onCloudToken: token => { verifiedCloudToken = token; }
+});
+ipcMain.handle('auth:syncSession', () => getCloudSync().connect());
+ipcMain.handle('auth:adoptSyncSession', (_event, session) => getCloudSync().adopt(session));
+ipcMain.handle('auth:cloudSyncStatus', () => getCloudSync().status());
+
 
 // Process-level crash/error handlers jitni jaldi ho sake set kar do, taaki
 // startup ke dauran bhi koi exception silently na guzar jaaye.
@@ -665,6 +675,7 @@ ipcMain.handle('auth:check', async () => {
 ipcMain.handle('auth:logout', async () => {
   offlineAuth.logout();
   verifiedCloudToken = null;
+  cloudSync?.pause();
   access.setPrincipal(null);
   return { success: true };
 });
@@ -949,12 +960,11 @@ ipcMain.handle('offline:cacheReplaceTable', async (_e, { table, rows, idField })
 ipcMain.handle('offline:refreshCashDays', async () => {
   const userId = access.getPrincipal()?.userId;
   const token = verifiedCloudToken;
-  const localAdmin = !!access.getPrincipal()?.localAdmin;
-  if (!userId || (!localAdmin && !token)) throw new Error('Verified PC access required');
+  if (!userId || !token) throw new Error('Cloud connection required for cash-day refresh');
   const rows = [];
   for (let offset=0; ; ) {
     const response = await net.fetch(`${authPublicConfig.url}/rest/v1/cash_book_days?select=*&order=id&limit=500&offset=${offset}`, {
-      headers: { apikey: authPublicConfig.key, ...(!localAdmin ? { Authorization: `Bearer ${token}` } : {}) }, signal: AbortSignal.timeout(20000),
+      headers: { apikey: authPublicConfig.key, Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20000),
     });
     if (!response.ok) throw new Error('Cash-day refresh unavailable');
     const batch = await response.json();
@@ -963,7 +973,6 @@ ipcMain.handle('offline:refreshCashDays', async () => {
     rows.push(...batch); offset += batch.length;
   }
   if (access.getPrincipal()?.userId !== userId || verifiedCloudToken !== token) throw new Error('Session changed during refresh');
-  if (localAdmin && rows.length === 0 && sqliteStore.cacheGetAll('cash_book_days').length > 0) throw new Error('API returned no visible cash days; cache preserved');
   sqliteStore.cacheReplaceTable('cash_book_days',rows,'id');
   return {success:true};
 });

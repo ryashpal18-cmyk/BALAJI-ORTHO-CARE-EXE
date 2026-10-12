@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('electron', {
   offlineStatus: () => ipcRenderer.invoke('auth:offlineStatus'),
   offlineSetup: (data) => ipcRenderer.invoke('auth:offlineSetup', data),
   syncSession: () => ipcRenderer.invoke('auth:syncSession'),
+  adoptSyncSession: session => ipcRenderer.invoke('auth:adoptSyncSession', session),
+  cloudSyncStatus: () => ipcRenderer.invoke('auth:cloudSyncStatus'),
 
   // ── Patient Operations ──────────────────────────────────────
   savePatient:     (data)   => ipcRenderer.invoke('db:savePatient', data),

@@ -22,6 +22,7 @@ files:
   - sms-outbox.cjs
   - access-control.cjs
   - offline-login.cjs
+  - cloud-sync.cjs
   - auth-public-config.json
   - package.json
 

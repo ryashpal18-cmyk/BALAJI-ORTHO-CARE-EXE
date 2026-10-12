@@ -1,3 +1,4 @@
+import { CloudSyncConnect } from "@/components/CloudSyncConnect";
 import { supabase } from "@/integrations/supabase/client";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -425,6 +426,8 @@ export default function SettingsPage() {
             App customization, dashboard control, aur user management
           </p>
         </div>
+
+        {isAdmin && <CloudSyncConnect />}
 
         {/* Tab bar */}
         <div style={{

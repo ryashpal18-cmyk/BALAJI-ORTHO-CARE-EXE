@@ -126,7 +126,7 @@ function register({ ipcMain, access, app, safeStorage, net, config, onCloudToken
   ipcMain.handle('auth:offlineStatus', () => get().status());
   ipcMain.handle('auth:offlineSetup', (_event, args) => get().setup(args));
   ipcMain.handle('auth:offlineLogin', (_event, args) => get().login(args));
-  ipcMain.handle('auth:syncSession', () => get().connect());
+
   return { restore: () => get().restore(), logout: () => get().logout() };
 }
 module.exports = { register, createOffline, normalizeEmail, MIN_SECRET };
