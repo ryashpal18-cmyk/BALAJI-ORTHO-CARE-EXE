@@ -87,6 +87,7 @@ export const ALL_PAGES = [
   { path: "/medicine-master",     label: "Medicine Master" },
   { path: "/patient-medicine",    label: "Patient Medicine" },
   { path: "/medicine-commission", label: "Medicine Commission" },
+  { path: "/dr-reg",              label: "DR REG (Doctors)" },
   { path: "/physiotherapy",       label: "Physiotherapy" },
   { path: "/ortho",               label: "Ortho / Fracture" },
   { path: "/reports",             label: "Reports / X-Ray" },

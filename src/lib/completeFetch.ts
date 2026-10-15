@@ -12,4 +12,4 @@ export async function fetchCompleteTable(table: string, select = "*"): Promise<a
     offset += data.length;
   }
 }
-export const OPERATIONAL_TABLES = ["patients", "billing", "appointments", "prescriptions", "physiotherapy_sessions", "beds", "xray_reports", "fracture_cases", "fracture_xrays", "hospitals", "stock_movements", "audit_logs", "insurance_claims", "branches", "booking_requests", "medicines", "medicine_entries", "invoice_medicine_mapping", "cash_book_entries", "cash_book_days", "payments", "medical_history", "report_payments", "sms_logs", "patient_medicines"];
+export const OPERATIONAL_TABLES = ["patients", "billing", "appointments", "prescriptions", "physiotherapy_sessions", "beds", "xray_reports", "fracture_cases", "fracture_xrays", "hospitals", "stock_movements", "audit_logs", "insurance_claims", "branches", "booking_requests", "medicines", "medicine_entries", "invoice_medicine_mapping", "cash_book_entries", "cash_book_days", "payments", "medical_history", "report_payments", "sms_logs", "patient_medicines", "doctors"];

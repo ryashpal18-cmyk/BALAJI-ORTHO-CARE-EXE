@@ -15,6 +15,7 @@ const TABLE_PAGES = {
   medicine_entries: ['/patient-medicine','/medicine-commission'], invoice_medicine_mapping: ['/patient-medicine','/medicine-commission'],
   patient_medicines: ['/patient-medicine','/opd'], sms_logs: ['/sms-logs','/whatsapp','/due-amount','/billing','/ortho'],
   insurance_claims: ['/insurance-claims'], booking_requests: ['/booking-requests'],
+  doctors: ['/billing','/dr-reg'],
   branches: ['*'], audit_logs: ['/audit-log'], deleted_records_log: [],
 };
 

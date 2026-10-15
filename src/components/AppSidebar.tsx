@@ -3,7 +3,7 @@ import {
   LayoutDashboard, BedDouble, Calendar, Receipt, Activity,
   FileText, BarChart3, Settings, Stethoscope, LogOut,
   MessageCircle, MessageSquare, Pill, Bone, ClipboardList, RefreshCw, FilePlus2, IndianRupee,
-  Package, ShieldCheck, ShieldPlus, Building2, CalendarCheck, Wallet,
+  Package, ShieldCheck, ShieldPlus, Building2, CalendarCheck, Wallet, UserPlus,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import logo from "@/assets/logo.png";
@@ -27,6 +27,7 @@ const ALL_MENU_ITEMS = [
   { title: "Appointments",        url: "/appointments",        icon: Calendar },
   { title: "Prescription Pad",    url: "/prescription",        icon: FilePlus2 },
   { title: "Billing",             url: "/billing",             icon: Receipt },
+  { title: "DR REG",             url: "/dr-reg",              icon: UserPlus },
   { title: "Due Amount",          url: "/due-amount",          icon: IndianRupee },
   { title: "Cash Tally",          url: "/cash-tally",          icon: Receipt },
   { title: "Medicine Master",     url: "/medicine-master",     icon: Pill },

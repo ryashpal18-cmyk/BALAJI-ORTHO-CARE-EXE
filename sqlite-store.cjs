@@ -156,7 +156,7 @@ function cacheReplaceRowKey(table, oldId, newRow, idField) {
     const newId = newRow[idField];
     if (oldId !== newId) {
       metaSet('alias:' + table + ':' + oldId, newId);
-      const referenceKeys = { patients: ['patient_id','patientId'], fracture_cases: ['fracture_case_id','caseId'], medicines: ['medicine_id'], medicine_entries: ['entry_id'], billing: ['billing_id'], branches: ['branch_id'] }[table] || [];
+      const referenceKeys = { patients: ['patient_id','patientId'], fracture_cases: ['fracture_case_id','caseId'], medicines: ['medicine_id'], medicine_entries: ['entry_id'], billing: ['billing_id'], branches: ['branch_id'], doctors: ['doctor_id'] }[table] || [];
       const remap = value => {
         if (!value || typeof value !== 'object') return value;
         const out = { ...value };

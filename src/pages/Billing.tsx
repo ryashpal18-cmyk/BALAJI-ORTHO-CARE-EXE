@@ -65,6 +65,11 @@ import { useIsAdmin } from "@/hooks/useIsAdmin";
 
 import { getServiceCatalog, learnServiceItems } from "@/lib/appConfig";
 import { useAddFractureCase } from "@/hooks/useOrtho";
+import { useDoctors } from "@/hooks/useDoctors";
+import {
+  DEFAULT_COMMISSION_PERCENT, DEFAULT_DOCTOR_NAME, DEFAULT_DOCTOR_VALUE,
+  isXrayService, normId,
+} from "@/lib/doctors";
 
 // ✅ Safe date helper - "Invalid time value" crash se bachao
 const safeDate = (val: any): string => {
@@ -465,6 +470,7 @@ export default function Billing() {
   const location = useLocation();
   const { data: bills, isLoading } = useBills();
   const { data: patients } = usePatients();
+  const { data: doctors = [] } = useDoctors();
   const addBill = useAddBill();
   const addFractureCase = useAddFractureCase();
   const updateBill = useUpdateBill();
@@ -480,6 +486,8 @@ export default function Billing() {
   const [amountPaid, setAmountPaid] = useState("");
   const [discountAmount, setDiscountAmount] = useState("");
   const [paymentMode, setPaymentMode] = useState("");
+  // Doctor: default hamesha Dr. S. S. Rathore. Dusra doctor chune par hi bill par doctor fields jaate hain.
+  const [doctorChoice, setDoctorChoice] = useState(DEFAULT_DOCTOR_VALUE);
   const [isSending, setIsSending] = useState(false);
   const creatingBill = useRef(false);
   const [rangeMode, setRangeMode] = useState("today");
@@ -600,6 +608,13 @@ const filteredPatients = useMemo(() => {
   };
 
   const totalAmount = services.filter(s => s.name.trim() && s.amount.trim()).reduce((sum, s) => sum + Number(s.amount), 0);
+  const xrayTotal = services
+    .filter(s => s.name.trim() && s.amount.trim() && isXrayService(s.name))
+    .reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
+  const selectedDoctor = doctorChoice === DEFAULT_DOCTOR_VALUE
+    ? null
+    : doctors.find((d) => normId(d.id) === doctorChoice) || null;
+  const doctorOptions = doctors.filter((d) => d.is_active || normId(d.id) === doctorChoice);
   const paidNum = parseFloat(amountPaid) || 0;
   const discountNum = parseFloat(discountAmount) || 0;
   const dueAmount = Math.max(totalAmount - discountNum - paidNum, 0);
@@ -664,6 +679,12 @@ const filteredPatients = useMemo(() => {
         amount_paid: paidNum,
         payment_mode: paymentMode || null,
         discount: discountNum,
+        // Doctor fields sirf dusre registered doctor par jaate hain (default doctor = koi change nahi).
+        ...(selectedDoctor ? {
+          doctor_id: selectedDoctor.id,
+          doctor_name: selectedDoctor.name,
+          doctor_commission_percent: Number(selectedDoctor.commission_percent ?? DEFAULT_COMMISSION_PERCENT),
+        } : {}),
         // 🔒 FIX: created_at yahin lock karo — offline din/din-raat use hone
         // par bill agle din sync ho to bhi Supabase apna "now()" laga ke
         // aaj ki date na de de, isliye asli banaye jaane ka time bhejte hain.
@@ -722,6 +743,7 @@ const filteredPatients = useMemo(() => {
       setAmountPaid("");
       setDiscountAmount("");
       setPaymentMode("");
+      setDoctorChoice(DEFAULT_DOCTOR_VALUE);
       setOpen(false);
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -767,6 +789,7 @@ const filteredPatients = useMemo(() => {
     setAmountPaid(String((bill as any).amount_paid || 0));
     setDiscountAmount(String((bill as any).discount || ""));
     setPaymentMode((bill as any).payment_mode || "");
+    setDoctorChoice(bill.doctor_id ? normId(bill.doctor_id) : DEFAULT_DOCTOR_VALUE);
     setEditOpen(true);
   };
 
@@ -801,6 +824,15 @@ const filteredPatients = useMemo(() => {
         amount_paid: paidNum,
         payment_mode: paymentMode || null,
         discount: discountNum,
+        ...(doctorChoice !== (editingBill.doctor_id ? normId(editingBill.doctor_id) : DEFAULT_DOCTOR_VALUE)
+          ? (selectedDoctor
+              ? {
+                  doctor_id: selectedDoctor.id,
+                  doctor_name: selectedDoctor.name,
+                  doctor_commission_percent: Number(selectedDoctor.commission_percent ?? DEFAULT_COMMISSION_PERCENT),
+                }
+              : { doctor_id: null, doctor_name: null, doctor_commission_percent: null })
+          : {}),
       } as any);
 
       const updatedBill = {
@@ -838,6 +870,7 @@ const filteredPatients = useMemo(() => {
       setAmountPaid("");
       setDiscountAmount("");
       setPaymentMode("");
+      setDoctorChoice(DEFAULT_DOCTOR_VALUE);
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
@@ -962,6 +995,32 @@ const filteredPatients = useMemo(() => {
       serviceNameRefs.current[idx + 1]?.focus();
     }
   };
+
+  const renderDoctorSelect = () => (
+    <div className="space-y-1">
+      <Label className="text-xs">👨‍⚕️ Doctor</Label>
+      <Select value={doctorChoice} onValueChange={setDoctorChoice}>
+        <SelectTrigger className="h-9">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={DEFAULT_DOCTOR_VALUE}>{DEFAULT_DOCTOR_NAME} (Default)</SelectItem>
+          {doctorOptions.map((d) => (
+            <SelectItem key={d.id} value={normId(d.id)}>
+              {d.name} — X-Ray {d.commission_percent}%
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {selectedDoctor && (
+        <p className="text-[11px] text-muted-foreground">
+          {xrayTotal > 0
+            ? `X-Ray ₹${xrayTotal.toLocaleString()} → ${selectedDoctor.name} का commission ₹${(Math.round(xrayTotal * Number(selectedDoctor.commission_percent ?? DEFAULT_COMMISSION_PERCENT)) / 100).toLocaleString()}`
+            : "Bill में X-Ray service जुड़ने पर commission बनेगा"}
+        </p>
+      )}
+    </div>
+  );
 
   const renderServiceForm = () => (
     <div className="space-y-2">
@@ -1132,6 +1191,7 @@ const filteredPatients = useMemo(() => {
                   setAmountPaid("");
                   setPaymentMode("");
                   setPatientSearch("");
+                  setDoctorChoice(DEFAULT_DOCTOR_VALUE);
                 }
               }}
             >
@@ -1182,6 +1242,7 @@ const filteredPatients = useMemo(() => {
                       </SelectContent>
                     </Select>
                   </div>
+                  {renderDoctorSelect()}
                   {renderServiceForm()}
                   {renderPaymentSection()}
                   <Button
@@ -1277,6 +1338,7 @@ const filteredPatients = useMemo(() => {
               setServices([{ name: "", amount: "" }]);
               setAmountPaid("");
               setPaymentMode("");
+              setDoctorChoice(DEFAULT_DOCTOR_VALUE);
             }
           }}
         >
@@ -1299,6 +1361,7 @@ const filteredPatients = useMemo(() => {
                   <span className="text-primary">{(editingBill?.patients as any)?.name}</span>
                 </p>
               </div>
+              {renderDoctorSelect()}
               {renderServiceForm()}
               {renderPaymentSection()}
               <Button type="submit" className="w-full" disabled={updateBill.isPending || isSending}>

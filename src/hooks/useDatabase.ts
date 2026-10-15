@@ -60,10 +60,14 @@ export function usePatients() {
 export function useUpdateBill() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (bill: { id: string; amount: number; amount_paid: number; status: string; service?: string; payment_mode?: string; discount?: number | null }) => {
+    mutationFn: async (bill: { id: string; amount: number; amount_paid: number; status: string; service?: string; payment_mode?: string; discount?: number | null; doctor_id?: string | null; doctor_name?: string | null; doctor_commission_percent?: number | null }) => {
       const updateData: any = { amount: bill.amount, amount_paid: bill.amount_paid, status: bill.status };
       if (bill.service !== undefined) updateData.service = bill.service;
       if (bill.payment_mode !== undefined) updateData.payment_mode = bill.payment_mode;
+      // Doctor sirf tab bheja jaata hai jab edit mein badla ho (purane flow par koi asar nahi).
+      if (bill.doctor_id !== undefined) updateData.doctor_id = bill.doctor_id;
+      if (bill.doctor_name !== undefined) updateData.doctor_name = bill.doctor_name;
+      if (bill.doctor_commission_percent !== undefined) updateData.doctor_commission_percent = bill.doctor_commission_percent;
       // 🚨 FIX: "discount" field yahan missing tha — Edit Bill dialog mein discount
       // badalne par woh save hi nahi hota tha (chupchaap drop ho jaata tha).
       if (bill.discount !== undefined) updateData.discount = bill.discount;
