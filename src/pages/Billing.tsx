@@ -1,3 +1,4 @@
+import { ServiceCatalogManager } from "@/components/ServiceCatalogManager";
 import { invoiceNumber } from "@/lib/invoiceNumber";
 import { netBillAmount } from "@/lib/billAmounts";
 import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
@@ -63,7 +64,7 @@ import * as XLSX from "xlsx";
 import { openWhatsAppWeb } from "@/pages/WhatsApp";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 
-import { getServiceCatalog, learnServiceItems } from "@/lib/appConfig";
+import { getServiceCatalog, learnServiceItems, serviceSearchKey } from "@/lib/appConfig";
 import { useAddFractureCase } from "@/hooks/useOrtho";
 import { useDoctors } from "@/hooks/useDoctors";
 import {
@@ -694,7 +695,11 @@ const filteredPatients = useMemo(() => {
       toast({ title: "✅ Bill Saved", description: result.smsQueued ? "Bill aur SMS queue PC par save ho gaye" : "Bill saved. Valid mobile nahi hai, isliye SMS queue nahi hua." });
 
       // Jo bhi items type kiye the, unhe catalog mein yaad kar lo
-      learnServiceItems(validServices.map((s) => ({ name: s.name, amount: parseFloat(s.amount) || 0 })));
+      try {
+        learnServiceItems(validServices.map((s) => ({ name: s.name, amount: Number(s.amount) })));
+      } catch {
+        toast({ title: "बिल सेव है; सेवा रेट-लिस्ट सेव नहीं हो पाई", variant: "destructive" });
+      }
 
       // ── Auto OrthoPanel: bill mein plaster ho to fracture case auto-add ──
       const plasterKeywords = ["plaster", "p.o.p", "pop", "cast", "slab", "splint", "पलस्तर"];
@@ -915,6 +920,7 @@ const filteredPatients = useMemo(() => {
     toast({ title: "Exported!", description: "Excel file download हो गई" });
   };
 
+  const paidInputRef = useRef<HTMLInputElement | null>(null);
   const serviceNameRefs = useRef<(HTMLInputElement | null)[]>([]);
   const serviceAmountRefs = useRef<(HTMLInputElement | null)[]>([]);
   const billFormRef = useRef<HTMLFormElement | null>(null);
@@ -931,10 +937,10 @@ const filteredPatients = useMemo(() => {
   const showSuggestions = (query: string, idx: number) => {
     if (!query.trim()) { setSuggestions([]); setSugForRow(-1); return; }
     const catalog = getServiceCatalog();
-    const q = query.toLowerCase();
+    const q = serviceSearchKey(query);
     const matched = catalog
-      .filter((c) => c.name.toLowerCase().includes(q))
-      .sort((a, b) => a.name.toLowerCase().indexOf(q) - b.name.toLowerCase().indexOf(q))
+      .filter((c) => serviceSearchKey(c.name).includes(q))
+      .sort((a, b) => serviceSearchKey(a.name).indexOf(q) - serviceSearchKey(b.name).indexOf(q))
       .slice(0, 6);
     setSuggestions(matched);
     setSugForRow(idx);
@@ -945,11 +951,13 @@ const filteredPatients = useMemo(() => {
     updateService(idx, "name", item.name);
     updateService(idx, "amount", String(item.rate));
     setSuggestions([]); setSugForRow(-1); setActiveSugIdx(-1);
-    // Amount field par focus — Enter dabakar aage badhte rahenge
-    requestAnimationFrame(() => serviceAmountRefs.current[idx]?.focus());
+    // Choosing a saved product fills its price and moves straight to the next product.
+    if (idx === services.length - 1) addServiceRow();
+    focusServiceName(idx + 1);
   };
 
   const handleServiceNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, idx: number) => {
+    if (e.nativeEvent.isComposing) return;
     // Agar suggestions khule hain to arrow/enter unhe handle kare
     if (suggestions.length > 0 && sugForRow === idx) {
       if (e.key === "ArrowDown") {
@@ -962,7 +970,7 @@ const filteredPatients = useMemo(() => {
         setActiveSugIdx((p) => Math.max(p - 1, 0));
         return;
       }
-      if (e.key === "Enter" || e.key === "Tab") {
+      if (e.key === "Enter") {
         e.preventDefault();
         const pick = activeSugIdx >= 0 ? suggestions[activeSugIdx] : suggestions[0];
         if (pick) { applySuggestion(pick, idx); return; }
@@ -975,7 +983,11 @@ const filteredPatients = useMemo(() => {
     if (e.key === "Enter") {
       e.preventDefault();
       setSuggestions([]); setSugForRow(-1);
-      serviceAmountRefs.current[idx]?.focus();
+      if (!services[idx].name.trim() && !services[idx].amount.trim()) {
+        paidInputRef.current?.focus();
+      } else {
+        serviceAmountRefs.current[idx]?.focus();
+      }
     }
   };
 
@@ -986,9 +998,10 @@ const filteredPatients = useMemo(() => {
     const current = services[idx];
     if (isLastRow) {
       if (!current.name && !current.amount) {
-        billFormRef.current?.requestSubmit();
+        paidInputRef.current?.focus();
         return;
       }
+      if (!current.name.trim() || !current.amount.trim() || !Number.isFinite(Number(current.amount)) || Number(current.amount) < 0) return;
       addServiceRow();
       focusServiceName(idx + 1);
     } else {
@@ -1024,7 +1037,8 @@ const filteredPatients = useMemo(() => {
 
   const renderServiceForm = () => (
     <div className="space-y-2">
-      <Label>Services</Label>
+      <div className="flex items-center justify-between gap-2"><Label>Services / Products</Label><ServiceCatalogManager /></div>
+      <p className="text-xs text-muted-foreground">नाम लिखें → ↑↓ से चुनें → Enter से रेट भरें और अगली सेवा जोड़ें। खाली सेवा पर Enter से Payment पर जाएँ।</p>
       <div className="space-y-2 max-h-48 overflow-y-auto">
         {services.map((s, idx) => (
           <div key={idx} className="flex gap-2 items-start">
@@ -1034,18 +1048,20 @@ const filteredPatients = useMemo(() => {
                 placeholder="Item/Service type karo..."
                 className="h-9 w-full"
                 value={s.name}
+                aria-label={`Service ${idx + 1} name`}
                 autoComplete="off"
                 onChange={(e) => {
                   updateService(idx, "name", e.target.value);
                   showSuggestions(e.target.value, idx);
                 }}
                 onKeyDown={(e) => handleServiceNameKeyDown(e, idx)}
-                onBlur={() => setTimeout(() => { setSuggestions([]); setSugForRow(-1); }, 150)}
+                onFocus={() => showSuggestions(s.name, idx)}
+                onBlur={() => { setSuggestions([]); setSugForRow(-1); }}
               />
               {/* Suggestion dropdown */}
               {sugForRow === idx && suggestions.length > 0 && (
                 <div style={{
-                  position: "absolute", top: "100%", left: 0, right: 0, zIndex: 999,
+                  position: "relative", zIndex: 10,
                   background: "#fff", border: "1.5px solid #1e57b0",
                   borderRadius: "8px", boxShadow: "0 4px 16px rgba(30,87,176,0.12)",
                   marginTop: "2px", overflow: "hidden",
@@ -1053,7 +1069,7 @@ const filteredPatients = useMemo(() => {
                   {suggestions.map((sug, si) => (
                     <div
                       key={sug.name}
-                      onMouseDown={() => applySuggestion(sug, idx)}
+                      onMouseDown={(e) => { e.preventDefault(); applySuggestion(sug, idx); }}
                       style={{
                         padding: "8px 12px",
                         cursor: "pointer",
@@ -1076,7 +1092,8 @@ const filteredPatients = useMemo(() => {
             </div>
             <Input
               ref={(el) => (serviceAmountRefs.current[idx] = el)}
-              type="number"
+              type="number" min="0" step="0.01"
+              aria-label={`Service ${idx + 1} rate`}
               placeholder="₹"
               className="w-24 h-9"
               value={s.amount}
@@ -1130,6 +1147,8 @@ const filteredPatients = useMemo(() => {
             type="number"
             placeholder="0"
             className="h-9"
+            ref={paidInputRef}
+            min="0" step="0.01"
             value={amountPaid}
             onChange={(e) => setAmountPaid(e.target.value)}
           />
@@ -1140,11 +1159,13 @@ const filteredPatients = useMemo(() => {
             type="number"
             placeholder="0"
             className="h-9 border-yellow-400 focus:ring-yellow-400"
+            min="0" step="0.01"
             value={discountAmount}
             onChange={(e) => setDiscountAmount(e.target.value)}
           />
         </div>
       </div>
+      <div className="flex justify-between text-sm"><span>छूट के बाद देय राशि</span><strong>₹{Math.max(totalAmount - discountNum, 0).toLocaleString()}</strong></div>
       <div className="flex justify-between items-center p-2 rounded-lg border border-dashed">
         <span className="text-xs font-medium text-muted-foreground">Due Amount</span>
         <span
@@ -1179,6 +1200,7 @@ const filteredPatients = useMemo(() => {
             </div>
           </div>
           <div className="flex gap-2">
+            <ServiceCatalogManager />
             <Button variant="outline" className="gap-2" onClick={exportToExcel}>
               <Download className="h-4 w-4" /> Excel Export
             </Button>
@@ -1189,6 +1211,9 @@ const filteredPatients = useMemo(() => {
                 if (!v) {
                   setServices([{ name: "", amount: "" }]);
                   setAmountPaid("");
+                  setDiscountAmount("");
+                  setSelectedPatient("");
+                  setSuggestions([]); setSugForRow(-1);
                   setPaymentMode("");
                   setPatientSearch("");
                   setDoctorChoice(DEFAULT_DOCTOR_VALUE);

@@ -103,38 +103,42 @@ export interface ServiceCatalogItem {
   rate: number;
 }
 
+export const serviceSearchKey = (name: string) => name.trim().toLocaleLowerCase().replace(/[\s.\-_]+/g, "");
+
 export const getServiceCatalog = (): ServiceCatalogItem[] => {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.SERVICE_CATALOG) || "[]"); } catch { return []; }
+  try {
+    const items = JSON.parse(localStorage.getItem(STORAGE_KEYS.SERVICE_CATALOG) || "[]");
+    return Array.isArray(items) ? items.filter(c => c && typeof c.id === "string" && typeof c.name === "string" && c.name.trim() && !/[|:]/.test(c.name) && Number.isFinite(c.rate) && c.rate >= 0) : [];
+  } catch { return []; }
 };
 
 export const saveServiceCatalog = (items: ServiceCatalogItem[]) =>
   localStorage.setItem(STORAGE_KEYS.SERVICE_CATALOG, JSON.stringify(items));
 
-/**
- * Bill save hone ke baad silently call hota hai — har service item ko
- * catalog mein yaad kar leta hai. Agar naam pehli baar aaya to nayi
- * entry banti hai, agar pehle se hai to rate update ho jata hai.
- */
+export function upsertServiceProduct(name: string, rate: string, id?: string): ServiceCatalogItem[] {
+  const cleanName = name.trim();
+  const value = Number(rate);
+  if (!cleanName || /[|:]/.test(cleanName)) throw new Error("सेवा का सही नाम लिखें। नाम में : या | न डालें।");
+  if (!rate.trim() || !Number.isFinite(value) || value < 0) throw new Error("सही रेट भरें (₹0 या अधिक)।");
+  const items = getServiceCatalog();
+  if (items.some(c => c.id !== id && serviceSearchKey(c.name) === serviceSearchKey(cleanName))) {
+    throw new Error("यह सेवा पहले से है। उसका रेट Edit करें।");
+  }
+  const item = { id: id || crypto.randomUUID(), name: cleanName, rate: Math.round(value * 100) / 100 };
+  const next = id ? items.map(c => c.id === id ? item : c) : [...items, item];
+  saveServiceCatalog(next);
+  return next;
+}
+
+// Remember new free-text services, but never overwrite the saved price with a bill-specific rate.
 export const learnServiceItems = (items: { name: string; amount: number }[]) => {
-  if (!items.length) return;
   const catalog = getServiceCatalog();
-  const byName = new Map(catalog.map((c) => [c.name.toLowerCase().trim(), c]));
+  const known = new Set(catalog.map(c => serviceSearchKey(c.name)));
   for (const { name, amount } of items) {
-    const trimmed = name.trim();
-    if (!trimmed || !amount) continue;
-    const key = trimmed.toLowerCase();
-    const existing = byName.get(key);
-    if (existing) {
-      existing.rate = amount; // rate update
-    } else {
-      const item: ServiceCatalogItem = {
-        id: `svc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        name: trimmed,
-        rate: amount,
-      };
-      catalog.push(item);
-      byName.set(key, item);
-    }
+    const trimmed = name.trim(), key = serviceSearchKey(trimmed);
+    if (!trimmed || /[|:]/.test(trimmed) || !Number.isFinite(amount) || amount < 0 || known.has(key)) continue;
+    catalog.push({ id: crypto.randomUUID(), name: trimmed, rate: amount });
+    known.add(key);
   }
   saveServiceCatalog(catalog);
 };

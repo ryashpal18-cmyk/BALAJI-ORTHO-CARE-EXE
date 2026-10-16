@@ -26,7 +26,7 @@ export function billCareCategory(service: unknown): 'cast' | 'slab' | 'removal' 
 
 export function buildBillSmsMessage(args: {
   patientName?: string; invoice: string; date: string; service: unknown;
-  total: number; paid: number; due: number; followupDate?: string | null;
+  total: number; discount?: number; paid: number; due: number; followupDate?: string | null;
 }): string {
   const name = (args.patientName || 'मरीज').trim();
   const names = billServiceNames(args.service);
@@ -38,6 +38,7 @@ export function buildBillSmsMessage(args: {
     `दिनांक: ${args.date}`,
     ...(names.length ? [`सेवा: ${names.join(', ')}`] : []),
     `कुल राशि: ₹${args.total}`,
+    ...(args.discount ? [`छूट: ₹${args.discount}`, `देय राशि: ₹${Math.max(args.total - args.discount, 0)}`] : []),
     `जमा राशि: ₹${args.paid}`,
     `बकाया राशि: ₹${args.due}`,
   ];
