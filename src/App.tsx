@@ -57,6 +57,7 @@ import OPD from "./pages/OPD";
 import IPD from "./pages/IPD";
 import Appointments from "./pages/Appointments";
 import Billing from "./pages/Billing";
+import Products from "./pages/Products";
 import DueAmount from "./pages/DueAmount";
 import CashTally from "./pages/CashTally";
 import DailyCashBook from "./pages/DailyCashBook";
@@ -152,6 +153,7 @@ const App = () => {
                   <Route path="/opd" element={<ProtectedRoute><OPD /></ProtectedRoute>} />
                   <Route path="/ipd" element={<ProtectedRoute><IPD /></ProtectedRoute>} />
                   <Route path="/appointments" element={<ProtectedRoute><Appointments /></ProtectedRoute>} />
+                  <Route path="/products" element={<ProtectedRoute><Products /></ProtectedRoute>} />
                   <Route path="/billing" element={<ProtectedRoute><Billing /></ProtectedRoute>} />
                   <Route path="/due-amount" element={<ProtectedRoute><DueAmount /></ProtectedRoute>} />
                   <Route path="/cash-tally" element={<ProtectedRoute><CashTally /></ProtectedRoute>} />

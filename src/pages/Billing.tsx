@@ -1,4 +1,3 @@
-import { ServiceCatalogManager } from "@/components/ServiceCatalogManager";
 import { invoiceNumber } from "@/lib/invoiceNumber";
 import { netBillAmount } from "@/lib/billAmounts";
 import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
@@ -1037,7 +1036,7 @@ const filteredPatients = useMemo(() => {
 
   const renderServiceForm = () => (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2"><Label>Services / Products</Label><ServiceCatalogManager /></div>
+      <Label>Services / Products</Label>
       <p className="text-xs text-muted-foreground">नाम लिखें → ↑↓ से चुनें → Enter से रेट भरें और अगली सेवा जोड़ें। खाली सेवा पर Enter से Payment पर जाएँ।</p>
       <div className="space-y-2 max-h-48 overflow-y-auto">
         {services.map((s, idx) => (
@@ -1200,7 +1199,6 @@ const filteredPatients = useMemo(() => {
             </div>
           </div>
           <div className="flex gap-2">
-            <ServiceCatalogManager />
             <Button variant="outline" className="gap-2" onClick={exportToExcel}>
               <Download className="h-4 w-4" /> Excel Export
             </Button>

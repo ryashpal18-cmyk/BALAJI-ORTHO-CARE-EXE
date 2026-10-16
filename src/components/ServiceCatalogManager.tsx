@@ -1,15 +1,13 @@
 import { useRef, useState } from "react";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { getServiceCatalog, saveServiceCatalog, serviceSearchKey, upsertServiceProduct, type ServiceCatalogItem } from "@/lib/appConfig";
 import { toast } from "@/hooks/use-toast";
 
 export function ServiceCatalogManager() {
-  const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<ServiceCatalogItem[]>([]);
+  const [items, setItems] = useState<ServiceCatalogItem[]>(getServiceCatalog);
   const [name, setName] = useState("");
   const [rate, setRate] = useState("");
   const [editingId, setEditingId] = useState<string>();
@@ -34,16 +32,7 @@ export function ServiceCatalogManager() {
       if (editingId === id) reset();
     } catch { toast({ title: "सेवा हटाई नहीं जा सकी", variant: "destructive" }); }
   };
-  return <Dialog open={open} onOpenChange={value => {
-    setOpen(value);
-    if (value) { setItems(getServiceCatalog()); reset(); setSearch(""); setDeleteId(undefined); }
-  }}>
-    <DialogTrigger asChild><Button type="button" variant="outline" size="sm" className="gap-1"><Plus className="h-4 w-4" /> Add Product / रेट-लिस्ट</Button></DialogTrigger>
-    <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto" onKeyDown={e => {
-      // This dialog may be launched from the bill form; never submit that bill on Enter.
-      if (e.key === "Enter") e.stopPropagation();
-    }}>
-      <DialogHeader><DialogTitle>सेवाएँ और रेट-लिस्ट</DialogTitle></DialogHeader>
+  return <section className="space-y-4" aria-label="Product rate list">
       <p className="text-sm text-muted-foreground">X-Ray, Plaster जैसी सेवाएँ और उनके रेट पहले सेव करें। बिल बनाते समय नाम लिखकर चुनें। यह सूची इसी PC पर सेव रहेगी।</p>
       <div className="grid grid-cols-[1fr_110px] gap-3">
         <div className="space-y-1"><Label htmlFor="catalog-name">सेवा / Product का नाम</Label>
@@ -68,6 +57,5 @@ export function ServiceCatalogManager() {
         </div>)}
         {!items.length && <p className="py-4 text-center text-sm text-muted-foreground">अभी कोई सेवा सेव नहीं है। ऊपर नाम और रेट भरें।</p>}
       </div>
-    </DialogContent>
-  </Dialog>;
+  </section>;
 }

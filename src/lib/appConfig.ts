@@ -82,6 +82,7 @@ export const ALL_PAGES = [
   { path: "/daily-cash-book",     label: "Daily Cash Book" },
   { path: "/ipd",                 label: "IPD / Beds" },
   { path: "/appointments",        label: "Appointments" },
+  { path: "/products",            label: "Add Product" },
   { path: "/billing",             label: "Billing" },
   { path: "/cash-tally",          label: "Cash Tally" },
   { path: "/medicine-master",     label: "Medicine Master" },

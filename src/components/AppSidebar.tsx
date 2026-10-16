@@ -26,6 +26,7 @@ const ALL_MENU_ITEMS = [
   { title: "IPD / Beds",          url: "/ipd",                 icon: BedDouble },
   { title: "Appointments",        url: "/appointments",        icon: Calendar },
   { title: "Prescription Pad",    url: "/prescription",        icon: FilePlus2 },
+  { title: "Add Product",         url: "/products",            icon: Package },
   { title: "Billing",             url: "/billing",             icon: Receipt },
   { title: "DR REG",             url: "/dr-reg",              icon: UserPlus },
   { title: "Due Amount",          url: "/due-amount",          icon: IndianRupee },
