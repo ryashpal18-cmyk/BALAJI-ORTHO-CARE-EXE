@@ -337,10 +337,14 @@ export async function queueRemapRowId(table: string, oldRowId: string, newRowId:
 // Repeated failures remain durable and retry automatically with capped backoff.
 // The separate attention count is informational; it never deletes or disables work.
 export const MAX_SYNC_RETRIES = 8;
-export async function queueCount(): Promise<number> { return (await queueGetAll()).length; }
+// Unconfirmed SMS (delivery outcome unknown) wait for a human check in SMS Logs; they are never
+// auto-retried, so they must not keep the cloud-sync "pending / atki hui" counters stuck forever.
+const isParkedSms = (m: QueuedMutation) => m.op === "sms" && m.payload?.deliveryState === "unconfirmed";
+export async function queueCount(): Promise<number> { return (await queueGetAll()).filter(m => !isParkedSms(m)).length; }
 export async function queueStuckCount(): Promise<number> {
-  return (await queueGetAll()).filter(m => (m.retries || 0) >= MAX_SYNC_RETRIES).length;
+  return (await queueGetAll()).filter(m => !isParkedSms(m) && (m.retries || 0) >= MAX_SYNC_RETRIES).length;
 }
+export async function queueSmsReviewCount(): Promise<number> { return (await queueGetAll()).filter(isParkedSms).length; }
 
 // ─── Meta ─────────────────────────────────────────────────────────────────
 

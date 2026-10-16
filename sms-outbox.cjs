@@ -1,5 +1,27 @@
 'use strict';
 const { createHash } = require('crypto');
+// A failure that happened BEFORE the request could leave this PC (DNS, refused/unreachable
+// connection, connect timeout, TLS handshake) proves nothing was delivered, so a later retry
+// cannot create a duplicate SMS. Anything else (our own timeout, reset mid-request, 5xx,
+// journal write failure) stays "uncertain" and is never auto-resent.
+const NOT_SENT_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN', 'ERR_TLS_CERT_ALTNAME_INVALID']);
+const NOT_SENT_NET = /net::ERR_(INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|CONNECTION_REFUSED|ADDRESS_UNREACHABLE)/;
+function provablyNotSent(error) {
+  const found = [];
+  let netText = false;
+  const walk = (e, depth) => {
+    if (!e || typeof e !== 'object' || depth > 3) return;
+    if (typeof e.message === 'string' && NOT_SENT_NET.test(e.message)) netText = true;
+    if (typeof e.code === 'string') found.push(e.code === 'ETIMEDOUT' && e.syscall === 'connect' ? 'ENETUNREACH' : e.code);
+    walk(e.cause, depth + 1);
+    if (Array.isArray(e.errors)) e.errors.forEach(x => walk(x, depth + 1));
+  };
+  walk(error, 0);
+  if (netText && found.every(c => NOT_SENT_CODES.has(c))) return true;
+  return found.length > 0 && found.every(c => NOT_SENT_CODES.has(c));
+}
 // Persist BEFORE dispatch. A crash/timeout after dispatch is ambiguous, never an automatic resend.
 function createSmsSender({ store, fetchImpl = fetch, timeoutMs = 15000 }) {
   const active = new Map();
@@ -42,6 +64,11 @@ function createSmsSender({ store, fetchImpl = fetch, timeoutMs = 15000 }) {
         store.metaSet(key, { fingerprint, state: 'accepted', acceptedAt });
         return { ok: true, acceptedAt };
       } catch (error) {
+        if (provablyNotSent(error)) {
+          // Nothing reached the gateway: release the journal so the normal backoff retry can send it.
+          try { store.metaSet(key, { fingerprint, state: 'not_sent' }); return { ok: false, error: 'SMS gateway unreachable (internet/DNS); retry hoga' }; }
+          catch { /* could not release the marker: stay conservative below */ }
+        }
         try { store.metaSet(key, { fingerprint, state: 'uncertain' }); } catch { /* durable dispatching marker still prevents resend */ }
         return { ok: false, uncertain: true, error: 'SMS delivery unconfirmed; check gateway before resending' };
       } finally { clearTimeout(timer); }

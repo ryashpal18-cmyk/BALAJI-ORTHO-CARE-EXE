@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CloudOff, RefreshCw, CheckCircle2 } from "lucide-react";
-import { queueCount, queueStuckCount, onQueueChange } from "@/lib/offlineDb";
+import { queueCount, queueStuckCount, queueSmsReviewCount, onQueueChange } from "@/lib/offlineDb";
 import { onSyncStatus, runSync } from "@/lib/offlineSync";
 
 export function SyncStatusBadge() {
@@ -12,6 +12,7 @@ export function SyncStatusBadge() {
   // karte, sirf alag se count karke dikhate hain taaki pata chale kuch
   // atka hua hai aur review kiya ja sake.
   const [stuck, setStuck]       = useState(0);
+  const [smsReview, setSmsReview] = useState(0);
   const [syncing, setSyncing]   = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [justSynced, setJustSynced] = useState(false);
@@ -25,7 +26,7 @@ export function SyncStatusBadge() {
     refreshStuckCount();
     const stuckInterval = setInterval(refreshStuckCount, 60000);
 
-    const offQueue = onQueueChange((count) => setPending(count));
+    const offQueue = onQueueChange((count) => { setPending(count); void refreshStuckCount(); });
     const offSync  = onSyncStatus((s) => {
       setSyncError(s.lastError || null);
       if (s.lastError) setJustSynced(false);
@@ -46,12 +47,25 @@ export function SyncStatusBadge() {
   }, []);
 
   async function refreshStuckCount() {
-    try { setStuck(await queueStuckCount()); setPending(await queueCount()); } catch { /* silent */ }
+    try { setStuck(await queueStuckCount()); setPending(await queueCount()); setSmsReview(await queueSmsReviewCount()); } catch { /* silent */ }
   }
 
+  const smsNote = smsReview > 0 ? (
+    <span
+      title="SMS delivery ka result pata nahi chala. SMS Logs me gateway check karke 'Dobara bhejein' ya 'Hataein' chunein. Ye cloud data sync ko nahi rokta."
+      style={{
+        display: "flex", alignItems: "center", height: "32px", padding: "0 8px",
+        borderRadius: "8px", border: "1.5px solid #fcd34d", background: "rgba(254,243,199,0.9)",
+        color: "#b45309", fontSize: "11px", fontWeight: 600,
+      }}
+    >
+      ✉ {smsReview} SMS check karein
+    </span>
+  ) : null;
+
   if (syncError) return <button className="text-xs text-amber-700" title={syncError} onClick={() => void runSync().catch(() => {})}>PC पर सुरक्षित · Cloud sync बाकी ({pending})</button>;
-  // Online + kuch pending nahi + sync nahi chal raha = badge dikhao hi mat
-  if (online && pending === 0 && !syncing && !justSynced) return null;
+  // Online + kuch pending nahi + sync nahi chal raha = badge dikhao hi mat (sirf SMS check note ho to wahi)
+  if (online && pending === 0 && !syncing && !justSynced) return smsNote;
 
   // Abhi sync hua — 3 second green checkmark
   if (justSynced && pending === 0) return (
@@ -126,6 +140,7 @@ export function SyncStatusBadge() {
           ⚠ {stuck} atki hui
         </span>
       )}
+      {smsNote}
     </div>
   );
 }

@@ -117,6 +117,12 @@ function emitSyncStatus(pending: number, lastError?: string) {
 // karein — pehle dono jagah alag-alag hardcoded the, mismatch ka risk tha.
 const MAX_RETRIES = MAX_SYNC_RETRIES;
 
+// SMS jiska delivery outcome pata nahi (timeout/5xx) "parked" hota hai: gateway dobara call
+// nahi hota, ERROR log/retry-loop nahi chalta, aur ye cloud-sync pending count ko nahi rokta.
+// Staff SMS Logs page se gateway check karke "Dobara bhejein" ya "Hataein" chunta hai.
+const isParkedSms = (m: QueuedMutation) => m.op === "sms" && m.payload?.deliveryState === "unconfirmed";
+const pendingCount = async () => (await queueGetAll()).filter(m => !isParkedSms(m)).length;
+
 // 🚨 FIX: pehle sirf row ki apni "id" se "local_" prefix hataya jaata tha.
 // Lekin agar offline mein naya patient banao aur turant uski billing bhi
 // banao, to billing.patient_id = "local_<uuid>" hi rehta tha — Supabase
@@ -266,7 +272,10 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
       apiUrl: import.meta.env.VITE_TEXTBEE_API_URL, apiKey: import.meta.env.VITE_TEXTBEE_API_KEY,
       deviceId: import.meta.env.VITE_TEXTBEE_DEVICE_ID, mobile, message });
     if (!result?.ok) {
-      if (result?.uncertain) await queueUpdate(m.id!, { payload: { ...m.payload, messageId, deliveryState: "unconfirmed" } });
+      if (result?.uncertain) {
+        await queueUpdate(m.id!, { payload: { ...m.payload, messageId, deliveryState: "unconfirmed" }, lastError: "" });
+        throw new Error("SMS_UNCONFIRMED");
+      }
       throw new Error(result?.error || "SMS gateway fail");
     }
     // Gateway acceptance is journaled by main before returning. Log persistence/retries never resend it.
@@ -314,17 +323,17 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
 
 export async function runSync(): Promise<{ synced: number; pending: number }> {
   if ((window as any).electron?.checkAuth && !(await (window as any).electron.checkAuth()).valid) return { synced: 0, pending: 0 };
-  if (syncing) return { synced: 0, pending: (await queueGetAll()).length };
+  if (syncing) return { synced: 0, pending: await pendingCount() };
 
   const online = typeof navigator !== "undefined" ? navigator.onLine : true;
-  if (!online) return { synced: 0, pending: (await queueGetAll()).length };
+  if (!online) return { synced: 0, pending: await pendingCount() };
 
   syncing = true;
   let synced = 0;
   let lastError: string | undefined;
 
   try {
-    emitSyncStatus((await queueGetAll()).length);
+    emitSyncStatus(await pendingCount());
     const drain = async (sms: boolean) => {
     const blocked = new Set<string>();
     let queue = await queueGetAll();
@@ -335,6 +344,7 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
     for (const snapshotItem of queue) {
       const m = (await queueGetAll()).find(q => q.id === snapshotItem.id);
       if (!m || (m.op === "sms") !== sms) continue;
+      if (isParkedSms(m)) continue; // manual check pending — never auto-resend, never an error
       const key = `${m.table}::${(m.rowId || m.tempId || String(m.id)).replace(/^local_/, "")}`;
       if (blocked.has(key)) continue;
       // Never abandon durable work after a fixed number of failed requests.
@@ -350,6 +360,10 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
         blocked.add(key);
         const msg = err?.message || String(err);
         if (msg === "PENDING_PARENT_INSERT") continue;
+        if (msg === "SMS_UNCONFIRMED") {
+          cLog.warn("sync", "SMS delivery unconfirmed — SMS Logs me manual check ke liye park kiya (auto-resend nahi)");
+          continue;
+        }
         cLog.error("sync", "Mutation fail — op: " + m.op + ", table: " + m.table + ", msg: " + msg);
         if (m.id !== undefined) {
           const retries = (m.retries || 0) + 1;
@@ -379,11 +393,11 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
     }
   } finally {
     syncing = false;
-    const pending = (await queueGetAll()).length;
+    const pending = await pendingCount();
     emitSyncStatus(pending, lastError);
   }
 
-  return { synced, pending: (await queueGetAll()).length };
+  return { synced, pending: await pendingCount() };
 }
 
 let autoSyncStarted = false;

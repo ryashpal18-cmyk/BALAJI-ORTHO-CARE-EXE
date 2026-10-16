@@ -7,7 +7,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { MessageSquare } from "lucide-react";
-import { cacheGetAll, queueGetAll, onQueueChange } from "@/lib/offlineDb";
+import { Button } from "@/components/ui/button";
+import { cacheGetAll, queueGetAll, queueRemove, queueUpdate, onQueueChange } from "@/lib/offlineDb";
+import { runSync } from "@/lib/offlineSync";
 import { smsLogRows } from "@/lib/smsLogRows";
 
 type SmsLog = {
@@ -19,6 +21,8 @@ type SmsLog = {
   sms_type: string | null;
   sent_at: string | null;
   last_error?: string;
+  queue_id?: number;
+  unconfirmed?: boolean;
 };
 
 export default function SmsLogs() {
@@ -26,6 +30,28 @@ export default function SmsLogs() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  // Unconfirmed SMS: staff gateway check karne ke baad khud faisla leta hai (auto-resend kabhi nahi).
+  const resend = async (queueId: number) => {
+    if (!window.confirm("Gateway (TextBee) me check kar liya? Agar SMS pehle hi chala gaya ho to patient ko duplicate SMS jayega. Dobara bhejein?")) return;
+    setBusyId(queueId);
+    try {
+      const entry = (await queueGetAll()).find(q => q.id === queueId && q.op === "sms");
+      if (!entry) return;
+      const { deliveryState: _parked, ...payload } = entry.payload || {};
+      await queueUpdate(queueId, { payload: { ...payload, messageId: crypto.randomUUID() }, retries: 0, lastError: "", lastAttemptAt: 0 });
+      void runSync().catch(() => {});
+    } catch { setLoadError("SMS dobara queue nahi hua. Data PC par safe hai, dobara try karein."); }
+    finally { setBusyId(null); }
+  };
+  const discard = async (queueId: number) => {
+    if (!window.confirm("Ye SMS outbox se hata dein? Ye patient ko nahi bheja jayega.")) return;
+    setBusyId(queueId);
+    try { await queueRemove(queueId); }
+    catch { setLoadError("SMS outbox se hata nahi paya. Dobara try karein."); }
+    finally { setBusyId(null); }
+  };
 
   useEffect(() => {
     let live = true;
@@ -83,13 +109,14 @@ export default function SmsLogs() {
                     <TableHead>Status</TableHead>
                     <TableHead>Date Time</TableHead>
                     <TableHead>Message</TableHead>
+                    <TableHead>Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">Loading...</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Loading...</TableCell></TableRow>
                   ) : filtered.length === 0 ? (
-                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">No SMS logs</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No SMS logs</TableCell></TableRow>
                   ) : filtered.map((l) => (
                     <TableRow key={l.id}>
                       <TableCell className="font-medium">{l.patient_name || "—"}</TableCell>
@@ -106,6 +133,14 @@ export default function SmsLogs() {
                       </TableCell>
                       <TableCell className="max-w-xs truncate text-xs text-muted-foreground" title={l.message || ""}>
                         {l.message || "—"}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {l.unconfirmed && l.queue_id !== undefined && (
+                          <div className="flex gap-1">
+                            <Button size="sm" variant="outline" disabled={busyId === l.queue_id} onClick={() => void resend(l.queue_id!)}>Dobara bhejein</Button>
+                            <Button size="sm" variant="ghost" disabled={busyId === l.queue_id} onClick={() => void discard(l.queue_id!)}>Hataein</Button>
+                          </div>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

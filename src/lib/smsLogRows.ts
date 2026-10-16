@@ -7,7 +7,7 @@ export function smsLogRows(cached: any[], queue: any[]) {
     if (rows.get(id)?.status === "sent") continue;
     rows.set(id, { id, patient_name: p.patientName, mobile: p.mobile, message: p.message,
       sms_type: p.smsType, status: p.deliveryState === "unconfirmed" ? "Delivery unconfirmed — gateway check karein" : "Pending — PC par saved",
-      sent_at: entry.createdAt, last_error: entry.lastError });
+      sent_at: entry.createdAt, last_error: entry.lastError, queue_id: entry.id, unconfirmed: p.deliveryState === "unconfirmed" });
   }
   return [...rows.values()].sort((a, b) => String(b.sent_at || "").localeCompare(String(a.sent_at || "")));
 }

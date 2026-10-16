@@ -27,7 +27,7 @@ function load(file,names,deps={}){
  if (ctx.supabase) ctx.supabase = require("./audit-fixtures.cjs").queryMock(ctx.supabase);
  vm.createContext(ctx);vm.runInContext(source+'\n;globalThis.api={'+names.join(',')+'};',ctx);return ctx.api;
 }
-const db=load('src/lib/offlineDb.ts',['cacheUpsertRowFromServer','cacheGetAll','cacheGetRow','cacheUpsertRow','cacheReplaceTable','cacheSetRows','cacheDeleteRow','cacheReplaceRowKey','queueAdd','queueGetAll','queueUpdate','queueRemove','queueRemapRowId','commitMutation','tempId','getLocalSnapshot','atomicStockAdjustment','MAX_SYNC_RETRIES']);
+const db=load('src/lib/offlineDb.ts',['cacheUpsertRowFromServer','cacheGetAll','cacheGetRow','cacheUpsertRow','cacheReplaceTable','cacheSetRows','cacheDeleteRow','cacheReplaceRowKey','queueAdd','queueGetAll','queueUpdate','queueRemove','queueRemapRowId','commitMutation','tempId','getLocalSnapshot','atomicStockAdjustment','MAX_SYNC_RETRIES','queueCount','queueStuckCount','queueSmsReviewCount']);
 const payment=load('src/lib/paymentLedger.ts',['paymentHistory','withPaymentHistory','collectionRows']);
 const offline=load('src/lib/offlineQuery.ts',['offlineInsert','offlineUpdate','offlineDelete'],{...db,...payment,isOnline:async()=>false,runSync:noop});
 
@@ -77,5 +77,49 @@ const config={apiUrl:'https://gateway.example.test/send',apiKey:'test-only',devi
  const parallel=load('src/lib/offlineSync.ts',['runSync'],{...db,ensureCloudSession:async()=>true,isValidMobile:()=>true,navigator:{onLine:true},supabase:{rpc:async()=>{deleted=true;return {data:true}},auth:{getSession:async()=>({data:{session:null}})}}});
  const running=parallel.runSync();await new Promise(r=>setTimeout(r,20));assert.equal(deleted,true);release({ok:false,error:'fake rejection'});await running;
  console.log('PASS data lane runs while SMS gateway is stalled; legacy request gets durable ID');
+ // ── Endless "SMS delivery unconfirmed" error loop fix ──
+ // 1) Failures that provably happened before the request left this PC are retryable (no duplicate risk).
+ const netErr=code=>Object.assign(new TypeError('fetch failed'),{cause:Object.assign(new Error(code),{code})});
+ let netCalls=0;
+ const flaky=createSmsSender({store,fetchImpl:async()=>{netCalls++;if(netCalls===1)throw netErr('ENOTFOUND');
+  if(netCalls===2)throw Object.assign(new TypeError('fetch failed'),{cause:new AggregateError([Object.assign(new Error('a'),{code:'ECONNREFUSED'}),Object.assign(new Error('b'),{code:'ENETUNREACH'})])});
+  return {ok:true}}});
+ const down={...config,requestId:'net-down',mobile:'919123456780',message:'Net test'};
+ const d1=await flaky(down),d2=await flaky(down);
+ assert.equal(d1.ok,false);assert.ok(!d1.uncertain);assert.equal(d2.ok,false);assert.ok(!d2.uncertain);
+ assert.equal((await flaky(down)).ok,true);assert.equal(netCalls,3);
+ let resetCalls=0;
+ const resetSender=createSmsSender({store,fetchImpl:async()=>{resetCalls++;throw netErr('ECONNRESET')}});
+ const midReq={...config,requestId:'reset-mid',mobile:'919123456780',message:'Reset test'};
+ assert.equal((await resetSender(midReq)).uncertain,true);assert.equal((await resetSender(midReq)).uncertain,true);assert.equal(resetCalls,1);
+ console.log('PASS DNS/refused/unreachable failures retry safely; mid-request reset stays unconfirmed and is never resent');
+ // 2) A genuinely unconfirmed SMS is parked: gateway called once, no ERROR log, no lastError, no retry counter,
+ //    and it never keeps the cloud-sync pending / stuck counters alive.
+ for(const q of store.queueGetAll())store.queueRemove(q.id);
+ const errorLog=[],statuses=[];let gwCalls=0;
+ windowMock.electron.sendSMS=async()=>{gwCalls++;return {ok:false,uncertain:true,error:'SMS delivery unconfirmed; check gateway before resending'}};
+ const qid=store.queueAdd({table:'sms_logs',op:'sms',payload:{mobile:'919123456780',message:'Parked',patientName:'P',smsType:'general'}});
+ const parkedSync=load('src/lib/offlineSync.ts',['runSync','onSyncStatus'],{...db,ensureCloudSession:async()=>true,isValidMobile:()=>true,navigator:{onLine:true},cLog:{info:noop,warn:noop,error:(...a)=>errorLog.push(a)}});
+ parkedSync.onSyncStatus(s=>statuses.push(s));
+ const first=await parkedSync.runSync();
+ const parkedItem=store.queueGetAll().find(q=>q.id===qid);
+ assert.equal(gwCalls,1);assert.equal(errorLog.length,0);assert.equal(parkedItem.payload.deliveryState,'unconfirmed');assert.equal(parkedItem.retries,0);
+ assert.equal(first.pending,0);assert.ok(statuses.length>0&&statuses.every(s=>!s.lastError));
+ for(const q of store.queueGetAll())store.queueUpdate(q.id,{lastAttemptAt:0});
+ const second=await parkedSync.runSync();assert.equal(gwCalls,1);assert.equal(errorLog.length,0);assert.equal(second.pending,0);
+ store.queueUpdate(qid,{retries:20});
+ assert.equal(await db.queueCount(),0);assert.equal(await db.queueStuckCount(),0);assert.equal(await db.queueSmsReviewCount(),1);
+ console.log('PASS unconfirmed SMS is parked once: no repeat gateway call, no ERROR log, no sync error, not counted as pending/stuck');
+ // 3) Staff "Dobara bhejein" (SMS Logs): fresh request ID, retry counters reset, then it dispatches normally.
+ const cur=store.queueGetAll().find(q=>q.id===qid);const {deliveryState:_parked,...resendPayload}=cur.payload;
+ store.queueUpdate(qid,{payload:{...resendPayload,messageId:'fresh-id'},retries:0,lastError:'',lastAttemptAt:0});
+ windowMock.electron.sendSMS=async input=>{gwCalls++;assert.equal(input.requestId,'fresh-id');return {ok:true,acceptedAt:new Date().toISOString()}};
+ await parkedSync.runSync();
+ assert.equal(gwCalls,2);assert.equal(store.queueGetAll().filter(q=>q.op==='sms').length,0);assert.equal(await db.queueSmsReviewCount(),0);
+ console.log('PASS manual resend uses a fresh request ID and dispatches once');
+ const reviewRows=load('src/lib/smsLogRows.ts',['smsLogRows']).smsLogRows([],[{id:7,op:'sms',payload:{messageId:'u',deliveryState:'unconfirmed'}},{id:8,op:'sms',payload:{messageId:'p'}}]);
+ assert.equal(reviewRows.find(r=>r.id==='u').queue_id,7);assert.equal(reviewRows.find(r=>r.id==='u').unconfirmed,true);assert.equal(reviewRows.find(r=>r.id==='p').unconfirmed,false);
+ console.log('PASS SMS Logs rows expose queue id and unconfirmed flag for the action buttons');
+ for(const q of store.queueGetAll())store.queueRemove(q.id);
  store.close();fs.rmSync(testDir,{recursive:true,force:true});
 })().catch(e=>{console.error(e);try{store.close()}catch{};fs.rmSync(testDir,{recursive:true,force:true});process.exitCode=1});
