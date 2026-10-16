@@ -4,6 +4,7 @@ import { normalizeIndianMobile } from './mobile';
 import { isValidMobile } from './utils';
 import { invoiceNumber } from './invoiceNumber';
 import { runSync } from './offlineSync';
+import { buildBillSmsMessage } from './billSmsMessage';
 
 // Bill, payment history and its SMS outbox entry either all commit or all roll back.
 export async function saveBillOffline(input: any) {
@@ -25,7 +26,7 @@ export async function saveBillOffline(input: any) {
     const mobile = normalizeIndianMobile(patient.mobile);
     const net = Math.max(Number(bill.amount) - Number(bill.discount || 0), 0);
     const due = Math.max(net - Number(bill.amount_paid || 0), 0);
-    const message = `नमस्ते ${patient.name || 'Patient'} जी 🙏\n\nBalaji Digital X-Ray & Ortho Care Center\n\n📋 बिल नंबर: ${invoiceNumber(id)}\n📅 दिनांक: ${new Date(created_at).toLocaleDateString('en-IN')}\n💰 कुल राशि: ₹${net}\n✅ जमा: ₹${bill.amount_paid || 0}\n❗ बकाया: ₹${due}\n\nधन्यवाद 🙏`;
+    const message = buildBillSmsMessage({ patientName: patient.name, invoice: invoiceNumber(id), date: new Date(created_at).toLocaleDateString('en-IN'), service: bill.service, total: net, paid: Number(bill.amount_paid || 0), due });
     const row = { id: messageId, patient_name: patient.name, mobile, message, status: 'pending', sms_type: 'bill_saved', sent_at: created_at, _pendingSync: true };
     items.push({ mutation: { table: 'sms_logs', op: 'sms', payload: { messageId, mobile, message, patientName: patient.name, smsType: 'bill_saved', billing_id: id } }, row });
   }
