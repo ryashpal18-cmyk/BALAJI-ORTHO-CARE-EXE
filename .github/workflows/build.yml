@@ -5,6 +5,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+concurrency:
+  group: windows-main
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: windows-latest
@@ -21,33 +24,7 @@ jobs:
           node-version: 22
           cache: "npm"
       - name: Install dependencies
-        run: npm install
-      - name: Bump patch version
-        id: bump
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          # ✅ FIX: agar (concurrency lagne ke baad bhi, kisi rare case mein)
-          # push reject ho jaaye, to khud hi latest khींच ke dobara try karo
-          # — 3 baar tak — bina fail hue.
-          for attempt in 1 2 3; do
-            git fetch origin main
-            git reset --hard origin/main
-            npm version patch --no-git-tag-version
-            VERSION=$(node -p "require('./package.json').version")
-            git add package.json package-lock.json
-            git commit -m "chore: bump version to v$VERSION [skip ci]"
-            git tag -d "v$VERSION" 2>/dev/null || true
-            git push origin ":refs/tags/v$VERSION" 2>/dev/null || true
-            git tag -f "v$VERSION"
-            if git push origin main && git push origin "v$VERSION" --force; then
-              echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-              break
-            fi
-            echo "Push reject hua (attempt $attempt) — latest khींच ke retry kar rahe hain..."
-            sleep 5
-          done
+        run: npm ci
       - name: Check TypeScript
         run: npm run typecheck
       - name: Check offline admin login
@@ -64,6 +41,21 @@ jobs:
           node tests/audit-26.cjs
           node tests/sms-offline.cjs
           node tests/core-offline.cjs
+          node tests/billing-catalog.cjs
+          node tests/clinic-updates.cjs
+      - name: Bump patch version
+        id: bump
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm version patch --no-git-tag-version
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to v$VERSION [skip ci]"
+          git tag "v$VERSION"
+          git push --atomic origin HEAD:main "v$VERSION"
       - name: Build React App
         run: npm run build
       - name: Build & Publish Setup EXE

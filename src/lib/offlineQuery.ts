@@ -1,6 +1,6 @@
 import { queryClient } from "./queryClient";
 import { withPaymentHistory, normalizeBill } from "./paymentLedger";
-import { commitMutation } from "./offlineDb";
+import { commitMutation, commitBatch } from "./offlineDb";
 import { ensureCloudSession } from "./localSession";
 // ─────────────────────────────────────────────────────────────────────────
 // Offline-aware query/mutation helpers
@@ -86,9 +86,28 @@ export async function offlineUpdate(table: string, rowId: string, updates: any, 
     const existing = await cacheGetRow(table, rowId);
     if (!existing) throw new Error("Record not available locally; refresh before editing");
     rowId = existing.id || rowId;
-    let changes = table === "billing" ? normalizeBill(updates, existing) : { ...updates };
-    if (table === "billing") changes = withPaymentHistory(existing, changes, tempId().slice(6), new Date().toISOString());
-    const saved = await commitMutation({ table, op: "update", rowId, payload: changes }, changes, opts.idField || "id");
+    const { _auditReason, _receiptId, _expectedPaid, _collectAmount, ...fields } = updates;
+    if (table === "billing" && _expectedPaid !== undefined && Number(existing.amount_paid || 0) !== _expectedPaid)
+      throw new Error("इस बिल का भुगतान बदल गया है। दोबारा खोलकर राशि जाँचें।");
+    if (table === "billing" && _collectAmount !== undefined) {
+      const amount = Number(_collectAmount);
+      const due = Math.max(Number(existing.amount || 0) - Number(existing.discount || 0) - Number(existing.amount_paid || 0), 0);
+      if (!Number.isFinite(amount) || amount <= 0 || amount > due) throw new Error("जमा राशि बकाया से अधिक या शून्य नहीं हो सकती");
+      fields.amount_paid = Math.round((Number(existing.amount_paid || 0) + amount) * 100) / 100;
+    }
+    let changes = table === "billing" ? normalizeBill(fields, existing) : { ...fields };
+    if (table === "billing") changes = withPaymentHistory(existing, changes, _receiptId || tempId().slice(6), new Date().toISOString());
+    const item = { mutation: { table, op: "update", rowId, payload: changes, ...(_expectedPaid !== undefined ? { expectedPaid: _expectedPaid } : {}) }, row: changes, idField: opts.idField || "id" };
+    let saved;
+    if (table === "billing") {
+      const auditId = tempId();
+      const before = Object.fromEntries(["amount", "discount", "amount_paid", "payment_mode", "service", "status"].map(k => [k, existing[k] ?? null]));
+      const after = Object.fromEntries(Object.keys(before).map(k => [k, changes[k] ?? existing[k] ?? null]));
+      const audit = { id: auditId, created_at: new Date().toISOString(), actor_name: localStorage.getItem("userName") || "Admin",
+        actor_role: localStorage.getItem("bocc_user_role") || "admin", action: "update", module: "billing", record_id: rowId,
+        description: JSON.stringify({ reason: _auditReason || "Bill edited", before, after }), _pendingSync: true };
+      [saved] = await commitBatch([item, { mutation: { table: "audit_logs", op: "insert", tempId: auditId, payload: audit }, row: audit }]);
+    } else saved = await commitMutation(item.mutation, changes, item.idField);
     syncLater(); return saved;
   });
 }
@@ -97,4 +116,27 @@ export async function offlineDelete(table: string, rowId: string) {
   rowId = existing?.id || rowId;
   await serialize(`${table}::${rowId}`, () => commitMutation({ table, op: "delete", rowId }, null));
   syncLater();
+}
+
+
+export async function saveFollowUpDates(caseId: string, followup: string, removal: string) {
+  for (const date of [followup, removal]) if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)))) throw new Error("सही तारीख चुनें");
+  return serialize("fracture_cases::" + caseId, async () => {
+    const c = await cacheGetRow("fracture_cases", caseId);
+    if (!c) throw new Error("केस डिवाइस पर उपलब्ध नहीं है");
+    const patient = await cacheGetRow("patients", c.patient_id);
+    if (!patient?.branch_id) throw new Error("मरीज की branch चुनें");
+    const now = new Date().toISOString(), changes = { next_followup_date: followup || null, updated_at: now };
+    const items: any[] = [{ mutation:{table:"fracture_cases", op:"update", rowId:c.id, payload:changes}, row:changes }];
+    const notes = "cast-removal:" + String(c.id).replace(/^local_/, "");
+    const existing = (await cacheGetAll("appointments")).find(a => a.notes === notes);
+    if (removal || existing) {
+      const id = existing?.id || tempId();
+      const row = { ...(existing || {}), id, patient_id:patient.id, branch_id:patient.branch_id, notes,
+        date:removal || existing.date, status:removal ? "Scheduled" : "Cancelled", updated_at:now,
+        created_at:existing?.created_at || now, patients:patient };
+      items.push({ mutation:{table:"appointments", op:existing ? "update" : "insert", ...(existing ? {rowId:id} : {tempId:id}), payload:row}, row });
+    }
+    const result = await commitBatch(items); syncLater(); return result[0];
+  });
 }

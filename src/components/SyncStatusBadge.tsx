@@ -1,150 +1,49 @@
 import { useEffect, useState } from "react";
-import { CloudOff, RefreshCw, CheckCircle2 } from "lucide-react";
-import { queueCount, queueStuckCount, queueSmsReviewCount, onQueueChange } from "@/lib/offlineDb";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { metaGet, queueGetAll, onQueueChange, type QueuedMutation } from "@/lib/offlineDb";
 import { onSyncStatus, runSync } from "@/lib/offlineSync";
 
 export function SyncStatusBadge() {
-  const [online, setOnline]     = useState(navigator.onLine);
-  const [pending, setPending]   = useState(0);
-  // 🚨 FIX: pehle "stuck" (MAX retries tak fail ho chuki) entries ko chupke
-  // se delete kar diya jaata tha app start hote hi ya sync tap karte hi —
-  // bina bataye patient/bill data gum ho sakta tha. Ab unhe delete nahi
-  // karte, sirf alag se count karke dikhate hain taaki pata chale kuch
-  // atka hua hai aur review kiya ja sake.
-  const [stuck, setStuck]       = useState(0);
-  const [smsReview, setSmsReview] = useState(0);
-  const [syncing, setSyncing]   = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [justSynced, setJustSynced] = useState(false);
-
+  const [open, setOpen] = useState(false), [online, setOnline] = useState(navigator.onLine);
+  const [rows, setRows] = useState<QueuedMutation[]>([]), [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState(""), [last, setLast] = useState<string | null>(null);
+  const refresh = async () => {
+    try { const [queue, stamp] = await Promise.all([queueGetAll(), metaGet("last-cloud-sync-at")]); setRows(queue); setLast(stamp || null); }
+    catch { setError("स्थानीय sync सूची पढ़ी नहीं जा सकी। ऐप दोबारा खोलें।"); }
+  };
   useEffect(() => {
-    const handleOnline  = () => { setOnline(true); void runSync().catch(() => {}); };
-    const handleOffline = () => setOnline(false);
-    window.addEventListener("online",  handleOnline);
-    window.addEventListener("offline", handleOffline);
-
-    refreshStuckCount();
-    const stuckInterval = setInterval(refreshStuckCount, 60000);
-
-    const offQueue = onQueueChange((count) => { setPending(count); void refreshStuckCount(); });
-    const offSync  = onSyncStatus((s) => {
-      setSyncError(s.lastError || null);
-      if (s.lastError) setJustSynced(false);
-      setSyncing(s.syncing);
-      setPending(s.pending);
-      if (!s.syncing && s.pending === 0 && !s.lastError) {
-        setJustSynced(true);
-        setTimeout(() => setJustSynced(false), 3000);
-      }
-    });
-
-    return () => {
-      window.removeEventListener("online",  handleOnline);
-      window.removeEventListener("offline", handleOffline);
-      offQueue(); offSync();
-      clearInterval(stuckInterval);
-    };
+    let active = true;
+    const net = () => setOnline(navigator.onLine);
+    const queue = onQueueChange(() => { if (active) void refresh(); });
+    const sync = onSyncStatus(s => { if (active) { setSyncing(s.syncing); setError(s.lastError || ""); void refresh(); } });
+    const timer = setInterval(() => { if (active) void refresh(); }, 15000);
+    window.addEventListener("online", net); window.addEventListener("offline", net);
+    void refresh();
+    return () => { active = false; queue(); sync(); clearInterval(timer); window.removeEventListener("online", net); window.removeEventListener("offline", net); };
   }, []);
-
-  async function refreshStuckCount() {
-    try { setStuck(await queueStuckCount()); setPending(await queueCount()); setSmsReview(await queueSmsReviewCount()); } catch { /* silent */ }
-  }
-
-  const smsNote = smsReview > 0 ? (
-    <span
-      title="SMS delivery ka result pata nahi chala. SMS Logs me gateway check karke 'Dobara bhejein' ya 'Hataein' chunein. Ye cloud data sync ko nahi rokta."
-      style={{
-        display: "flex", alignItems: "center", height: "32px", padding: "0 8px",
-        borderRadius: "8px", border: "1.5px solid #fcd34d", background: "rgba(254,243,199,0.9)",
-        color: "#b45309", fontSize: "11px", fontWeight: 600,
-      }}
-    >
-      ✉ {smsReview} SMS check karein
-    </span>
-  ) : null;
-
-  if (syncError) return <button className="text-xs text-amber-700" title={syncError} onClick={() => void runSync().catch(() => {})}>PC पर सुरक्षित · Cloud sync बाकी ({pending})</button>;
-  // Online + kuch pending nahi + sync nahi chal raha = badge dikhao hi mat (sirf SMS check note ho to wahi)
-  if (online && pending === 0 && !syncing && !justSynced) return smsNote;
-
-  // Abhi sync hua — 3 second green checkmark
-  if (justSynced && pending === 0) return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: "6px",
-      height: "32px", padding: "0 10px", borderRadius: "8px",
-      border: "1.5px solid #86efac", background: "rgba(220,252,231,0.9)",
-      color: "#0e7c4a", fontSize: "12px", fontWeight: 600,
-    }}>
-      <CheckCircle2 style={{ width: "14px", height: "14px" }} />
-      Synced ✓
-    </div>
-  );
-
-  // Offline
-  if (!online) return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: "6px",
-      height: "32px", padding: "0 10px", borderRadius: "8px",
-      border: "1.5px solid #fcd34d", background: "rgba(254,243,199,0.9)",
-      color: "#b45309", fontSize: "12px", fontWeight: 600,
-    }}>
-      <CloudOff style={{ width: "14px", height: "14px" }} />
-      {pending > 0 ? `Offline · ${pending} pending` : "Offline"}
-    </div>
-  );
-
-  // Syncing
-  if (syncing) return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: "6px",
-      height: "32px", padding: "0 10px", borderRadius: "8px",
-      border: "1.5px solid #bfdbfe", background: "rgba(219,234,254,0.9)",
-      color: "#1e57b0", fontSize: "12px", fontWeight: 600,
-    }}>
-      <RefreshCw style={{ width: "14px", height: "14px", animation: "spin 1s linear infinite" }} />
-      Syncing...
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
-  );
-
-  if (syncError) return <button className="text-xs text-amber-700" title={syncError} onClick={() => void runSync().catch(() => {})}>PC पर सुरक्षित · Cloud sync बाकी ({pending})</button>;
-  // Online + pending items — tap to retry
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-      <button
-        onClick={handleManualSync}
-        title="Tap karke sync karo"
-        style={{
-          display: "flex", alignItems: "center", gap: "6px",
-          height: "32px", padding: "0 10px", borderRadius: "8px",
-          border: "1.5px solid #bfdbfe", background: "rgba(219,234,254,0.9)",
-          color: "#1e57b0", fontSize: "12px", fontWeight: 600, cursor: "pointer",
-        }}
-      >
-        <RefreshCw style={{ width: "14px", height: "14px" }} />
-        {pending} pending · Tap
-      </button>
-      {/* 🆕 FIX: ye entries khud retry nahi hongi (bahut baar fail ho chuki
-          hain — shayad data problem hai, jaise duplicate ya galat field).
-          Pehle inhe chupke se delete kar diya jaata tha; ab bas dikha rahe
-          hain taaki data safe rahe aur dekh ke faisla liya ja sake. */}
-      {stuck > 0 && (
-        <span
-          title="Data PC par safe hai. Background retry chalti rahegi; baar-baar fail ho to support ko logs bhejein."
-          style={{
-            display: "flex", alignItems: "center", height: "32px", padding: "0 8px",
-            borderRadius: "8px", border: "1.5px solid #fca5a5", background: "rgba(254,226,226,0.9)",
-            color: "#b91c1c", fontSize: "11px", fontWeight: 600,
-          }}
-        >
-          ⚠ {stuck} atki hui
-        </span>
-      )}
-      {smsNote}
-    </div>
-  );
-}
-
-async function handleManualSync() {
-  await runSync().catch(() => {});
+  const data = rows.filter(r => r.op !== "sms");
+  const review = rows.filter(r => r.op === "sms" && r.payload?.deliveryState === "unconfirmed");
+  const sms = rows.filter(r => r.op === "sms" && r.payload?.deliveryState !== "unconfirmed");
+  const retry = async () => { setSyncing(true); try { await runSync(); } catch (e: any) { setError(e.message); } finally { setSyncing(false); await refresh(); } };
+  return <>
+    <Button type="button" size="sm" variant="outline" className="max-w-[230px] text-xs" onClick={() => setOpen(true)}>
+      {syncing ? "Sync चल रहा है…" : online ? "Sync स्थिति" : "Offline"} · {data.length} डेटा · {sms.length} SMS{review.length ? ` · ${review.length} जाँचें` : ""}{error ? " ⚠" : ""}
+    </Button>
+    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[85vh] overflow-auto">
+      <DialogHeader><DialogTitle>Sync और Pending स्थिति</DialogTitle></DialogHeader>
+      <p>अंतिम सफल cloud upload: {last ? new Date(last).toLocaleString("en-IN") : "अभी दर्ज नहीं है"}</p>
+      <p>{data.length} डेटा रिकॉर्ड · {sms.length} pending SMS · {review.length} SMS की gateway में जाँच बाकी</p>
+      <p className="text-xs text-muted-foreground">यह pending काम की संख्या है; एक मरीज के कई बदलाव हो सकते हैं।</p>
+      {error && <p role="alert" className="text-destructive">{error}</p>}
+      <Button type="button" disabled={syncing || !online} onClick={() => void retry()}>अभी sync करें</Button>
+      {rows.map(r => <div key={r.id} className="rounded border p-3 text-sm">
+        <p className="font-medium">{r.table} · {r.op} · {r.payload?.patientName || r.payload?.name || r.rowId || r.tempId || r.id}</p>
+        <p>प्रयास: {r.retries} · {new Date(r.createdAt).toLocaleString("en-IN")}</p>
+        {r.lastError && <p className="break-words text-destructive">{r.lastError}</p>}
+        {r.op === "sms" && r.payload?.deliveryState === "unconfirmed" && <p>परिणाम अनिश्चित है। SMS Logs में gateway जाँचकर निर्णय लें। अपने आप दोबारा नहीं भेजा जाएगा।</p>}
+      </div>)}
+      {!rows.length && <p>डिवाइस की queue में कोई काम बाकी नहीं है।</p>}
+    </DialogContent></Dialog>
+  </>;
 }

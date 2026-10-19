@@ -1,3 +1,4 @@
+import FollowUps from "@/pages/FollowUps";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import React from "react";
@@ -154,7 +155,8 @@ const App = () => {
                   <Route path="/ipd" element={<ProtectedRoute><IPD /></ProtectedRoute>} />
                   <Route path="/appointments" element={<ProtectedRoute><Appointments /></ProtectedRoute>} />
                   <Route path="/products" element={<ProtectedRoute><Products /></ProtectedRoute>} />
-                  <Route path="/billing" element={<ProtectedRoute><Billing /></ProtectedRoute>} />
+                  <Route path="/follow-ups" element={<ProtectedRoute><FollowUps /></ProtectedRoute>} />
+              <Route path="/billing" element={<ProtectedRoute><Billing /></ProtectedRoute>} />
                   <Route path="/due-amount" element={<ProtectedRoute><DueAmount /></ProtectedRoute>} />
                   <Route path="/cash-tally" element={<ProtectedRoute><CashTally /></ProtectedRoute>} />
                   <Route path="/daily-cash-book" element={<ProtectedRoute><DailyCashBook /></ProtectedRoute>} />

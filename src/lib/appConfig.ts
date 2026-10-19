@@ -69,6 +69,7 @@ export const saveAppTheme    = (t: AppTheme)        => localStorage.setItem(STOR
 
 // ── All pages list ──
 export const ALL_PAGES = [
+  { path: "/follow-ups", label: "Follow-up List" },
   { path: "/due-amount", label: "Due Amount" },
   { path: "/prescription", label: "Prescription" },
   { path: "/inventory", label: "Inventory" },

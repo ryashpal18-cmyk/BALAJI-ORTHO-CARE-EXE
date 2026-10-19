@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Pill, Receipt, Bone, CalendarClock, FilePlus2, History,
@@ -28,13 +28,9 @@ const COLORS: Record<TimelineItem["type"], string> = {
 };
 
 export function PatientHistoryTimeline({ patientId }: { patientId: string }) {
-  const [items, setItems] = useState<TimelineItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!patientId) return;
-    (async () => {
-      setLoading(true);
+  const { data:items = [], isLoading:loading, error } = useQuery({
+    queryKey:["patient-history", patientId.replace(/^local_/, "")], enabled:!!patientId, staleTime:0,
+    queryFn:async () => {
       const [rx, bills, fx, appts] = await Promise.all([
         offlineFetchScoped<any>(
           "prescriptions",
@@ -43,7 +39,7 @@ export function PatientHistoryTimeline({ patientId }: { patientId: string }) {
             if (error) throw error;
             return data || [];
           },
-          (cached) => cached.filter((r: any) => r.patient_id === patientId),
+          (cached) => cached.filter((r: any) => String(r.patient_id || "").replace(/^local_/, "") === patientId.replace(/^local_/, "")),
         ),
         offlineFetchScoped<any>(
           "billing",
@@ -52,7 +48,7 @@ export function PatientHistoryTimeline({ patientId }: { patientId: string }) {
             if (error) throw error;
             return data || [];
           },
-          (cached) => cached.filter((b: any) => b.patient_id === patientId),
+          (cached) => cached.filter((b: any) => String(b.patient_id || "").replace(/^local_/, "") === patientId.replace(/^local_/, "")),
         ),
         offlineFetchScoped<any>(
           "fracture_cases",
@@ -61,7 +57,7 @@ export function PatientHistoryTimeline({ patientId }: { patientId: string }) {
             if (error) throw error;
             return data || [];
           },
-          (cached) => cached.filter((f: any) => f.patient_id === patientId),
+          (cached) => cached.filter((f: any) => String(f.patient_id || "").replace(/^local_/, "") === patientId.replace(/^local_/, "")),
         ),
         offlineFetchScoped<any>(
           "appointments",
@@ -70,7 +66,7 @@ export function PatientHistoryTimeline({ patientId }: { patientId: string }) {
             if (error) throw error;
             return data || [];
           },
-          (cached) => cached.filter((a: any) => a.patient_id === patientId),
+          (cached) => cached.filter((a: any) => String(a.patient_id || "").replace(/^local_/, "") === patientId.replace(/^local_/, "")),
         ),
       ]);
 
@@ -86,7 +82,7 @@ export function PatientHistoryTimeline({ patientId }: { patientId: string }) {
           id: `bill-${b.id}`,
           type: "bill" as const,
           date: b.created_at,
-          title: `Bill — ₹${Number(b.amount || 0).toLocaleString("en-IN")}`,
+          title: `Bill — ₹${Math.max(Number(b.amount || 0) - Number(b.discount || 0), 0).toLocaleString("en-IN")}`,
           subtitle: `${b.service || "Service"} · ${b.status}`,
         })),
         ...((fx as any[]) || []).map((f) => ({
@@ -105,10 +101,9 @@ export function PatientHistoryTimeline({ patientId }: { patientId: string }) {
         })),
       ].sort((x, y) => (y.date || "").localeCompare(x.date || ""));
 
-      setItems(merged);
-      setLoading(false);
-    })();
-  }, [patientId]);
+      return merged;
+    },
+  });
 
   return (
     <div className="border rounded-xl bg-card overflow-hidden">
@@ -118,7 +113,7 @@ export function PatientHistoryTimeline({ patientId }: { patientId: string }) {
         <span className="ml-auto text-xs text-muted-foreground">{items.length} events</span>
       </div>
 
-      {loading ? (
+      {error ? <p role="alert" className="p-4 text-destructive">हिस्ट्री लोड नहीं हुई। दोबारा खोलें।</p> : loading ? (
         <p className="p-6 text-center text-sm text-muted-foreground">Loading...</p>
       ) : items.length === 0 ? (
         <p className="p-6 text-center text-sm text-muted-foreground">Koi history nahi mili</p>

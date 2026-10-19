@@ -1,3 +1,5 @@
+import { CollectPayment } from "@/components/CollectPayment";
+import { PaymentReceipts } from "@/components/PaymentReceipts";
 import { businessDate } from "@/lib/businessDate";
 import { normalizeIndianMobile } from "@/lib/mobile";
 import { useState, useMemo } from "react";
@@ -41,6 +43,7 @@ export default function DueAmount() {
   const updateBill = useUpdateBill();
 
   const [search, setSearch] = useState("");
+  const [payTarget, setPayTarget] = useState<any>(null);
   const [editTarget, setEditTarget] = useState<any | null>(null);
   const [editPaid, setEditPaid] = useState("");
   const [sendingId, setSendingId] = useState<string | null>(null);
@@ -242,17 +245,9 @@ export default function DueAmount() {
                     </div>
 
                     <div className="flex flex-wrap gap-2 pt-1">
-                      <Button size="sm" variant="outline" onClick={() => openEdit(bill)}>
-                        <Pencil className="h-3.5 w-3.5 mr-1" /> Edit / Pay
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-success border-success/40"
-                        onClick={() => handleMarkFullyPaid(bill)}
-                      >
-                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Pura Paid
-                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setPayTarget({bill, full:false})}>भुगतान जमा</Button>
+                      <Button size="sm" variant="outline" onClick={() => setPayTarget({bill, full:true})}>पूरा बकाया जमा</Button>
+                      <PaymentReceipts bill={bill} />
                     </div>
 
                     <div className="flex flex-wrap gap-2">
@@ -291,6 +286,7 @@ export default function DueAmount() {
         ))}
       </div>
 
+      {payTarget && <CollectPayment key={payTarget.bill.id} bill={payTarget.bill} full={payTarget.full} initiallyOpen onClose={() => setPayTarget(null)} />}
       {/* ── Edit / Pay Due Dialog ── */}
       <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}>
         <DialogContent>

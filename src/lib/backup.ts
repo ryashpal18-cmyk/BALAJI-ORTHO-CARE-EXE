@@ -22,6 +22,21 @@ import * as XLSX from "xlsx";
 
 // Tables jo backup mein shamil hoti hain — clinic ka pura operational data.
 const BACKUP_TABLES = OPERATIONAL_TABLES;
+export function getBackupStatus(): { at?: string; ok?: boolean; warnings?: string[]; error?: string } {
+  try { return JSON.parse(localStorage.getItem("bocc_backup_status") || "{}"); } catch { return {}; }
+}
+function recordBackupResult(result: BackupResult): BackupResult {
+  localStorage.setItem("bocc_backup_status", JSON.stringify({ at:new Date().toISOString(), ok:result.ok, warnings:result.warnings || [], error:result.error }));
+  return result;
+}
+export function inspectBackup(json: string) {
+  const backup = JSON.parse(json);
+  if (backup.formatVersion !== 2 || !backup.tables || !Array.isArray(backup.localSnapshot?.queue)) throw new Error("Version 2 JSON backup required");
+  const tables = Object.values(backup.tables);
+  if (tables.some(rows => !Array.isArray(rows))) throw new Error("Invalid backup table");
+  return { records: tables.reduce((sum: number, rows: any[]) => sum + rows.length, 0), pending:backup.localSnapshot.queue.length,
+    generatedAt:backup.generatedAt, warnings:Array.isArray(backup.warnings) ? backup.warnings : [] };
+}
 
 export const BACKUP_STORAGE_KEYS = {
   LAST_BACKUP_AT: "bocc_last_backup_at",
@@ -71,6 +86,11 @@ function clinicalLocalStorage() {
   return notes;
 }
 export async function restoreBackup(json: string) {
+  inspectBackup(json);
+  const currentData = await getLocalSnapshot();
+  if (currentData.queue.length || Object.entries(currentData.cache).some(([table, rows]) => !["branches", "profiles", "user_roles"].includes(table) && (rows as any[]).length))
+    throw new Error("Restore केवल खाली नए डिवाइस पर करें। मौजूदा मरीज और pending डेटा सुरक्षित है।");
+
   const backup = JSON.parse(json);
   if (backup.formatVersion !== 2 || !backup.tables || !Array.isArray(backup.localSnapshot?.queue)) throw new Error("Version 2 JSON backup required");
   await restoreLocalSnapshot({ cache: backup.tables, queue: backup.localSnapshot.queue, meta: backup.localSnapshot.meta || [] });
@@ -159,10 +179,10 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
       }
 
       localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_BACKUP_AT, now.toISOString());
-      return { ok: true, mode: "electron", jsonPath: jsonRes.path, xlsxPath: xlsxRes.path, recordCounts, warnings };
+      return recordBackupResult({ ok: true, mode: "electron", jsonPath: jsonRes.path, xlsxPath: xlsxRes.path, recordCounts, warnings });
     }
   } catch (e: any) {
-    return { ok: false, mode: "electron", recordCounts, error: e?.message || String(e) };
+    return recordBackupResult({ ok: false, mode: "electron", recordCounts, error: e?.message || String(e) });
   }
 
   // Browser fallback — download dono files
@@ -170,9 +190,9 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
     downloadBlob(new Blob([jsonString], { type: "application/json" }), `${baseName}.json`);
     downloadBlob(new Blob([xlsxArrayBuffer], { type: "application/octet-stream" }), `${baseName}.xlsx`);
     localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_BACKUP_AT, now.toISOString());
-    return { ok: true, mode: "browser", recordCounts, warnings };
+    return recordBackupResult({ ok: true, mode: "browser", recordCounts, warnings });
   } catch (e: any) {
-    return { ok: false, mode: "browser", recordCounts, error: e?.message || String(e) };
+    return recordBackupResult({ ok: false, mode: "browser", recordCounts, error: e?.message || String(e) });
   }
 }
 
@@ -245,7 +265,7 @@ export function startAutoBackupScheduler() {
     if (isDailyBackupEnabled()) {
       const lastDaily = localStorage.getItem(BACKUP_STORAGE_KEYS.LAST_DAILY_BACKUP_DATE);
       if (lastDaily !== today) {
-        const res = await runBackupNow("daily");
+        const res = await runBackupNow("daily").catch((error: Error) => recordBackupResult({ok:false, mode:"browser", recordCounts:{}, error:error.message}));
         if (res.ok) localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_DAILY_BACKUP_DATE, today);
       }
     }
@@ -254,7 +274,7 @@ export function startAutoBackupScheduler() {
       const lastWeekly = localStorage.getItem(BACKUP_STORAGE_KEYS.LAST_WEEKLY_BACKUP_DATE);
       const isSunday = new Date().getDay() === 0;
       if (isSunday && lastWeekly !== today) {
-        const res = await runBackupNow("weekly");
+        const res = await runBackupNow("weekly").catch((error: Error) => recordBackupResult({ok:false, mode:"browser", recordCounts:{}, error:error.message}));
         if (res.ok) localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_WEEKLY_BACKUP_DATE, today);
       }
     }

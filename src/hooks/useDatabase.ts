@@ -1,3 +1,4 @@
+import { collectionRows } from "@/lib/paymentLedger";
 import { saveBillOffline } from "@/lib/saveBillOffline";
 import { useBranchContext } from "@/lib/branchContext";
 import { readBranchTable } from "@/lib/branchData";
@@ -27,7 +28,7 @@ export function useDashboardStats() {
         readBranchTable("billing", selectedBranchId), cacheGetAll("beds")]);
       return { todayPatients: patients.length, todayAppointments: appointments.filter(a => a.date === today).length,
         pendingPayments: billing.reduce((sum,b) => sum + Math.max(Number(b.amount || 0)-Number(b.discount || 0)-Number(b.amount_paid || 0),0),0),
-        todayRevenue: billing.filter(b => businessDate(b.created_at) === today).reduce((sum,b) => sum+Number(b.amount || 0),0),
+        todayRevenue: collectionRows(billing).filter(b => businessDate(b.created_at) === today).reduce((sum,b) => sum+Number(b.amount_paid || 0),0),
         bedsOccupied: beds.filter(b => b.status === "occupied").length, totalBeds: beds.length };
     } });
 }
@@ -48,7 +49,12 @@ export function useBills(scope: "selected" | "clinic" = "selected") {
   const { selectedBranchId } = useBranchContext();
   const branch = scope === "clinic" ? null : selectedBranchId;
   return useQuery({ queryKey: ["billing", "all", branch], ...QUERY_OPTS,
-    queryFn: async () => (await readBranchTable("billing", branch, "*, patients(name, mobile, address)")).sort((a,b) => (b.created_at || "").localeCompare(a.created_at || "")) });
+    queryFn: async () => (await (async () => {
+      const [rows, patients] = await Promise.all([readBranchTable("billing", branch, "*, patients(name, mobile, address)"), cacheGetAll("patients")]);
+      const key = (id: string) => String(id || "").replace(/^local_/, "");
+      const byId = new Map(patients.map(p => [key(p.id), p]));
+      return rows.map(b => ({ ...b, patients: byId.get(key(b.patient_id)) || b.patients || null }));
+    })()).sort((a,b) => (b.created_at || "").localeCompare(a.created_at || "")) });
 }
 
 export function usePatients() {
@@ -60,8 +66,8 @@ export function usePatients() {
 export function useUpdateBill() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (bill: { id: string; amount: number; amount_paid: number; status: string; service?: string; payment_mode?: string; discount?: number | null; doctor_id?: string | null; doctor_name?: string | null; doctor_commission_percent?: number | null }) => {
-      const updateData: any = { amount: bill.amount, amount_paid: bill.amount_paid, status: bill.status };
+    mutationFn: async (bill: { id: string; amount: number; amount_paid: number; status: string; service?: string; payment_mode?: string; audit_reason?: string; discount?: number | null; doctor_id?: string | null; doctor_name?: string | null; doctor_commission_percent?: number | null }) => {
+      const updateData: any = { _auditReason: bill.audit_reason, amount: bill.amount, amount_paid: bill.amount_paid, status: bill.status };
       if (bill.service !== undefined) updateData.service = bill.service;
       if (bill.payment_mode !== undefined) updateData.payment_mode = bill.payment_mode;
       // Doctor sirf tab bheja jaata hai jab edit mein badla ho (purane flow par koi asar nahi).
@@ -81,6 +87,8 @@ export function useUpdateBill() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["billing"] });
       qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      qc.invalidateQueries({ queryKey: ["audit-logs"] });
+      qc.invalidateQueries({ queryKey: ["report_payments"] });
     },
   });
 }
@@ -122,21 +130,11 @@ export function usePhysioSessions() {
 }
 
 export function useReportPayments() {
+  const { selectedBranchId } = useBranchContext();
   return useQuery({
-    queryKey: ["report_payments"],
-    staleTime: 30000,
-    queryFn: async () => {
-      const rows = await offlineFetchScoped(
-        "billing",
-        async () => {
-          const { data, error } = await supabase.from("billing").select("amount, amount_paid, created_at, status").eq("status", "Paid").order("created_at", { ascending: false });
-          if (error) throw error;
-          return data || [];
-        },
-        (cached) => cached.filter((b: any) => b.status === "Paid")
-      );
-      return (rows || []).map((b: any) => ({ amount: Number(b.amount_paid || b.amount || 0), payment_date: businessDate(b.created_at || "") }));
-    },
+    queryKey: ["report_payments", selectedBranchId], ...QUERY_OPTS,
+    queryFn: async () => collectionRows(await readBranchTable("billing", selectedBranchId))
+      .map(r => ({ amount:Number(r.amount_paid || 0), payment_date:businessDate(r.created_at) })),
   });
 }
 
@@ -157,6 +155,8 @@ export function useAddBill() {
       // Baad mein background mein fresh data bhi le lo
       qc.invalidateQueries({ queryKey: ["billing"] });
       qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      qc.invalidateQueries({ queryKey: ["audit-logs"] });
+      qc.invalidateQueries({ queryKey: ["report_payments"] });
     },
   });
 }
@@ -171,6 +171,8 @@ export function useDeleteBill() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["billing"] });
       qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      qc.invalidateQueries({ queryKey: ["audit-logs"] });
+      qc.invalidateQueries({ queryKey: ["report_payments"] });
     },
   });
 }
@@ -273,6 +275,8 @@ export function useUpdateBed() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["beds"] });
       qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      qc.invalidateQueries({ queryKey: ["audit-logs"] });
+      qc.invalidateQueries({ queryKey: ["report_payments"] });
     },
   });
 }
@@ -366,6 +370,8 @@ export function useDeletePatient() {
       qc.invalidateQueries({ queryKey: ["patients"] });
       qc.invalidateQueries({ queryKey: ["billing"] });
       qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      qc.invalidateQueries({ queryKey: ["audit-logs"] });
+      qc.invalidateQueries({ queryKey: ["report_payments"] });
     },
   });
 }

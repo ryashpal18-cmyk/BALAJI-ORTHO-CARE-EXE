@@ -1,3 +1,4 @@
+import { PaymentReceipts } from "@/components/PaymentReceipts";
 import { invoiceNumber } from "@/lib/invoiceNumber";
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
@@ -7,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
-import { cacheGetAll } from "@/lib/offlineDb";
+import { cacheGetAll, onQueueChange } from "@/lib/offlineDb";
 import { offlineUpdate } from "@/lib/offlineQuery";
 import { cLog } from "@/lib/clientLogger";
 import { toast } from "@/hooks/use-toast";
@@ -256,21 +257,21 @@ export default function PatientProfile() {
                       <th className="p-3 text-right">Amount</th>
                       <th className="p-3 text-right">Paid</th>
                       <th className="p-3 text-right">Due</th>
-                      <th className="p-3 text-center">Status</th>
+                      <th className="p-3 text-center">Status</th><th className="p-3">भुगतान रसीद</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {bills.map(b => {
                       const paid = Number(b.amount_paid || 0);
                       const amt  = Number(b.amount || 0);
-                      const due  = Math.max(amt - paid, 0);
+                      const due  = Math.max(amt - Number(b.discount || 0) - paid, 0);
                       const services = String(b.service || "").split("|").map((s: string) => s.split(":")[0].trim()).filter(Boolean).join(", ");
                       return (
                         <tr key={b.id} className="hover:bg-muted/20">
                           <td className="p-3 font-mono text-xs">{invoiceNumber(b.id)}</td>
                           <td className="p-3 max-w-[160px] truncate text-xs text-muted-foreground">{services}</td>
                           <td className="p-3 text-xs">{new Date(b.created_at).toLocaleDateString("en-IN")}</td>
-                          <td className="p-3 text-right font-medium">₹{amt.toLocaleString("en-IN")}</td>
+                          <td className="p-3 text-right font-medium">₹{amt.toLocaleString("en-IN")}<small className="block">छूट ₹{Number(b.discount || 0).toLocaleString("en-IN")}</small></td>
                           <td className="p-3 text-right text-green-600">₹{paid.toLocaleString("en-IN")}</td>
                           <td className="p-3 text-right text-destructive">₹{due.toLocaleString("en-IN")}</td>
                           <td className="p-3 text-center">
@@ -279,7 +280,7 @@ export default function PatientProfile() {
                               b.status === "Partial" ? "bg-yellow-100 text-yellow-700" :
                                                        "bg-red-100 text-red-700"
                             }`}>{b.status}</span>
-                          </td>
+                          </td><td className="p-3"><PaymentReceipts bill={{...b, patients:patient}} /></td>
                         </tr>
                       );
                     })}
@@ -310,7 +311,7 @@ export default function PatientProfile() {
                       <th className="p-3 text-left">Date</th>
                       <th className="p-3 text-left">Treatment</th>
                       <th className="p-3 text-left">Notes</th>
-                      <th className="p-3 text-center">Status</th>
+                      <th className="p-3 text-center">Status</th><th className="p-3">भुगतान रसीद</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">

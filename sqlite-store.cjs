@@ -334,6 +334,7 @@ function commitMutation(mutation, row, idField = 'id') {
     if (mutation.op === 'update') {
       const existing = cacheGetRow(mutation.table, mutation.rowId);
       if (!existing) throw new Error('Record not available locally; refresh before editing');
+      if (mutation.table === 'billing' && mutation.expectedPaid !== undefined && Number(existing.amount_paid || 0) !== mutation.expectedPaid) throw new Error('Payment changed; reopen bill before collecting');
       saved = { ...existing, ...row, [idField]: mutation.rowId, _pendingSync: true };
     }
     if (mutation.op === 'delete') cascadeLocalDelete(mutation.table, mutation.rowId);

@@ -21,7 +21,7 @@ import {
   StaffUser, DashModules, AppTheme,
 } from "@/lib/appConfig";
 import {
-  restoreBackup, runBackupNow, listBackupFiles, openBackupFolder, getBackupFolderPath,
+  inspectBackup, getBackupStatus, restoreBackup, runBackupNow, listBackupFiles, openBackupFolder, getBackupFolderPath,
   getLastBackupAt, isDailyBackupEnabled, isWeeklyBackupEnabled,
   setDailyBackupEnabled, setWeeklyBackupEnabled,
 } from "@/lib/backup";
@@ -958,12 +958,20 @@ export default function SettingsPage() {
                   <p>Restore JSON (केवल खाली नए/test database पर; existing data overwrite नहीं होगा)</p>
                   <Input type="file" accept=".json" onChange={async e => {
                     const file = e.target.files?.[0]; if (!file) return;
-                    try { await restoreBackup(await file.text()); toast({ title: "Backup restored. Restart app." }); }
+                    try {
+                      const json = await file.text(), info = inspectBackup(json);
+                      if (!window.confirm(`बैकअप में ${info.records} रिकॉर्ड और ${info.pending} pending काम हैं। ${info.warnings.length} coverage चेतावनियाँ हैं। केवल खाली डिवाइस पर restore करें। आगे बढ़ें?`)) return;
+                      await restoreBackup(json); toast({ title: "Backup restored. Restart app." });
+                    }
                     catch (error: any) { toast({ title: "Restore failed", description: error.message, variant: "destructive" }); }
                     e.target.value = "";
                   }} />
                 </div>
-                {/* Auto backup toggles */}
+                {getBackupStatus().at && <div className="rounded border p-3 text-sm" role="status">
+                  <p>अंतिम प्रयास: {formatBackupTime(getBackupStatus().at)} — {getBackupStatus().ok ? "सेव हुआ" : "असफल"}</p>
+                  {getBackupStatus().error && <p className="text-destructive">{getBackupStatus().error}</p>}
+                  {!!getBackupStatus().warnings?.length && <p className="text-amber-700">{getBackupStatus().warnings!.length} tables में केवल स्थानीय डेटा शामिल है।</p>}
+                </div>}{/* Auto backup toggles */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>
                   <p style={{ fontSize: "12px", fontWeight: 700, color: "#1a2a4a", textTransform: "uppercase", letterSpacing: "0.4px" }}>
                     Automatic Backup
@@ -997,9 +1005,8 @@ export default function SettingsPage() {
                     <ToggleSwitch on={weeklyOn} onToggle={handleToggleWeekly} />
                   </div>
                   <p style={{ fontSize: "11px", color: "#8a9ab0", marginTop: "2px" }}>
-                    Auto-backup ke liye internet zaroori hai (latest data fetch karne ke liye). Jab bhi app khula ho
-                    aur internet ho, system khud check kar leta hai.
-                  </p>
+                    ऐप खुला रहने पर अपने आप backup बनेगा। इंटरनेट बंद हो तो उपलब्ध स्थानीय डेटा शामिल होगा; यह पूर्ण cloud backup नहीं होगा। X-ray और अन्य attachments की अलग कॉपी रखें।
+</p>
                 </div>
               </CardContent>
             </Card>

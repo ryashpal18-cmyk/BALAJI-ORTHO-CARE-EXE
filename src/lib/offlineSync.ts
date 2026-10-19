@@ -9,7 +9,7 @@ import { supabase, usesApiSync } from "@/integrations/supabase/client";
 import { cLog } from "@/lib/clientLogger";
 import { isValidMobile } from "@/lib/utils";
 import { queryClient } from "@/lib/queryClient";
-import { commitMutation, queueGetAll, queueRemove, queueUpdate, queueRemapRowId, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetAll, backupCacheToDisk, QueuedMutation, MAX_SYNC_RETRIES } from "./offlineDb";
+import { metaSet, commitMutation, queueGetAll, queueRemove, queueUpdate, queueRemapRowId, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetAll, backupCacheToDisk, QueuedMutation, MAX_SYNC_RETRIES } from "./offlineDb";
 
 
 declare global {
@@ -354,6 +354,7 @@ export async function runSync(): Promise<{ synced: number; pending: number }> {
 
       try {
         await applyMutation(m);
+        if (!sms) await metaSet("last-cloud-sync-at", new Date().toISOString());
         if (m.id !== undefined) await queueRemove(m.id);
         synced++;
       } catch (err: any) {

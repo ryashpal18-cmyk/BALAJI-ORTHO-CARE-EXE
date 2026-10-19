@@ -797,9 +797,11 @@ const filteredPatients = useMemo(() => {
     setEditOpen(true);
   };
 
+  const [editReason, setEditReason] = useState("");
   const handleEditSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingBill) return;
+    if (!editReason.trim()) { toast({ title: "बिल बदलने का कारण लिखें", variant: "destructive" }); return; }
     if (services.some(s => (s.name.trim() || s.amount.trim()) && (!s.name.trim() || !s.amount.trim()))) {
       toast({ title: 'हर service का नाम और रकम भरें', variant: 'destructive' }); return;
     }
@@ -822,6 +824,7 @@ const filteredPatients = useMemo(() => {
       const status = computeStatus();
       await updateBill.mutateAsync({
         id: editingBill.id,
+        audit_reason: editReason.trim(),
         service: serviceStr,
         amount: newTotal,
         status,
@@ -870,6 +873,7 @@ const filteredPatients = useMemo(() => {
       toast({ title: "Success", description: "Bill updated & WhatsApp sent!" });
       setEditOpen(false);
       setEditingBill(null);
+      setEditReason("");
       setServices([{ name: "", amount: "" }]);
       setAmountPaid("");
       setDiscountAmount("");
@@ -1358,6 +1362,7 @@ const filteredPatients = useMemo(() => {
             setEditOpen(v);
             if (!v) {
               setEditingBill(null);
+              setEditReason("");
               setServices([{ name: "", amount: "" }]);
               setAmountPaid("");
               setPaymentMode("");
@@ -1385,7 +1390,7 @@ const filteredPatients = useMemo(() => {
                 </p>
               </div>
               {renderDoctorSelect()}
-              {renderServiceForm()}
+              {renderServiceForm()}<div className="space-y-1"><Label htmlFor="bill-edit-reason">बिल बदलने का कारण *</Label><Input id="bill-edit-reason" value={editReason} onChange={e => setEditReason(e.target.value)} required placeholder="जैसे गलत रेट सुधारना" /></div>
               {renderPaymentSection()}
               <Button type="submit" className="w-full" disabled={updateBill.isPending || isSending}>
                 {isSending

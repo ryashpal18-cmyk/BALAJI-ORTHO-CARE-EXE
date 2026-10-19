@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/table";
 import { MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cacheGetAll, queueGetAll, queueRemove, queueUpdate, onQueueChange } from "@/lib/offlineDb";
+import { cacheGetAll, cacheGetRow, commitMutation, queueGetAll, queueRemove, queueUpdate, onQueueChange } from "@/lib/offlineDb";
 import { runSync } from "@/lib/offlineSync";
 import { smsLogRows } from "@/lib/smsLogRows";
 
@@ -32,6 +32,14 @@ export default function SmsLogs() {
   const [loadError, setLoadError] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
 
+  const recordReview = async (entry: any, status: string) => {
+    const id = entry.payload?.messageId;
+    if (!id) throw new Error("SMS identity missing");
+    const existing = await cacheGetRow("sms_logs", id);
+    const row = { ...existing, id, patient_name:entry.payload.patientName || "", mobile:entry.payload.mobile,
+      message:entry.payload.message, sms_type:entry.payload.smsType, sent_at:entry.createdAt, status };
+    await commitMutation({table:"sms_logs", op:"insert", tempId:id, payload:row}, row);
+  };
   // Unconfirmed SMS: staff gateway check karne ke baad khud faisla leta hai (auto-resend kabhi nahi).
   const resend = async (queueId: number) => {
     if (!window.confirm("Gateway (TextBee) me check kar liya? Agar SMS pehle hi chala gaya ho to patient ko duplicate SMS jayega. Dobara bhejein?")) return;
@@ -39,16 +47,17 @@ export default function SmsLogs() {
     try {
       const entry = (await queueGetAll()).find(q => q.id === queueId && q.op === "sms");
       if (!entry) return;
+      await recordReview(entry, "Manual resend requested — original delivery unconfirmed");
       const { deliveryState: _parked, ...payload } = entry.payload || {};
       await queueUpdate(queueId, { payload: { ...payload, messageId: crypto.randomUUID() }, retries: 0, lastError: "", lastAttemptAt: 0 });
       void runSync().catch(() => {});
-    } catch { setLoadError("SMS dobara queue nahi hua. Data PC par safe hai, dobara try karein."); }
+    } catch { setLoadError("SMS dobara queue nahi hua. Data डिवाइस पर safe hai, dobara try karein."); }
     finally { setBusyId(null); }
   };
   const discard = async (queueId: number) => {
     if (!window.confirm("Ye SMS outbox se hata dein? Ye patient ko nahi bheja jayega.")) return;
     setBusyId(queueId);
-    try { await queueRemove(queueId); }
+    try { const entry = (await queueGetAll()).find(q => q.id === queueId && q.op === "sms"); if (!entry) return; await recordReview(entry, "Removed from outbox — original delivery unconfirmed"); await queueRemove(queueId); }
     catch { setLoadError("SMS outbox se hata nahi paya. Dobara try karein."); }
     finally { setBusyId(null); }
   };

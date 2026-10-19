@@ -33,7 +33,7 @@ export function ServiceCatalogManager() {
     } catch { toast({ title: "सेवा हटाई नहीं जा सकी", variant: "destructive" }); }
   };
   return <section className="space-y-4" aria-label="Product rate list">
-      <p className="text-sm text-muted-foreground">X-Ray, Plaster जैसी सेवाएँ और उनके रेट पहले सेव करें। बिल बनाते समय नाम लिखकर चुनें। यह सूची इसी PC पर सेव रहेगी।</p>
+      <p className="text-sm text-muted-foreground">X-Ray, Plaster जैसी सेवाएँ और उनके रेट पहले सेव करें। बिल बनाते समय नाम लिखकर चुनें। यह सूची इसी डिवाइस पर सेव रहेगी।</p>
       <div className="grid grid-cols-[1fr_110px] gap-3">
         <div className="space-y-1"><Label htmlFor="catalog-name">सेवा / Product का नाम</Label>
           <Input id="catalog-name" ref={nameRef} value={name} placeholder="जैसे X-Ray" onChange={e => setName(e.target.value)} onKeyDown={e => {

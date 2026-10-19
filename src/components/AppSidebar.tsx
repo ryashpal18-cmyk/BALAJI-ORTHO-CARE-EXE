@@ -20,6 +20,7 @@ import { BranchSelector } from "@/components/BranchSelector";
 import { resetCloudConnection } from "@/lib/localSession";
 
 const ALL_MENU_ITEMS = [
+  { title: "Follow-up List", url: "/follow-ups", icon: Calendar },
   { title: "Dashboard",           url: "/dashboard",           icon: LayoutDashboard },
   { title: "OPD",                 url: "/opd",                 icon: Stethoscope },
   { title: "Daily Cash Book",     url: "/daily-cash-book",     icon: Wallet },

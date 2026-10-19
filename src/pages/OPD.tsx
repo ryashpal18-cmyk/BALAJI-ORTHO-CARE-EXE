@@ -95,6 +95,12 @@ export default function OPD() {
   const [showVillageOptions, setShowVillageOptions] = useState(false);
   const [villageHighlight, setVillageHighlight] = useState(-1);
   const [existingPatient, setExistingPatient] = useState<any>(null);
+  const [mobileMatches, setMobileMatches] = useState<any[]>([]);
+  const [newFamilyMember, setNewFamilyMember] = useState(false);
+  const choosePatient = (patient: any) => {
+    setExistingPatient(patient); setNewFamilyMember(false);
+    setRegForm(p => ({ ...p, name:patient.name || "", age:patient.age == null ? "" : String(patient.age), gender:patient.gender || "", address:patient.address || "" }));
+  };
   const [mobileSearchStatus, setMobileSearchStatus] = useState<"idle" | "searching" | "found" | "new">("idle");
   const [rxForm, setRxForm] = useState({ patient_id: "", diagnosis: "", medicines: "", followup_date: "" });
   const [isExporting, setIsExporting] = useState(false);
@@ -116,34 +122,28 @@ export default function OPD() {
   // Local lookup is immediate; late cloud results never replace a newer input.
   const handleMobileChange = async (mobile: string) => {
     const request = ++mobileRequest.current;
-    setRegForm(p => ({ ...p, mobile })); setExistingPatient(null);
+    setRegForm(p => ({ ...p, mobile, name:"", age:"", gender:"", address:"" })); setExistingPatient(null); setMobileMatches([]); setNewFamilyMember(false);
     const digits = mobile.replace(/\D/g, '').slice(-10);
     if (digits.length !== 10) { setMobileSearchStatus('idle'); return; }
     setMobileSearchStatus('searching');
-    const apply = (patient: any, background = false) => {
+    const apply = (patients: any[]) => {
       if (request !== mobileRequest.current || registering.current) return;
-      setExistingPatient(patient);
-      setMobileSearchStatus(patient ? 'found' : 'new');
-      if (patient) setRegForm(p => ({ mobile, name: background ? (p.name || patient.name || '') : patient.name || '',
-        age: background ? (p.age || String(patient.age || '')) : String(patient.age || ''),
-        gender: background ? (p.gender || patient.gender || '') : patient.gender || '',
-        address: background ? (p.address || patient.address || '') : patient.address || '' }));
+      setMobileMatches(patients);
+      setMobileSearchStatus(patients.length ? "found" : "new");
     };
     try {
-      const cached = await cacheGetAll('patients');
-      const patient = cached.find(p => (p.mobile || '').replace(/\D/g, '').slice(-10) === digits);
-      apply(patient || null);
-      if (!patient) void (async () => {
+      const cached = await cacheGetAll("patients");
+      apply(cached.filter(p => (p.mobile || "").replace(/\D/g, "").slice(-10) === digits));
+      void (async () => {
         if (!(await isOnline())) return;
-        const { data, error } = await supabase.from('patients').select('*').ilike('mobile', '%' + digits).limit(1);
-        if (!error && data?.[0]) {
-          // Store the full row before offering Update & Continue.
-          await cacheUpsertRowFromServer('patients', data[0]);
-          apply(data[0], true);
-        }
+        const { data, error } = await supabase.from("patients").select("*").ilike("mobile", "%" + digits).limit(30);
+        if (error || !data?.length) return;
+        for (const row of data) await cacheUpsertRowFromServer("patients", row);
+        const fresh = await cacheGetAll("patients");
+        apply(fresh.filter(p => (p.mobile || "").replace(/\D/g, "").slice(-10) === digits));
       })().catch(() => {});
     } catch (e: any) {
-      if (request === mobileRequest.current) { setMobileSearchStatus('idle'); toast({ title: 'Patient lookup failed', description: e.message, variant: 'destructive' }); }
+      if (request === mobileRequest.current) { setMobileSearchStatus("idle"); toast({ title:"Patient lookup failed", description:e.message, variant:"destructive" }); }
     }
   };
 
@@ -175,6 +175,12 @@ export default function OPD() {
       return;
     }
 
+    if (mobileMatches.length && !existingPatient && !newFamilyMember) {
+      toast({ title:"पुराना मरीज चुनें या नया परिवार सदस्य चुनें", variant:"destructive" }); return;
+    }
+    if (!existingPatient && mobileMatches.some(p => (p.name || "").trim().toLocaleLowerCase() === regForm.name.trim().toLocaleLowerCase())) {
+      toast({ title:"इस नाम और मोबाइल का मरीज पहले से है। सूची से चुनें।", variant:"destructive" }); return;
+    }
     if (registering.current) return;
     const digits = regForm.mobile.replace(/\D/g, '');
     if (!/^(?:91)?[6-9]\d{9}$/.test(digits) || !regForm.name.trim()) {
@@ -216,6 +222,7 @@ export default function OPD() {
       setRegForm({ name: "", mobile: "", age: "", gender: "", address: "" });
       setExistingPatient(null);
       setMobileSearchStatus("idle");
+      setMobileMatches([]); setNewFamilyMember(false);
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally { registering.current = false; }
@@ -443,13 +450,18 @@ export default function OPD() {
                       <p className="text-xs text-muted-foreground animate-pulse">🔍 Searching patient...</p>
                     )}
                     {mobileSearchStatus === "found" && (
-                      <p className="text-xs text-green-600 font-medium">✅ Patient already registered — details auto-filled</p>
+                      <p className="text-xs text-green-600 font-medium">इस मोबाइल पर पुराने मरीज हैं — सही मरीज चुनें</p>
                     )}
                     {mobileSearchStatus === "new" && (
                       <p className="text-xs text-blue-600 font-medium">🆕 New Patient — please fill details below</p>
                     )}
                   </div>
 
+                  {!!mobileMatches.length && <div className="rounded border p-3 space-y-2">
+                    <p className="text-sm">इस नंबर के मरीज:</p>
+                    {mobileMatches.map(p => <Button key={p.id} type="button" variant={existingPatient?.id === p.id ? "default" : "outline"} className="mr-2 mb-2" onClick={() => choosePatient(p)}>{p.name} · {p.age ?? "—"} · {p.address || "—"}</Button>)}
+                    <Button type="button" variant={newFamilyMember ? "default" : "outline"} onClick={() => { setExistingPatient(null); setNewFamilyMember(true); setRegForm(p => ({ ...p, name:"", age:"", gender:"", address:"" })); }}>इसी नंबर पर नया परिवार सदस्य</Button>
+                  </div>}
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Patient Name *</Label>
