@@ -48,10 +48,13 @@ function normalizeEvent(input, time = Date.now()) {
   const event={ appVersion:redactText(input.appVersion||'unknown',40), timestamp:new Date(time).toISOString(), level:['info','warn','error'].includes(String(input.level).toLowerCase())?String(input.level).toLowerCase():'error',
     code:/^[A-Z][A-Z0-9-]{2,40}$/.test(input.code||'')?input.code:classified.code, source:redactText(input.source||'application',100), message,
     action:sanitize(input.action), detail:sanitize(input.detail), stack:redactText(input.stack||'',12000), route:redactText(input.route||'',200), session:redactText(input.session||'',100) };
+  const detail=JSON.stringify(event.detail);if(detail&&detail.length>16000)event.detail={truncated:true,preview:detail.slice(0,16000)};
   event.fingerprint=fingerprint(event); return event;
 }
 function describe(code,message) {
+  const rule=RULES.find(r=>r[1]===code);if(rule)return {code,title:rule[2],action:rule[3]};
   const known={
+    'UI-007':['Renderer startup error','Startup stack और bundled JS/assets जाँचें; UI monitor शुरू होने से पहले error आया।'],
     'UI-004':['React screen crashed','Component stack और screen/action से render failure reproduce करें।'],
     'UI-005':['Main screen load failed','Installed assets/preload और release files जाँचें।'],
     'UI-006':['Renderer not responding','उसी screen/action पर memory, long tasks और crash logs जाँचें।'],

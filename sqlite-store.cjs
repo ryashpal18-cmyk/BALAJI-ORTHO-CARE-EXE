@@ -389,6 +389,7 @@ function diagnosticSnapshot({ deep = false } = {}) {
     const cache = {}; let malformed = 0;
     for (const r of raw) { try { (cache[r.table_name] ||= []).push(JSON.parse(r.data)); } catch { malformed++; } }
     const queueCount = db.prepare('SELECT count(*) AS n FROM mutation_queue').get().n;
+    const queueCounts=db.prepare('SELECT op, count(*) AS n FROM mutation_queue GROUP BY op').all();
     const queue = []; let malformedQueue = 0;
     for (const r of db.prepare('SELECT * FROM mutation_queue ORDER BY id LIMIT ?').all(max)) {
       try { queue.push(rowToMutation(r)); } catch { malformedQueue++; }
@@ -397,7 +398,7 @@ function diagnosticSnapshot({ deep = false } = {}) {
     const meta = {};
     for (const key of ['last-cloud-sync-at', 'whatsapp:invoice-jobs', 'whatsapp:settings']) meta[key] = metaGet(key);
     const smsJournal = db.prepare("SELECT value FROM meta WHERE key LIKE 'sms-dispatch:%' LIMIT ?").all(max).map(r => {try{return JSON.parse(r.value)?.state}catch{return 'invalid'}});
-    return { counts, cache, queue, queueCount:Number(queueCount), malformed, malformedQueue,
+    return { counts, cache, queue, queueCounts, queueCount:Number(queueCount), malformed, malformedQueue,
       truncated: counts.reduce((n,r)=>n+Number(r.n),0)>max || Number(queueCount)>max || smsJournal.length>=max,
       integrity: db.prepare(deep ? 'PRAGMA integrity_check(20)' : 'PRAGMA quick_check(1)').all(),
       journalMode: db.prepare('PRAGMA journal_mode').get(), meta, smsJournal };

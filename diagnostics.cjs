@@ -40,11 +40,12 @@ function createDiagnostics({store,logger,reportDir,backupDir,dataDir,appInfo,reg
       add('DB-003',s.malformed||s.malformedQueue?'error':'pass','Stored JSON and queue readability',{malformedCache:s.malformed,malformedQueue:s.malformedQueue},'Malformed record को सुरक्षित copy पर ठीक करें।','database');
       add('DB-004','pass','Actual SQLite record and queue counts',{tables:s.counts,queueTotal:s.queueCount,journal:s.journalMode},'Counts local PC के हैं; cloud totals नहीं।','database');
       if(s.truncated)add('COVERAGE-002','skipped','Large database scan limited','Maximum 50,000 rows per scan/journal; counts complete, item checks partial.','बड़ी database की अलग offline copy पर विस्तृत audit करें।','coverage');
+      const smsTotal=Number(s.queueCounts.find(r=>r.op==='sms')?.n||0),dataTotal=s.queueCount-smsTotal;
       const queue=s.queue,data=queue.filter(q=>q.op!=='sms'),sms=queue.filter(q=>q.op==='sms');
       const review=sms.filter(q=>['unconfirmed','uncertain','sending','dispatching'].includes(q.payload?.deliveryState));
       const retry=data.filter(q=>(q.retries||0)>=5||q.lastError),old=data.filter(q=>now()-Date.parse(q.createdAt)>86400000);
-      add('SYNC-001',retry.length||old.length?'warn':data.length?'warn':'pass','Offline data sync queue',{pending:data.length,stuck:retry.length,olderThan24h:old.length,lastAcknowledgedUpload:s.meta['last-cloud-sync-at']||null,examples:retry.slice(0,10).map(q=>({ref:reference(q.id),table:q.table,op:q.op,retries:q.retries,error:redactText(q.lastError)}))},'Cloud connection/failed item जाँचें; queue clear/delete न करें।','sync');
-      add('SMS-001',sms.length?'warn':'pass','Offline SMS queue',{queued:sms.length,needsReview:review.length},'Gateway में परिणाम जाँचकर review करें; report SMS नहीं भेजती।','sms');
+      add('SYNC-001',retry.length||old.length?'warn':dataTotal?'warn':'pass','Offline data sync queue',{pending:dataTotal,examined:data.length,stuck:retry.length,olderThan24h:old.length,lastAcknowledgedUpload:s.meta['last-cloud-sync-at']||null,examples:retry.slice(0,10).map(q=>({ref:reference(q.id),table:q.table,op:q.op,retries:q.retries,error:redactText(q.lastError)}))},'Cloud connection/failed item जाँचें; queue clear/delete न करें।','sync');
+      add('SMS-001',smsTotal?'warn':'pass','Offline SMS queue',{queued:smsTotal,examined:sms.length,needsReview:review.length},'Gateway में परिणाम जाँचकर review करें; report SMS नहीं भेजती।','sms');
       const uncertain=s.smsJournal.filter(s=>['dispatching','uncertain','invalid'].includes(s)).length;
       add('SMS-002',uncertain||review.length?'warn':'pass','SMS dispatch safety journal',{unconfirmedJournal:uncertain,unconfirmedQueue:review.length},'Gateway acceptance और phone delivery अलग हैं; अनिश्चित संदेश स्वतः resend न करें।','sms');
       add('SMS-003','skipped','Live gateway / handset delivery','No SMS was sent. Credentials, SIM balance and actual handset delivery are not verified.','एक सहमति वाले test number पर अलग device test करें।','coverage');
@@ -91,6 +92,7 @@ function createDiagnostics({store,logger,reportDir,backupDir,dataDir,appInfo,reg
     await safeCheck('UI-000','UI inspection failed',async()=>{
       const ui=await uiProbe();if(!ui){add('UI-010','skipped','Current screen layout','Renderer snapshot unavailable.','Screen खुलने के बाद दोबारा जाँचें।','coverage');return;}
       const overflow=Number(ui.overflowPx)||0;add('UI-010',overflow>4?'warn':'pass','Current screen horizontal overflow',{route:ui.route,width:ui.width,height:ui.height,overflowPx:overflow,brokenImages:ui.brokenImages},'Window size/zoom और screen layout जाँचें।','ui');
+      if(ui.rootChildren===0)add('UI-008','error','Application root is empty','No rendered clinic screen found in the root element.','Startup JS/assets और bootstrap errors जाँचें।','ui');
       if(Number(ui.brokenImages)>0)add('UI-011','warn','Broken images on current screen',{count:ui.brokenImages},'Image path/network और file presence जाँचें।','ui');
       add('UI-012','skipped','All screens and business workflows','Only the currently rendered screen and recorded errors are inspected. Hidden screens, print alignment and untriggered bugs require device tests.','समस्या वाला screen/action चलाएँ, फिर report निकालें।','coverage');
     });

@@ -20,6 +20,7 @@ let verifiedCloudToken = null;
 let authGeneration = 0;
 // Register guards before any handlers, including raw renderer IPC aliases.
 const registeredDiagnosticChannels = new Set();
+const rendererMonitorReady = new WeakSet();
 const originalHandle = ipcMain.handle.bind(ipcMain);
 ipcMain.handle = (channel, fn) => {
   originalHandle(channel, async (event, ...args) => {
@@ -1136,7 +1137,7 @@ function getDiagnostics() {
       if (!mainWindow || mainWindow.isDestroyed()) return null;
       return boundedDiagnostic(mainWindow.webContents.executeJavaScript(`(() => ({
         route:location.hash.split('?')[0].replace(/\\b[0-9a-f]{8}-[0-9a-f-]{27,}\\b/gi,':id').replace(/([/?])[^/?]*[0-9][^/?]*/g,'$1:id').slice(0,160),
-        width:innerWidth,height:innerHeight,
+        width:innerWidth,height:innerHeight,rootChildren:document.getElementById('root')?.childElementCount??null,
         overflowPx:Math.max(0,document.documentElement.scrollWidth-innerWidth),
         brokenImages:[...document.images].filter(i=>i.complete&&!!i.currentSrc&&!i.naturalWidth).length
       }))()`),5000);
@@ -1252,6 +1253,7 @@ ipcMain.handle('app:openExternal', async (_e, url) => {
 });
 
 ipcMain.handle('log:rendererError', async (_e, input = {}) => {
+  if(input?.code==='UI-START')rendererMonitorReady.add(_e.sender);
   // Merge message AND stack; one structured event per error. Payload fields are sanitized in logger.
   logger.record({level:input.level,source:input.source||'renderer',message:input.message,
     stack:input.stack,detail:input.detail,action:input.action,code:input.code,route:input.route});
@@ -1342,6 +1344,9 @@ app.on('before-quit', () => {
 
 app.on('web-contents-created', (_e, contents) => {
   contents.on('new-window', (e) => e.preventDefault());
+  contents.on('console-message', (_event,level,message) => {
+    if(level===3&&!rendererMonitorReady.has(contents))logger.record({level:'error',source:'ui-bootstrap',code:'UI-007',message});
+  });
   contents.on('did-fail-load', (_event,code,_description,_url,isMainFrame) => {
     if(isMainFrame&&code!==-3)logger.record({level:'error',source:'renderer-load',code:'UI-005',message:'Main screen failed to load',detail:{nativeCode:code}});
   });

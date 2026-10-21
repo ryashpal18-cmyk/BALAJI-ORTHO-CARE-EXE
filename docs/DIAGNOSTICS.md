@@ -9,7 +9,7 @@ Settings → About → **Clinic Diagnostics & Support Report**.
 
 ## Runtime coverage
 
-One renderer error/promise listener set, React error boundary reporting, resource load failures, fetch HTTP/network failures and optional long-task observation. Main process uncaught errors/rejections, failed screen load, renderer unresponsiveness and process crashes are logged. Repeated errors (12 within a minute per fingerprint) trigger an in-app alert without rescanning whole files. Monitoring begins when the renderer starts; it cannot recover errors from a previous release that never logged them.
+One renderer error/promise listener set, React error boundary reporting, resource load failures, fetch HTTP/network failures and optional long-task observation. Main process uncaught errors/rejections, console errors before the renderer monitor starts, failed screen load, renderer unresponsiveness and process crashes are logged. Repeated errors (12 within a minute per fingerprint) trigger an in-app alert without rescanning whole files. Monitoring begins when the renderer starts; it cannot recover errors from a previous release that never logged them.
 
 Native Windows CI runs the actual React diagnostic panel and monitor in an isolated Electron renderer: synthetic runtime/rejection/resource/network errors, quick/deep run, busy state, error-code rendering, skipped filter, TXT/JSON buttons and report-save failure. It never loads the user's real clinic database or sends a message.
 
@@ -27,7 +27,7 @@ A cloud `GET ...?select=id&limit=0` checks query/endpoint access with the curren
 
 | Code | Meaning |
 | --- | --- |
-| UI-001–006 / UI-011 / UI-020 | Process/render/import/resource/long-task error |
+| UI-001–008 / UI-011 / UI-020 | Process/render/import/resource/long-task error |
 | UI-010 / UI-012 | Current screen overflow / untested screens |
 | DB-000–004 | SQLite inspection/integrity/readability/counts |
 | SYNC-001–002 | Queued/stuck data or parent awaiting upload |
