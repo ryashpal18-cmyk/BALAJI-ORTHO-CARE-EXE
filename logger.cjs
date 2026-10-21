@@ -1,149 +1,34 @@
 'use strict';
-
-const fs   = require('fs');
-const path = require('path');
-
-// Log folder: C:\Balaji_Health_Backup\logs\
-const BACKUP_DIR     = 'C:\\Balaji_Health_Backup';
-const LOG_DIR        = path.join(BACKUP_DIR, 'logs');
-const MAX_LOG_DAYS   = 14;
-const MAX_LOG_BYTES   = 20 * 1024 * 1024; // 20MB — isse zyada ho to overflow file mein switch karo
-const SEPARATOR      = '─'.repeat(80);
-
-function ensureLogDir() {
-  try {
-    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
-    if (!fs.existsSync(LOG_DIR))    fs.mkdirSync(LOG_DIR,    { recursive: true });
-  } catch (e) {
-    console.error('[LOGGER] Folder nahi bana:', e.message);
+const fs=require('fs'),path=require('path'),crypto=require('crypto');
+const {normalizeEvent,localDay}=require('./diagnostic-utils.cjs');
+// Factory permits isolated fault-injection tests; production uses only the clinic log folder.
+function createLogger({dir='C:\\Balaji_Health_Backup\\logs', now=Date.now, maxBytes=5*1024*1024, maxTotalBytes=100*1024*1024, consoleOutput=true,onAlert=()=>{}}={}) {
+  const session=crypto.randomUUID();let lastWriteError='', handlers=false, appVersion='unknown';const bursts=new Map();
+  function ensure(){fs.mkdirSync(dir,{recursive:true});}
+  function filename(ext){const base=`app-${localDay(now())}`;let part=1,file;do{file=path.join(dir,base+(part===1?'':`-part${part}`)+ext);part++;}while(fs.existsSync(file)&&fs.statSync(file).size>=maxBytes);return file;}
+  function cleanOldLogs(){
+    try {ensure();const files=fs.readdirSync(dir).filter(f=>/^app-\d{4}-\d{2}-\d{2}(?:-part\d+)?\.(log|jsonl)$/.test(f)).map(f=>({file:path.join(dir,f),...fs.statSync(path.join(dir,f))})).sort((a,b)=>a.mtimeMs-b.mtimeMs);let total=files.reduce((s,f)=>s+f.size,0);
+      for(const f of files)if(f.mtimeMs<now()-14*86400000||total>maxTotalBytes){fs.unlinkSync(f.file);total-=f.size;}
+    }catch(e){lastWriteError=e.code||'LOG_CLEANUP_FAILED';}
   }
-}
-
-function getLogDir() {
-  ensureLogDir();
-  return LOG_DIR;
-}
-
-function todayLogFile() {
-  const d = new Date();
-  const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  const base = path.join(LOG_DIR, `app-${stamp}.log`);
-
-  // 🚨 FIX: Pehle ek hi din ka log file bina kisi size limit ke bharta rehta
-  // tha — agar koi error loop (jaise pehle offline-sync ka infinite SMS
-  // retry) bar-bar chalta, to file GBs tak badh sakti thi 14-din-purani
-  // cleanup chalne se pehle hi. Ab 20MB cross hone par "-part2", "-part3"
-  // jaisi overflow file mein switch ho jaata hai — purana din ka data safe
-  // rehta hai, bas ek hi file itna bada nahi banta.
-  try {
-    if (!fs.existsSync(base)) return base;
-    if (fs.statSync(base).size < MAX_LOG_BYTES) return base;
-
-    let part = 2;
-    let candidate = path.join(LOG_DIR, `app-${stamp}-part${part}.log`);
-    while (fs.existsSync(candidate) && fs.statSync(candidate).size >= MAX_LOG_BYTES) {
-      part += 1;
-      candidate = path.join(LOG_DIR, `app-${stamp}-part${part}.log`);
+  let writes=0;
+  function record(input){
+    const e=normalizeEvent({...input,session,appVersion},now());
+    try{ensure();if(++writes%100===0)cleanOldLogs();fs.appendFileSync(filename('.jsonl'),JSON.stringify(e)+'\n','utf8');fs.appendFileSync(filename('.log'),`[${e.timestamp}] [${e.level.toUpperCase()}] [${e.source}] [${e.code}]\n    ${e.message}\n${e.stack||''}${e.detail?'\n    Detail: '+JSON.stringify(e.detail):''}\n${'─'.repeat(80)}\n`,'utf8');lastWriteError='';}
+    catch(error){lastWriteError=error.code||'LOG_WRITE_FAILED';if(consoleOutput)console.error('[LOGGER]',lastWriteError);}
+    // Never send raw messages/details to the developer console.
+    if(consoleOutput)console[e.level==='error'?'error':e.level==='warn'?'warn':'log'](`[${e.code}] [${e.source}] ${e.message}`);
+    if(e.level==='error') {
+      const prior=bursts.get(e.fingerprint), t=now();
+      const burst=prior&&t-prior.start<60000?prior:{start:t,count:0,alerted:false};
+      burst.count++;bursts.set(e.fingerprint,burst);
+      if(burst.count>=12&&!burst.alerted){burst.alerted=true;try{onAlert({code:e.code,source:e.source,count:burst.count});}catch{}}
+      if(bursts.size>1000)bursts.delete(bursts.keys().next().value);
     }
-    return candidate;
-  } catch (_) {
-    return base;
+    return e;
   }
+  function setupGlobalHandlers(){if(handlers)return;handlers=true;process.on('uncaughtException',e=>record({level:'error',source:'main-process',message:e.message,stack:e.stack,detail:{code:e.code}}));process.on('unhandledRejection',e=>record({level:'error',source:'main-promise',message:e?.message||String(e),stack:e?.stack}));}
+  return {setVersion:value=>{appVersion=String(value).slice(0,40);},setAlertHandler:fn=>{onAlert=typeof fn==='function'?fn:()=>{};},record,logInfo:(s,m,d)=>record({level:'info',source:s,message:m,detail:d}),logWarn:(s,m,d)=>record({level:'warn',source:s,message:m,detail:d}),logError:(s,m,d)=>record({level:'error',source:s,message:m,detail:d}),
+    writeRendererLog:(level,source,message)=>record({level,source,message}),getLogDir:()=>{ensure();return dir;},cleanOldLogs,setupGlobalHandlers,health:()=>({lastWriteError,session})};
 }
-
-// ── Full detail extract karna ─────────────────────────────────────────────
-function extractDetail(val) {
-  if (!val) return '';
-  if (val instanceof Error) {
-    let out = `${val.name}: ${val.message}`;
-    if (val.stack) {
-      const stackLines = val.stack.split('\n').map(l => '    ' + l.trim()).join('\n');
-      out += `\n    Stack Trace:\n${stackLines}`;
-    }
-    if (val.code)    out += `\n    Code: ${val.code}`;
-    if (val.details) out += `\n    Details: ${val.details}`;
-    if (val.hint)    out += `\n    Hint: ${val.hint}`;
-    return out;
-  }
-  if (typeof val === 'string') return val;
-  try { return JSON.stringify(val, null, 2); } catch { return String(val); }
-}
-
-// ── Main write function ───────────────────────────────────────────────────
-function writeLine(level, source, message, detail) {
-  try {
-    ensureLogDir();
-    const time = new Date().toLocaleString('en-IN', { hour12: false });
-    const detailStr = detail ? `\n    Detail: ${extractDetail(detail)}` : '';
-    const line =
-      `[${time}] [${level}] [${source}]\n` +
-      `    ${message}${detailStr}\n` +
-      `${SEPARATOR}\n`;
-    fs.appendFileSync(todayLogFile(), line, 'utf-8');
-  } catch (e) {
-    console.error('[LOGGER] Write fail:', e.message);
-  }
-}
-
-// ── React renderer se aaya full log message likhna ───────────────────────
-// (clientLogger.ts already format kar ke bhejta hai)
-function writeRendererLog(level, source, formattedMessage) {
-  try {
-    ensureLogDir();
-    const line = formattedMessage.endsWith('\n') ? formattedMessage : formattedMessage + '\n';
-    fs.appendFileSync(todayLogFile(), line, 'utf-8');
-  } catch (e) {
-    console.error('[LOGGER] Renderer log write fail:', e.message);
-  }
-}
-
-function logInfo(source, message, detail)  {
-  writeLine('INFO',  source, message, detail);
-  console.log(`[INFO] [${source}]`, message);
-}
-function logWarn(source, message, detail)  {
-  writeLine('WARN',  source, message, detail);
-  console.warn(`[WARN] [${source}]`, message);
-}
-function logError(source, message, detail) {
-  writeLine('ERROR', source, message, detail);
-  console.error(`[ERROR] [${source}]`, message);
-}
-
-// ── 14 din purani log files delete karna ─────────────────────────────────
-function cleanOldLogs() {
-  try {
-    ensureLogDir();
-    const cutoff = Date.now() - MAX_LOG_DAYS * 24 * 60 * 60 * 1000;
-    for (const f of fs.readdirSync(LOG_DIR)) {
-      const full = path.join(LOG_DIR, f);
-      if (f.endsWith('.log') && fs.statSync(full).mtimeMs < cutoff) {
-        fs.unlinkSync(full);
-        console.log('[LOGGER] Purani log delete hui:', f);
-      }
-    }
-  } catch (_) {}
-}
-
-// ── Process level crash handlers ─────────────────────────────────────────
-function setupGlobalHandlers() {
-  process.on('uncaughtException', (err) => {
-    writeLine('ERROR', 'main-process', `UNCAUGHT EXCEPTION: ${err.message}`, err);
-    console.error('[FATAL]', err);
-  });
-  process.on('unhandledRejection', (reason) => {
-    const msg = reason instanceof Error ? reason.message : String(reason);
-    writeLine('ERROR', 'main-process', `UNHANDLED REJECTION: ${msg}`, reason);
-    console.error('[FATAL REJECTION]', reason);
-  });
-}
-
-module.exports = {
-  logInfo,
-  logWarn,
-  logError,
-  writeRendererLog,
-  cleanOldLogs,
-  setupGlobalHandlers,
-  getLogDir,
-};
+module.exports={...createLogger(),createLogger};

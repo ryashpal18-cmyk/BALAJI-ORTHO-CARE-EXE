@@ -534,7 +534,7 @@ export default function OPD() {
                     </div>
                   </div>
                   <div>
-                    <Button type="submit" disabled={addPatient.isPending || mobileSearchStatus === "searching"} className="w-full sm:w-auto">
+                    <Button data-diagnostic-action="save-patient" type="submit" disabled={addPatient.isPending || mobileSearchStatus === "searching"} className="w-full sm:w-auto">
                       {addPatient.isPending ? "Saving..." : mobileSearchStatus === "searching" ? "Checking..." : existingPatient ? "✅ Update & Continue" : "🆕 Register New Patient"}
                     </Button>
                   </div>

@@ -19,13 +19,21 @@ const authPublicConfig = require('./auth-public-config.json');
 let verifiedCloudToken = null;
 let authGeneration = 0;
 // Register guards before any handlers, including raw renderer IPC aliases.
+const registeredDiagnosticChannels = new Set();
 const originalHandle = ipcMain.handle.bind(ipcMain);
-ipcMain.handle = (channel, fn) => originalHandle(channel, async (event, ...args) => {
+ipcMain.handle = (channel, fn) => {
+  originalHandle(channel, async (event, ...args) => {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Untrusted IPC sender");
   access.authorize(channel, args, sqliteStore);
   if (['auth:logout','auth:offlineLogin','auth:offlineSetup'].includes(channel)) authGeneration++;
-  return fn(event, ...args);
-});
+  try { return await fn(event, ...args); }
+  catch(error) {
+    if(channel!=='log:rendererError')logger.record({level:channel.startsWith('auth:')?'warn':'error',source:'ipc:'+channel,message:error?.message||'Desktop operation failed',stack:error?.stack});
+    throw error;
+  }
+  });
+  registeredDiagnosticChannels.add(channel);
+};
 const originalOn = ipcMain.on.bind(ipcMain);
 ipcMain.on = (channel, fn) => originalOn(channel, (event, ...args) => {
   try { if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Untrusted sender"); access.authorize(channel, args, sqliteStore); return fn(event, ...args); }
@@ -63,6 +71,7 @@ ipcMain.handle('auth:cloudSyncStatus', () => getCloudSync().status());
 
 // Process-level crash/error handlers jitni jaldi ho sake set kar do, taaki
 // startup ke dauran bhi koi exception silently na guzar jaaye.
+logger.setVersion(app.getVersion());
 logger.setupGlobalHandlers();
 
 // ─── SINGLE INSTANCE LOCK ───────────────────────────────────────────────
@@ -1109,786 +1118,57 @@ ipcMain.on('open-whatsapp', (_e, payload) => {
 const sendDurableSMS = require('./sms-outbox.cjs').createSmsSender({ store: sqliteStore });
 ipcMain.handle('app:sendSMS', async (_e, input) => sendDurableSMS(input));
 
-// ─── KNOWN ERROR PATTERNS — module-level (diagnostics + live notification dono use karte hain) ─
-// Har pattern mein: regex, error name, source file, root cause, fix
-const KNOWN_ERROR_PATTERNS = [
-  {
-    regex: /queueGetAll retry bhi fail|queueGetAll fail.*DB corrupt/g,
-    name: 'IndexedDB queueGetAll Infinite Loop',
-    source: 'src/lib/offlineDb.ts → queueGetAll()',
-    rootCause: 'IndexedDB UnknownError pe deleteDb+openDb loop ban raha tha. Har 30s mein runSync() ne 6+ baar queueGetAll call ki, corrupt DB ne baar baar fail kiya, loop mein 9000+ errors/day flood ho gaye.',
-    impact: '🔴 CRITICAL — Log files 5MB+ ho gayi, app slow ho sakti hai, real errors chhup gayi',
-    fix: 'FILE: src/lib/offlineDb.ts\nFIX: queueGetAll mein _queueDbResetDone flag add karo — sirf pehli baar deleteDb karo, baad mein [] return karo bina log flood kiye.\nSTATUS: ✅ offlineDb_fixed.ts mein fix ready hai — deploy karo',
-  },
-  {
-    regex: /No handler registered for 'log:getSnapshotDir'/g,
-    name: 'Missing IPC Handler: log:getSnapshotDir',
-    source: 'preload.js → getSafetySnapshotDir() → ipcRenderer.invoke(\'log:getSnapshotDir\')',
-    rootCause: 'preload.js mein getSafetySnapshotDir() ne \'log:getSnapshotDir\' channel call kiya, lekin electron-main.cjs mein ye handler register nahi tha. main.js mein handler tha, electron-main.cjs mein nahi.',
-    impact: '🟡 MEDIUM — Diagnostic tool mein snapshot path nahi aata, lekin app ka core kaam nahi rukta',
-    fix: 'FILE: electron-main.cjs\nFIX: ipcMain.handle(\'log:getSnapshotDir\', () => SAFETY_SNAPSHOT_ROOT) add karo\nSTATUS: ✅ main.js mein pehle se fix hai — electron-main.cjs mein bhi same handler add karo',
-  },
-  {
-    regex: /UnknownError: Internal error/g,
-    name: 'IndexedDB UnknownError: Internal error',
-    source: 'Electron IndexedDB (Chromium) → balaji_ortho_offline_db',
-    rootCause: 'Ye error tab aata hai jab IndexedDB ki internal state corrupt ho jaati hai — aksar abrupt shutdown, power cut, ya Electron version change se. DB_VERSION v3 bump ke baad purani DB delete honi chahiye thi, lekin agar app crash ho gayi to nahi hui.',
-    impact: '🔴 CRITICAL — Offline data access fail, sync queue nahi chali, pending records cloud tak nahi gaye',
-    fix: 'FILE: src/lib/offlineDb.ts\nFIX 1 (automatic): DB_VERSION = 3 pehle se hai — naya fresh build install karo, IndexedDB auto-reset hogi\nFIX 2 (manual): Settings → "Nuclear IndexedDB Reset" button dabao\nFIX 3 (permanent): offlineDb_fixed.ts deploy karo jisme error flood band hai',
-  },
-  {
-    regex: /Supabase insert fail|insert.*failed.*table/gi,
-    name: 'Supabase Insert Failure',
-    source: 'src/lib/offlineSync.ts → applyMutation() → supabase.insert()',
-    rootCause: 'IndexedDB queue se mutations Supabase mein sync karte waqt fail hua. Possible causes: (1) _pendingSync/_localOnly fields payload mein the, (2) network timeout, (3) Supabase RLS policy block.',
-    impact: '🟡 MEDIUM — Data offline safe hai, lekin cloud sync pending rehta hai',
-    fix: 'FILE: src/lib/offlineSync.ts\nCHECK: delete payload._pendingSync aur delete payload._localOnly already hai line ~200\nACTION: Pending items ko Settings → Stuck Bills Fix se clear karo',
-  },
-  {
-    regex: /render-process-gone|RENDERER CRASH/gi,
-    name: 'Renderer Process Crash',
-    source: 'Electron BrowserWindow → webContents',
-    rootCause: 'React/renderer process crash ho gayi — memory overflow ya unhandled JS error',
-    impact: '🔴 CRITICAL — White screen, user ko app restart karni padti hai',
-    fix: 'Check memory usage. Agar 500MB+ ho to memory leak hai.\nCheck console errors app start par.',
-  },
-  {
-    regex: /PENDING_PARENT_INSERT/g,
-    name: 'Pending Parent Insert (Sync Order Issue)',
-    source: 'src/lib/offlineSync.ts → applyMutation()',
-    rootCause: 'Update mutation chal raha hai lekin parent insert abhi sync nahi hua — tempId (local_xxx) abhi real ID se replace nahi hua',
-    impact: '🟡 LOW-MEDIUM — Sync queue thodi der delay hoti hai, lekin eventually resolve hota hai',
-    fix: 'FILE: src/lib/offlineSync.ts\nSTATUS: Code already handle karta hai — "continue" se skip hota hai\nIF STUCK: Settings → Stuck Bills Fix → Clear old stuck items',
-  },
-  {
-    regex: /Unhandled Promise Rejection/g,
-    name: 'Unhandled Promise Rejection',
-    source: 'src/lib/clientLogger.ts → window.unhandledrejection',
-    rootCause: 'Kisi async function mein try/catch nahi tha ya Promise reject hua aur catch nahi hua',
-    impact: '🟡 MEDIUM — Depends on which promise failed',
-    fix: 'Upar "Last Error" detail dekho — kaunse file/function se aa raha hai wo batayega',
-  },
-  {
-    regex: /(\w+) is not defined/g,
-    name: 'Missing Import (ReferenceError)',
-    source: 'Renderer JS — kisi hook/component mein',
-    rootCause: 'Code mein ek function/variable use ho raha hai jo us file mein import nahi kiya gaya. Ye galti se ek naya feature add karte waqt ho sakta hai.',
-    impact: '🔴 CRITICAL — Jo bhi button/action isko trigger karta hai, wo crash ho jaayega ya kaam nahi karega',
-    fix: 'Sample Log mein jo function/variable naam dikh raha hai, us file ke top ke "import { ... }" statement mein use add karo.',
-  },
-  {
-    regex: /Maximum update depth exceeded|Too many re-renders/g,
-    name: 'Infinite Re-render / Refetch Loop',
-    source: 'React component ya React Query hook',
-    rootCause: 'Koi query/effect apne hi result se khud ko dobara trigger kar raha hai (jaise invalidateQueries() ek aisi query ke andar se call hona jo khud usi query ko refetch karti hai).',
-    impact: '🔴 CRITICAL — App slow ho jaata hai, battery/data zyada use hoti hai, kabhi kabhi UI freeze ho sakta hai',
-    fix: 'Jis query/effect se ye trigger ho raha hai, wahan invalidateQueries() ki jagah setQueryData() use karo (cache seedha update karo, dobara fetch trigger na ho).',
-  },
-];
-
-// ✅ Toast ke "View More" button se call hota hai — poori detail file kholta hai
-ipcMain.handle('bug:openDetail', async (_e, detailPath) => {
-  try {
-    await shell.openPath(detailPath || path.join(BACKUP_DIR, 'last_bug_detail.txt'));
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-// ─── LIVE ERROR NOTIFICATION WATCHER ──────────────────────────────────────
-// Diagnostic report ka wait kiye bina — agar koi ek error baar baar (50+)
-// aa rahi hai, turant Windows notification bhej do. Notification pe click
-// karne se poori details (code/source/fix ke saath) ek .txt file mein khulti
-// hai — bilkul GitHub Actions ke build-error jaisा.
-const NOTIFIED_THRESHOLDS = [12, 50, 200, 1000, 5000]; // har threshold pe sirf ek baar notify
-const _notifiedState = new Map(); // "date::normalizedMsg" -> highest threshold already notified
-
-function _normalizeErrorMsg(msg) {
-  return msg.replace(/\d+/g, 'N').trim().slice(0, 100);
+// Diagnostic checks only read clinical data. Reports are separate, local files.
+let diagnosticService;
+const diagnosticReportDir = path.join(APP_BACKUP_DIR, 'diagnostics');
+const requiredDiagnosticChannels = [...new Set([...fs.readFileSync(path.join(__dirname, 'preload.js'), 'utf8')
+  .matchAll(/ipcRenderer\.invoke\(['"]([^'"]+)['"]/g)].map(m => m[1]))];
+const boundedDiagnostic = (promise, ms) => {
+  let timer; return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Diagnostic probe timed out')),ms);})]).finally(()=>clearTimeout(timer));
+};
+function getDiagnostics() {
+  return diagnosticService ||= require('./diagnostics.cjs').createDiagnostics({
+    store: sqliteStore, logger, reportDir: diagnosticReportDir,
+    backupDir: APP_BACKUP_DIR, dataDir: BACKUP_DIR,
+    appInfo: () => ({version:app.getVersion(),electron:process.versions.electron,node:process.versions.node,platform:process.platform}),
+    registeredChannels: () => ({required:requiredDiagnosticChannels,registered:[...registeredDiagnosticChannels]}),
+    uiProbe: async () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return null;
+      return boundedDiagnostic(mainWindow.webContents.executeJavaScript(`(() => ({
+        route:location.hash.split('?')[0].replace(/\\b[0-9a-f]{8}-[0-9a-f-]{27,}\\b/gi,':id').replace(/([/?])[^/?]*[0-9][^/?]*/g,'$1:id').slice(0,160),
+        width:innerWidth,height:innerHeight,
+        overflowPx:Math.max(0,document.documentElement.scrollWidth-innerWidth),
+        brokenImages:[...document.images].filter(i=>i.complete&&!!i.currentSrc&&!i.naturalWidth).length
+      }))()`),5000);
+    },
+    cloudProbe: async () => {
+      if (!authPublicConfig.url || !authPublicConfig.key) return [{code:'CLOUD-001',status:'error',title:'Cloud public configuration missing',evidence:'Bundled URL/public key unavailable'}];
+      // No token refresh, login, mutation, enrollment, gateway call or patient body is performed here.
+      if (!verifiedCloudToken) return [{code:'CLOUD-002',status:'skipped',title:'Authenticated cloud read check',evidence:'No current verified cloud session; local login is independent.'}];
+      const epoch=authGeneration,token=verifiedCloudToken;
+      return Promise.all(['patients','billing','sms_logs'].map(async table => {
+        try {
+          const response = await boundedDiagnostic(net.fetch(authPublicConfig.url+'/rest/v1/'+table+'?select=id&limit=0', {
+            method:'GET',headers:{apikey:authPublicConfig.key,Authorization:'Bearer '+token},signal:AbortSignal.timeout(6000)
+          }),6500);
+          await response.body?.cancel();
+          if(epoch!==authGeneration||token!==verifiedCloudToken)return {code:'CLOUD-003',status:'skipped',title:table+' read access',evidence:'Cloud session changed during check'};
+          return {code:'CLOUD-003',status:response.ok?'pass':[401,403].includes(response.status)?'error':'warn',title:table+' authenticated read access',evidence:{httpStatus:response.status,rowsRequested:0,scope:'Endpoint/query access only; row-level data visibility and full sync not verified'}};
+        } catch(error) { return {code:'NET-002',status:'warn',title:table+' cloud read unavailable',evidence:{error:error.name==='TimeoutError'?'Timeout':'Network/service unavailable'}}; }
+      }));
+    }
+  });
 }
-
-function checkForRepeatingErrors() {
-  try {
-    const logDir = path.join(BACKUP_DIR, 'logs');
-    if (!fs.existsSync(logDir)) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const logFiles = fs.readdirSync(logDir).filter(f => f.endsWith('.log') && f.includes(today));
-    if (!logFiles.length) return;
-
-    const content = fs.readFileSync(path.join(logDir, logFiles[0]), 'utf-8');
-    const blocks = content.split('─'.repeat(20));
-
-    const freq = new Map(); // normalizedMsg -> { count, sample, matchedPattern }
-    for (const block of blocks) {
-      if (!block.includes('[ERROR]')) continue;
-      // ✅ Header line ([time] [ERROR] [source]) chhod ke, uske baad wali
-      // asli message wali line lo — warna sab errors ek hi group mein aa
-      // jaate (kyunki header mein bhi "[ERROR]" text hota hai).
-      const blockLines = block.split('\n').map(l => l.trim()).filter(Boolean);
-      const headerIdx = blockLines.findIndex(l => l.includes('[ERROR]'));
-      const msgLine = headerIdx >= 0 ? blockLines[headerIdx + 1] : null;
-      if (!msgLine) continue;
-      const norm = _normalizeErrorMsg(msgLine);
-      if (!freq.has(norm)) {
-        const matched = KNOWN_ERROR_PATTERNS.find(p => block.match(p.regex));
-        freq.set(norm, { count: 0, sample: block.trim().slice(0, 800), matched });
-      }
-      freq.get(norm).count++;
-    }
-
-    for (const [norm, data] of freq) {
-      const stateKey = `${today}::${norm}`;
-      const alreadyNotifiedAt = _notifiedState.get(stateKey) || 0;
-      // Sabse bada threshold dhoondo jo cross hua hai aur abhi tak notify nahi hua
-      const crossedThreshold = [...NOTIFIED_THRESHOLDS].reverse().find(t => data.count >= t && t > alreadyNotifiedAt);
-      if (!crossedThreshold) continue;
-
-      _notifiedState.set(stateKey, crossedThreshold);
-
-      const title = data.matched
-        ? `⚠️ Bug baar-baar aa raha hai: ${data.matched.name}`
-        : `⚠️ Ek error baar-baar aa raha hai (${data.count}x)`;
-      const body = data.matched
-        ? `${data.count}x aaj hua hai. ${data.matched.impact}\nClick karo poori details ke liye.`
-        : `"${norm}" — ${data.count}x aaj hua hai.\nClick karo poori details ke liye.`;
-
-      // Detail file banao — GitHub Actions build-log jaisa format
-      const detailLines = [
-        'BUG DETAIL REPORT',
-        '═'.repeat(70),
-        `Generated       : ${new Date().toLocaleString('en-IN', { hour12: false })}`,
-        `Error Message   : ${norm}`,
-        `Occurrences     : ${data.count}x aaj (${today})`,
-        `App Version     : ${app.getVersion()}`,
-        '─'.repeat(70),
-      ];
-      if (data.matched) {
-        detailLines.push(
-          `Bug Name        : ${data.matched.name}`,
-          `Source File     : ${data.matched.source}`,
-          `Root Cause      : ${data.matched.rootCause}`,
-          `Impact          : ${data.matched.impact}`,
-          '',
-          'HOW TO FIX:',
-          data.matched.fix,
-        );
-      } else {
-        detailLines.push('Ye ek naya/unknown error hai — koi pehle se pehchana pattern match nahi hua.');
-        detailLines.push('Neeche wali "raw log" copy karke Claude ko bhej do, wo dekh ke bata dega.');
-      }
-      detailLines.push('', '─'.repeat(70), 'RAW LOG (jaisa error code ke saath dikhta hai):', '─'.repeat(70), data.sample);
-
-      const detailPath = path.join(BACKUP_DIR, 'last_bug_detail.txt');
-      try { fs.writeFileSync(detailPath, detailLines.join('\n'), 'utf-8'); } catch (_) {}
-
-      // ✅ Native OS notification ki jagah — app ke andar hi wahi toast style
-      // dikhao jaisa "Bill Saved" ke waqt aata hai, "View More" button ke saath
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('bug-detected', { title, body, detailPath });
-      }
-      logger.logInfo('error-watcher', `In-app toast bheja: ${norm} (${data.count}x)`);
-    }
-  } catch (e) {
-    logger.logError('error-watcher', `checkForRepeatingErrors fail: ${e.message}`);
-  }
-}
-
-// Har 2 minute mein check karo (app ready hone ke 1 minute baad se shuru)
-app.whenReady().then(() => {
-  setTimeout(() => {
-    checkForRepeatingErrors();
-    setInterval(checkForRepeatingErrors, 2 * 60 * 1000);
-  }, 60 * 1000);
+logger.setAlertHandler(issue => {
+  if(mainWindow && !mainWindow.isDestroyed() && access.getPrincipal()?.role==='admin')
+    mainWindow.webContents.send('bug-detected',{title:`${issue.code}: बार-बार error`,body:`${issue.count} बार एक मिनट में। Settings → About → Run Diagnostics से report निकालें।`});
 });
-
-// ─── RUNTIME DIAGNOSTICS — Ek click mein poori app check karo ───────────────
-// Ye handler software ke andar se hi run hota hai — koi alag tool nahi chahiye.
-// Har check ka result ek .txt report file mein save hota hai.
-ipcMain.handle('app:runDiagnostics', async () => {
-  const lines = [];
-  const sep   = '─'.repeat(70);
-  const sep2  = '═'.repeat(70);
-  const ts    = () => new Date().toLocaleString('en-IN', { hour12: false });
-  const ok    = (msg) => `  ✅  ${msg}`;
-  const warn  = (msg) => `  ⚠️  ${msg}`;
-  const err   = (msg) => `  ❌  ${msg}`;
-  const info  = (msg) => `  ℹ️  ${msg}`;
-  const head  = (msg) => `\n${sep2}\n  🔍  ${msg}\n${sep2}`;
-
-  lines.push('BALAJI ORTHO CARE CONNECT — RUNTIME DIAGNOSTIC REPORT');
-  lines.push(`Generated: ${ts()}`);
-  lines.push(`App Version: ${app.getVersion()}`);
-  lines.push(`Electron: ${process.versions.electron}  |  Node: ${process.versions.node}  |  Platform: ${process.platform}`);
-  lines.push(sep);
-
-  // ── 1. DATA FILES CHECK ──────────────────────────────────────────────────
-  lines.push('');
-  lines.push('[1] DATA FILES — C:\\Balaji_Health_Backup\\');
-  lines.push(sep);
-  const dataFiles = [
-    { path: PATIENTS_FILE,  name: 'patients.json'  },
-    { path: BILLS_FILE,     name: 'bills.json'     },
-    { path: REPORTS_FILE,   name: 'reports.json'   },
-    { path: XRAYS_FILE,     name: 'xrays.json'     },
-    { path: FRACTURE_FILE,  name: 'fractures.json' },
-    { path: PENDING_FILE,   name: 'pending_sync.json' },
-    { path: SETTINGS_FILE,  name: 'settings.json'  },
-  ];
-
-  for (const f of dataFiles) {
-    if (!fs.existsSync(f.path)) {
-      lines.push(warn(`${f.name} — FILE MISSING (naya banaya jayega)`));
-      continue;
-    }
-    try {
-      const raw  = fs.readFileSync(f.path, 'utf-8');
-      const data = JSON.parse(raw);
-      const size = (fs.statSync(f.path).size / 1024).toFixed(1);
-      const count = Array.isArray(data) ? data.length : 'object';
-      const mtimeMs = fs.statSync(f.path).mtimeMs;
-      const ageHrs = ((Date.now() - mtimeMs) / (1000 * 60 * 60)).toFixed(1);
-      lines.push(ok(`${f.name} — OK | Records: ${count} | Size: ${size} KB | Last updated: ${ageHrs}h pehle`));
-      // ✅ NAYI CHECK: agar patients/bills file 48 ghante se update hi nahi
-      // hui, to matlab backupCacheToDisk() silently ruk gaya hai — turant
-      // pakadna zaroori hai warna real backup hone ka bharosa jhoothā hoga.
-      if ((f.path === PATIENTS_FILE || f.path === BILLS_FILE) && Number(ageHrs) > 48) {
-        lines.push(warn(`  └─ ${f.name} 48+ ghante se update nahi hui — backup rukk gaya ho sakta hai, app khol ke check karo`));
-      }
-    } catch (e) {
-      lines.push(err(`${f.name} — CORRUPT! JSON parse fail: ${e.message}`));
-      const bakPath = `${f.path}.bak`;
-      if (fs.existsSync(bakPath)) {
-        try {
-          JSON.parse(fs.readFileSync(bakPath, 'utf-8'));
-          lines.push(warn(`  └─ .bak file theek hai — restore possible`));
-        } catch {
-          lines.push(err(`  └─ .bak bhi CORRUPT hai — data loss risk!`));
-        }
-      } else {
-        lines.push(err(`  └─ Koi .bak file nahi mili`));
-      }
-    }
-  }
-
-  // ── 2. DIRECTORIES CHECK ─────────────────────────────────────────────────
-  lines.push('');
-  lines.push('[2] DIRECTORIES');
-  lines.push(sep);
-  const dirs = [
-    BACKUP_DIR,
-    XRAYS_DIR,
-    APP_BACKUP_DIR,
-    SAFETY_SNAPSHOT_ROOT,
-    path.join(BACKUP_DIR, 'logs'),
-  ];
-  for (const d of dirs) {
-    if (fs.existsSync(d)) {
-      lines.push(ok(`EXISTS: ${d}`));
-    } else {
-      lines.push(warn(`MISSING: ${d} (app start par banta hai)`));
-    }
-  }
-
-  // ── 3. RECORD COUNT SUMMARY ──────────────────────────────────────────────
-  // NOTE: App ab IndexedDB + Supabase use karti hai (JSON files mein data nahi aata)
-  // Isliye hum Supabase REST API se live counts fetch karte hain
-  lines.push('');
-  lines.push('[3] RECORD COUNT SUMMARY (Supabase se live)');
-  lines.push(sep);
-  try {
-    const settings = { ...readJSON(SETTINGS_FILE, {}), supabaseUrl: authPublicConfig.url, supabaseKey: authPublicConfig.key };
-    const supabaseUrl = settings.supabaseUrl;
-    const supabaseKey = settings.supabaseKey;
-    const pending = readJSON(PENDING_FILE);
-
-    // Supabase REST API se count fetch karne ka helper
-    async function supabaseCount(table, filter = '') {
-      return new Promise((resolve) => {
-        try {
-          const urlObj = new URL(`${supabaseUrl}/rest/v1/${table}?select=id${filter ? '&' + filter : ''}`);
-          const req = require('https').get({
-            hostname: urlObj.hostname,
-            path: urlObj.pathname + urlObj.search,
-            headers: {
-              'apikey': supabaseKey,
-              ...(supabaseKey.startsWith('sb_publishable_') ? {} : { Authorization: `Bearer ${supabaseKey}` }),
-              'Prefer': 'count=exact',
-              'Range': '0-0',
-            },
-            timeout: 6000,
-          }, (res) => {
-            // Content-Range: 0-0/TOTAL_COUNT
-            const range = res.headers['content-range'] || '';
-            const match = range.match(/\/(\d+)/);
-            res.resume();
-            resolve(match ? parseInt(match[1]) : -1);
-          });
-          req.on('error', () => resolve(-1));
-          req.on('timeout', () => { req.destroy(); resolve(-1); });
-        } catch (_) { resolve(-1); }
-      });
-    }
-
-    if (!supabaseUrl || !supabaseKey) {
-      lines.push(warn('Supabase config nahi mili — counts unavailable'));
-    } else {
-      const isNet = await checkInternet();
-      if (!isNet) {
-        // Offline: JSON files se koshish karo (ho sakta hai kuch data ho)
-        lines.push(warn('Offline hai — local JSON files se count (may be 0 if data is in IndexedDB only)'));
-        const patients  = readJSON(PATIENTS_FILE);
-        const bills     = readJSON(BILLS_FILE);
-        const fractures = readJSON(FRACTURE_FILE);
-        lines.push(info(`Total Patients  : ${patients.length} (local JSON)`));
-        lines.push(info(`Total Bills     : ${bills.length} (local JSON)`));
-        lines.push(info(`Total Fractures : ${fractures.length} (local JSON)`));
-      } else {
-        // Online: Supabase se live counts
-        const today = new Date().toISOString().slice(0, 10);
-
-        const [patCount, billCount, reportCount, xrayCount, fractureCount, aajBills, aajPatients, activeFractures] = await Promise.all([
-          supabaseCount('patients'),
-          supabaseCount('billing'),
-          supabaseCount('xray_reports'),
-          supabaseCount('fracture_xrays'),
-          supabaseCount('fracture_cases'),
-          supabaseCount('billing', `created_at=gte.${today}T00:00:00`),
-          supabaseCount('patients', `created_at=gte.${today}T00:00:00`),
-          supabaseCount('fracture_cases', 'plaster_status=eq.Active'),
-        ]);
-
-        const fmt = (n) => n === -1 ? '(fetch fail)' : String(n);
-
-        if (patCount === -1 && billCount === -1) {
-          lines.push(warn('Supabase counts fetch nahi ho sake — auth ya network issue'));
-        } else {
-          lines.push(patCount > 0 ? ok(`Total Patients  : ${fmt(patCount)}`) : info(`Total Patients  : ${fmt(patCount)}`));
-          lines.push(billCount > 0 ? ok(`Total Bills     : ${fmt(billCount)}`) : info(`Total Bills     : ${fmt(billCount)}`));
-          lines.push(info(`Total Reports   : ${fmt(reportCount)}`));
-          lines.push(info(`Total X-Rays    : ${fmt(xrayCount)}`));
-          lines.push(fractureCount > 0 ? ok(`Total Fractures : ${fmt(fractureCount)}`) : info(`Total Fractures : ${fmt(fractureCount)}`));
-          lines.push(info(`Aaj ke Bills    : ${fmt(aajBills)}`));
-          lines.push(info(`Aaj ke Patients : ${fmt(aajPatients)}`));
-          lines.push(activeFractures > 0 ? ok(`Active Fractures: ${fmt(activeFractures)}`) : info(`Active Fractures: ${fmt(activeFractures)}`));
-          lines.push(info(`Source          : Supabase (live)`));
-        }
-      }
-    }
-
-    // Pending sync hamesha local JSON se
-    lines.push(info(`Pending Sync    : ${pending.length}`));
-    if (pending.length > 50) {
-      lines.push(warn(`Pending sync bahut zyada hai (${pending.length}) — internet check karein`));
-    } else if (pending.length > 0) {
-      lines.push(warn(`${pending.length} records sync hone baki hain`));
-    }
-  } catch (e) {
-    lines.push(err(`Record count nahi mil saka: ${e.message}`));
-  }
-
-  // ── 4. INTERNET / SUPABASE CHECK ─────────────────────────────────────────
-  lines.push('');
-  lines.push('[4] CONNECTIVITY CHECK');
-  lines.push(sep);
-  const isNet = await checkInternet();
-  if (isNet) {
-    lines.push(ok('Internet: CONNECTED'));
-    // Supabase ping
-    try {
-      const settings = { ...readJSON(SETTINGS_FILE, {}), supabaseUrl: authPublicConfig.url, supabaseKey: authPublicConfig.key };
-      if (settings.supabaseUrl && settings.supabaseKey) {
-        const pingUrl = `${settings.supabaseUrl}/rest/v1/`;
-        const result  = await new Promise((resolve) => {
-          const urlObj  = new URL(pingUrl);
-          const req = require('https').get({
-            hostname: urlObj.hostname,
-            path: urlObj.pathname,
-            headers: { 'apikey': settings.supabaseKey },
-            timeout: 5000,
-          }, (res) => resolve({ status: res.statusCode }));
-          req.on('error', (e) => resolve({ status: 0, error: e.message }));
-          req.on('timeout', () => { req.destroy(); resolve({ status: 0, error: 'timeout' }); });
-        });
-        if (result.status >= 200 && result.status < 500) {
-          lines.push(ok(`Supabase: REACHABLE (HTTP ${result.status})`));
-        } else {
-          lines.push(warn(`Supabase: Status ${result.status || result.error}`));
-        }
-      } else {
-        lines.push(warn('Supabase URL/Key settings mein configure nahi hai'));
-      }
-    } catch (e) {
-      lines.push(err(`Supabase check fail: ${e.message}`));
-    }
-  } else {
-    lines.push(warn('Internet: OFFLINE — Supabase check skip kiya'));
-  }
-
-  // ── 5. SETTINGS CHECK ────────────────────────────────────────────────────
-  lines.push('');
-  lines.push('[5] SETTINGS CHECK');
-  lines.push(sep);
-  try {
-    const s = readJSON(SETTINGS_FILE, {});
-    lines.push(info(`Clinic Name  : ${s.centerName || '(blank)'}`));
-    lines.push(info(`Doctor Name  : ${s.doctorName || '(blank)'}`));
-    lines.push(info(`Auto Sync    : ${s.autoSync ? 'ON' : 'OFF'}`));
-    lines.push(info(`Supabase URL : ${s.supabaseUrl ? s.supabaseUrl.slice(0,40)+'...' : '(not set)'}`));
-    lines.push(info(`Supabase Key : ${s.supabaseKey ? '****' + s.supabaseKey.slice(-8) : '(not set)'}`));
-    if (!s.centerName) lines.push(warn('Clinic name khali hai — Settings mein bharein'));
-    if (!s.supabaseUrl || !s.supabaseKey) lines.push(warn('Supabase config missing — cloud sync nahi hoga'));
-  } catch (e) {
-    lines.push(err(`Settings read fail: ${e.message}`));
-  }
-
-  // ── 6. LOG FILES CHECK ───────────────────────────────────────────────────
-  lines.push('');
-  lines.push('[6] LOG FILES (last 3 days)');
-  lines.push(sep);
-  try {
-    const logDir = path.join(BACKUP_DIR, 'logs');
-    if (!fs.existsSync(logDir)) {
-      lines.push(warn('Log folder nahi mila'));
-    } else {
-      const logFiles = fs.readdirSync(logDir)
-        .filter(f => f.endsWith('.log'))
-        .sort()
-        .slice(-3)
-        .reverse();
-      if (!logFiles.length) {
-        lines.push(info('Abhi tak koi log file nahi bani'));
-      } else {
-        for (const lf of logFiles) {
-          const lPath = path.join(logDir, lf);
-          const lSize = (fs.statSync(lPath).size / 1024).toFixed(1);
-          const content = fs.readFileSync(lPath, 'utf-8');
-          const errCount  = (content.match(/\[ERROR\]/g) || []).length;
-          const warnCount = (content.match(/\[WARN\]/g)  || []).length;
-          const status = errCount > 0 ? err : warnCount > 0 ? warn : ok;
-          lines.push(status(`${lf} | Size: ${lSize} KB | Errors: ${errCount} | Warnings: ${warnCount}`));
-
-          // Last error extract karo
-          if (errCount > 0) {
-            const lastErr = content.split('[ERROR]').slice(-1)[0]?.split('─'.repeat(10))[0]?.trim()?.slice(0, 200);
-            if (lastErr) lines.push(`       Last Error: ${lastErr}`);
-          }
-        }
-      }
-    }
-  } catch (e) {
-    lines.push(err(`Log files check fail: ${e.message}`));
-  }
-
-  // ── 7. SAFETY SNAPSHOT CHECK ─────────────────────────────────────────────
-  lines.push('');
-  lines.push('[7] DAILY SAFETY SNAPSHOTS');
-  lines.push(sep);
-  try {
-    if (!fs.existsSync(SAFETY_SNAPSHOT_ROOT)) {
-      lines.push(warn('Snapshot folder exist nahi karta'));
-    } else {
-      const snaps = fs.readdirSync(SAFETY_SNAPSHOT_ROOT).sort().reverse().slice(0, 5);
-      if (!snaps.length) {
-        lines.push(warn('Koi snapshot nahi mila abhi tak'));
-      } else {
-        const today2 = new Date().toISOString().slice(0, 10);
-        if (snaps[0] === today2) {
-          lines.push(ok(`Aaj ka snapshot le liya gaya: ${snaps[0]}`));
-        } else {
-          lines.push(warn(`Aaj ka snapshot nahi mila. Last: ${snaps[0]}`));
-        }
-        for (const s of snaps) {
-          lines.push(info(`  Snapshot: ${s}`));
-        }
-      }
-    }
-  } catch (e) {
-    lines.push(err(`Snapshot check fail: ${e.message}`));
-  }
-
-  // ── 8. APP HEALTH ────────────────────────────────────────────────────────
-  lines.push('');
-  lines.push('[8] APP HEALTH');
-  lines.push(sep);
-  lines.push(ok(`Main process: RUNNING (PID: ${process.pid})`));
-  lines.push(ok(`App ready: YES`));
-  lines.push(ok(`Window: ${mainWindow && !mainWindow.isDestroyed() ? 'OPEN' : 'CLOSED'}`));
-  lines.push(info(`Memory: ${(process.memoryUsage().rss / 1024 / 1024).toFixed(1)} MB`));
-  lines.push(info(`Uptime: ${Math.round(process.uptime())} seconds`));
-
-  // ── 9. IPC HANDLER VERIFICATION ──────────────────────────────────────────
-  // Preload.js mein expose kiye gaye channels ko verify karo
-  // Error "No handler registered for X" ka pata lagao
-  lines.push('');
-  lines.push('[9] IPC HANDLER CHECK');
-  lines.push(sep);
-  try {
-    // Ye sare channels preload.js mein expose hain — main.js mein hone chahiye
-    const requiredChannels = [
-      'auth:login', 'auth:check', 'auth:logout',
-      'db:savePatient', 'db:getAllPatients', 'db:searchPatient', 'db:searchPatients',
-      'db:saveBill', 'db:getBills',
-      'db:saveReport', 'db:getReports',
-      'db:saveXray', 'db:getXrays', 'db:copyXrayImage',
-      'db:saveFractureCase', 'db:getFractureCases', 'db:updateFractureCase',
-      'db:getSettings', 'db:saveSettings',
-      'db:getPending', 'db:clearPending', 'db:markSynced', 'db:syncNow',
-      'app:isOnline', 'db:getStats',
-      'shell:openFolder', 'shell:print',
-      'app:getBackupDir', 'app:getXraysDir',
-      'backup:getDir', 'backup:writeJson', 'backup:writeBinary', 'backup:list', 'backup:openFolder',
-      'log:rendererError', 'log:getDir', 'log:getSnapshotDir', 'log:openFolder',
-      'app:sendSMS',
-      'app:runDiagnostics', 'app:nuclearIndexedDBReset',
-      'app:getVersion', 'app:checkForUpdate', 'app:downloadUpdate', 'app:installUpdate', 'app:openExternal',
-    ];
-
-
-    // Electron ipcMain.eventNames() IPC handle channels return nahi karta
-    // Log-based check zyada reliable hai — section [10] mein missing handlers detect hote hain
-    lines.push(ok(`Sabhi ${requiredChannels.length} IPC channels configured hain`));
-
-    // Known missing check — log file se "No handler registered" error dhundho
-    const logDir2 = path.join(BACKUP_DIR, 'logs');
-    if (fs.existsSync(logDir2)) {
-      const logFiles2 = fs.readdirSync(logDir2).filter(f => f.endsWith('.log')).sort().slice(-3);
-      const missingHandlers = new Set();
-      for (const lf of logFiles2) {
-        const content = fs.readFileSync(path.join(logDir2, lf), 'utf-8');
-        const matches = content.matchAll(/No handler registered for '([^']+)'/g);
-        for (const m of matches) missingHandlers.add(m[1]);
-      }
-      if (missingHandlers.size > 0) {
-        for (const ch of missingHandlers) {
-          lines.push(err(`IPC MISSING (log se mila): '${ch}' — main.js mein ipcMain.handle('${ch}', ...) add karo`));
-        }
-      }
-    }
-  } catch (e) {
-    lines.push(warn(`IPC check skip: ${e.message}`));
-  }
-
-  // ── 10. SMART LOG ANALYSIS — DEEP SCAN ──────────────────────────────────
-  // Ye section log files ko deeply scan karta hai:
-  // - Kaunse errors baar baar aa rahe hain (top errors)
-  // - Kaunsi file/function se aa rahe hain
-  // - Kya impact hoga system par
-  // - Fix kaise karein
-  lines.push('');
-  lines.push('[10] SMART LOG ANALYSIS — DEEP ERROR SCAN');
-  lines.push(sep);
-
-  try {
-    const logDir3 = path.join(BACKUP_DIR, 'logs');
-    if (!fs.existsSync(logDir3)) {
-      lines.push(warn('Log folder nahi mila — abhi tak koi log nahi bani'));
-    } else {
-      const logFiles3 = fs.readdirSync(logDir3)
-        .filter(f => f.endsWith('.log'))
-        .sort()
-        .slice(-3) // last 3 days
-        .reverse();
-
-      if (!logFiles3.length) {
-        lines.push(info('Koi log file nahi mili abhi tak'));
-      } else {
-        // ── Known error patterns with diagnosis ──────────────────────────
-        const knownPatterns = KNOWN_ERROR_PATTERNS;
-
-        // ── Scan each log file ──────────────────────────────────────────
-        const foundIssues = new Map(); // pattern name -> { count, files, samples }
-
-        for (const lf of logFiles3) {
-          const lPath = path.join(logDir3, lf);
-          let content = '';
-          try { content = fs.readFileSync(lPath, 'utf-8'); } catch { continue; }
-
-          for (const pattern of knownPatterns) {
-            const matches = content.match(pattern.regex) || [];
-            if (matches.length > 0) {
-              if (!foundIssues.has(pattern.name)) {
-                foundIssues.set(pattern.name, { pattern, count: 0, files: [], sample: '' });
-              }
-              const issue = foundIssues.get(pattern.name);
-              issue.count += matches.length;
-              issue.files.push(`${lf} (${matches.length}x)`);
-
-              // Sample — context ke saath first occurrence nikalo
-              if (!issue.sample) {
-                const idx = content.search(pattern.regex);
-                if (idx >= 0) {
-                  issue.sample = content.slice(Math.max(0, idx - 50), idx + 300)
-                    .split('\n').slice(0, 6).join('\n').trim();
-                }
-              }
-            }
-          }
-
-          // ── Unknown errors — patterns ke bahar jo ERROR hain ──────────
-          // Ek top-5 unknown errors list banaao
-        }
-
-        if (foundIssues.size === 0) {
-          lines.push(ok('Log files mein koi known issue nahi mila — sab theek lag raha hai!'));
-        } else {
-          lines.push(info(`${foundIssues.size} issues mili hain log files mein:`));
-          let issueNum = 1;
-
-          for (const [name, issue] of foundIssues) {
-            const p = issue.pattern;
-            lines.push('');
-            lines.push(`  ┌─ ISSUE #${issueNum++}: ${name}`);
-            lines.push(`  │  Occurrences : ${issue.count}x (${issue.files.join(', ')})`);
-            lines.push(`  │  Source File : ${p.source}`);
-            lines.push(`  │  Root Cause  : ${p.rootCause}`);
-            lines.push(`  │  Impact      : ${p.impact}`);
-            lines.push(`  │  Fix`);
-            for (const fixLine of p.fix.split('\n')) {
-              lines.push(`  │    ${fixLine}`);
-            }
-            if (issue.sample) {
-              lines.push(`  │  Sample Log  :`);
-              for (const sl of issue.sample.split('\n').slice(0, 4)) {
-                lines.push(`  │    ${sl.trim()}`);
-              }
-            }
-            lines.push(`  └${'─'.repeat(66)}`);
-          }
-        }
-
-        // ── Unknown / uncategorized errors ──────────────────────────────
-        lines.push('');
-        lines.push('  — Uncategorized Errors (top 5 by frequency) —');
-        try {
-          const allErrorLines = [];
-          for (const lf of logFiles3) {
-            const content = fs.readFileSync(path.join(logDir3, lf), 'utf-8');
-            // ERROR blocks nikalo
-            const blocks = content.split('─'.repeat(20));
-            for (const block of blocks) {
-              if (block.includes('[ERROR]') && !knownPatterns.some(p => block.match(p.regex))) {
-                // Short summary nikalo
-                const msgLine = block.split('\n').find(l => l.includes('Message:') || l.includes('[ERROR]'));
-                if (msgLine) allErrorLines.push(msgLine.trim().slice(0, 120));
-              }
-            }
-          }
-
-          // Frequency count
-          const freq = {};
-          for (const line of allErrorLines) {
-            const key = line.replace(/\d+/g, 'N').slice(0, 80); // normalize numbers
-            freq[key] = (freq[key] || 0) + 1;
-          }
-          const topUnknown = Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0, 5);
-
-          if (topUnknown.length === 0) {
-            lines.push(ok('  Koi uncategorized error nahi mili'));
-          } else {
-            for (const [msg, count] of topUnknown) {
-              lines.push(warn(`  ${count}x — ${msg}`));
-            }
-          }
-        } catch (e2) {
-          lines.push(info(`  Unknown error scan fail: ${e2.message}`));
-        }
-
-        // ── ✅ NAYI CHECK: LOOP DETECTION ─────────────────────────────────
-        // Agar koi ek hi log line 60 second ke andar 15+ baar repeat ho rahi
-        // hai, to ye ek loop bug ka pakka signal hai (jaisa infinite-refetch
-        // wala bug tha) — chahe wo error ho ya sirf info/warning.
-        lines.push('');
-        lines.push('  — Loop Detection (same message baar-baar repeat) —');
-        try {
-          const today3 = logFiles3[0]; // sabse recent log file
-          if (today3) {
-            const content = fs.readFileSync(path.join(logDir3, today3), 'utf-8');
-            // Har line se timestamp + normalized message nikalo
-            const entries = [];
-            const lineRe = /\[(\d{2}:\d{2}:\d{2})\][^\n]*?(?:\]\s*)([^\n]{10,100})/g;
-            let m;
-            while ((m = lineRe.exec(content)) !== null) {
-              entries.push({ time: m[1], msg: m[2].replace(/\d+/g, 'N').trim() });
-            }
-            // Same message, thodi der ke andar, kitni baar aayi — count karo
-            const msgTimeMap = new Map();
-            for (const e of entries) {
-              if (!msgTimeMap.has(e.msg)) msgTimeMap.set(e.msg, []);
-              msgTimeMap.get(e.msg).push(e.time);
-            }
-            let loopFound = false;
-            for (const [msg, times] of msgTimeMap) {
-              if (times.length >= 15) {
-                // Check karo ki ye 60 second ke andar hui ya poore din mein spread thi
-                const toSec = (t) => { const [h, mi, s] = t.split(':').map(Number); return h * 3600 + mi * 60 + s; };
-                const secs = times.map(toSec).sort((a, b) => a - b);
-                const span = secs[secs.length - 1] - secs[0];
-                if (span > 0 && times.length / (span / 60 || 1) >= 10) { // ~10+ per minute
-                  loopFound = true;
-                  lines.push(err(`LOOP DETECTED: "${msg}" — ${times.length}x in ${span}s (${(times.length / (span/60)).toFixed(0)}/min)`));
-                  lines.push(`       └─ Ye ek loop/infinite-retry bug ho sakta hai — jis feature se ye message aa raha hai use turant check karo`);
-                }
-              }
-            }
-            if (!loopFound) lines.push(ok('  Koi repeat-loop pattern nahi mila — normal hai'));
-          } else {
-            lines.push(info('  Koi log file nahi mili loop check ke liye'));
-          }
-        } catch (e3) {
-          lines.push(info(`  Loop detection skip: ${e3.message}`));
-        }
-      }
-    }
-  } catch (e) {
-    lines.push(err(`Smart log analysis fail: ${e.message}`));
-  }
-
-  // ── FINAL SUMMARY ────────────────────────────────────────────────────────
-  const fullText  = lines.join('\n');
-  const errCount  = (fullText.match(/❌/g) || []).length;
-  const warnCount = (fullText.match(/⚠️/g) || []).length;
-  const okCount   = (fullText.match(/✅/g) || []).length;
-
-  const summary = [
-    '',
-    sep,
-    'DIAGNOSTIC SUMMARY',
-    sep,
-    `✅ Pass    : ${okCount}`,
-    `⚠️  Warnings: ${warnCount}`,
-    `❌ Errors  : ${errCount}`,
-    '',
-    errCount > 0
-      ? '🚨 CRITICAL ERRORS HAIN — Section [10] mein fix details dekho'
-      : warnCount > 0
-        ? '⚠️  Kuch warnings hain — review karo'
-        : '🎉 Sab theek lag raha hai!',
-    '',
-    `Report generated: ${ts()}`,
-    sep,
-  ];
-
-  const reportText = fullText + '\n' + summary.join('\n');
-
-  // Report file save karo
-  try {
-    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
-    const reportFile = path.join(BACKUP_DIR, `diagnostic_report_${new Date().toISOString().slice(0,10)}.txt`);
-    fs.writeFileSync(reportFile, reportText, 'utf-8');
-    logger.logInfo('diagnostics', `Report save hui: ${reportFile}`);
-    return {
-      success:   true,
-      reportPath: reportFile,
-      errors:    errCount,
-      warnings:  warnCount,
-      passed:    okCount,
-      text:      reportText,
-    };
-  } catch (e) {
-    return { success: false, error: e.message, text: reportText };
-  }
-});
+function requireDiagnosticAdmin(){if(access.getPrincipal()?.role!=='admin')throw Error('Administrator login required');}
+ipcMain.handle('app:runDiagnostics', async (_event,options) => {requireDiagnosticAdmin();const epoch=authGeneration;try{const result=await getDiagnostics().run({mode:options?.mode});requireDiagnosticAdmin();if(epoch!==authGeneration)throw Error('Login changed during diagnostics');return result;}catch(error){logger.logError('diagnostics',error.message,error);return {success:false,error:'DIAG-001: Report could not complete/save. Check disk and logs.'};}});
+ipcMain.handle('diagnostics:history', () => {requireDiagnosticAdmin();return getDiagnostics().history();});
+ipcMain.handle('diagnostics:openReport', async (_event,name) => {requireDiagnosticAdmin();const error=await shell.openPath(getDiagnostics().reportFile(name));if(error)throw Error(error);return {success:true};});
+// Preserve the old notification action, but never open an arbitrary renderer-supplied path.
+ipcMain.handle('bug:openDetail', async () => {requireDiagnosticAdmin();const report=await getDiagnostics().run({mode:'quick'});await shell.openPath(getDiagnostics().reportFile(report.reportName));return {success:true};});
 
 // ─── APP INFO / DIAGNOSTICS (About tab + crash logging) ──────────────────
 ipcMain.handle('app:getVersion', async () => ({
@@ -1971,13 +1251,10 @@ ipcMain.handle('app:openExternal', async (_e, url) => {
   return { success: true };
 });
 
-ipcMain.handle('log:rendererError', async (_e, { level, message, stack, source } = {}) => {
-  // ── BUG FIX: pehle hamesha logError() call hoti thi — INFO/WARN bhi ERROR ban jaate the ──
-  const text = stack || message || 'Unknown renderer error';
-  const src  = source || 'renderer';
-  if (level === 'info')       logger.logInfo(src, text);
-  else if (level === 'warn')  logger.logWarn(src, text);
-  else                        logger.logError(src, text); // 'error' ya kuch bhi
+ipcMain.handle('log:rendererError', async (_e, input = {}) => {
+  // Merge message AND stack; one structured event per error. Payload fields are sanitized in logger.
+  logger.record({level:input.level,source:input.source||'renderer',message:input.message,
+    stack:input.stack,detail:input.detail,action:input.action,code:input.code,route:input.route});
   return { success: true };
 });
 
@@ -2065,6 +1342,10 @@ app.on('before-quit', () => {
 
 app.on('web-contents-created', (_e, contents) => {
   contents.on('new-window', (e) => e.preventDefault());
+  contents.on('did-fail-load', (_event,code,_description,_url,isMainFrame) => {
+    if(isMainFrame&&code!==-3)logger.record({level:'error',source:'renderer-load',code:'UI-005',message:'Main screen failed to load',detail:{nativeCode:code}});
+  });
+  contents.on('unresponsive',()=>logger.record({level:'error',source:'renderer-health',code:'UI-006',message:'Renderer became unresponsive'}));
 });
 
 // Renderer crash ya hang ho jaaye (e.g. out-of-memory, GPU crash) to bhi

@@ -1,3 +1,4 @@
+import { reportRuntimeIssue } from "@/lib/clientLogger";
 import FamilyProfile from "@/pages/FamilyProfile";
 import { FamilyDeepLinks } from "@/components/FamilyDeepLinks";
 import FollowUps from "@/pages/FollowUps";
@@ -17,7 +18,7 @@ class ErrorBoundary extends React.Component<
     return { hasError: true, error: error?.message || String(error) };
   }
   componentDidCatch(error: any, info: any) {
-    console.error("App crash:", error, info);
+    reportRuntimeIssue({source:"react-boundary",code:"UI-004",message:error?.message||"React screen failed",stack:error?.stack,detail:{componentStack:info?.componentStack}});
     const stack = info?.componentStack || "";
     this.setState(s => ({ error: s.error + "\n\nComponent Stack:" + stack.slice(0, 500) }));
   }

@@ -1290,6 +1290,7 @@ const filteredPatients = useMemo(() => {
                   {renderPaymentSection()}
                   <Button
                     type="submit"
+                    data-diagnostic-action="save-bill"
                     className="w-full"
                     disabled={addBill.isPending || isSending}
                   >
@@ -1408,7 +1409,7 @@ const filteredPatients = useMemo(() => {
               {renderDoctorSelect()}
               {renderServiceForm()}<div className="space-y-1"><Label htmlFor="bill-edit-reason">बिल बदलने का कारण *</Label><Input id="bill-edit-reason" value={editReason} onChange={e => setEditReason(e.target.value)} required placeholder="जैसे गलत रेट सुधारना" /></div>
               {renderPaymentSection()}
-              <Button type="submit" className="w-full" disabled={updateBill.isPending || isSending}>
+              <Button data-diagnostic-action="update-bill" type="submit" className="w-full" disabled={updateBill.isPending || isSending}>
                 {isSending
                   ? "Saving & sending..."
                   : updateBill.isPending

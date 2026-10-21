@@ -20,7 +20,7 @@ export function BugAlertWatcher() {
         action: (
           <ToastAction
             altText="View More"
-            onClick={() => w.electron?.openBugDetail?.(payload.detailPath)}
+            onClick={() => { void w.electron?.openBugDetail?.(payload.detailPath)?.catch?.(() => {}); }}
           >
             View More
           </ToastAction>

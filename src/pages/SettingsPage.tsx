@@ -1,3 +1,4 @@
+import { DiagnosticsPanel } from "@/components/DiagnosticsPanel";
 import { CloudSyncConnect } from "@/components/CloudSyncConnect";
 import { supabase } from "@/integrations/supabase/client";
 import { useState, useEffect } from "react";
@@ -82,11 +83,6 @@ export default function SettingsPage() {
   const [weeklyOn,     setWeeklyOn]       = useState(isWeeklyBackupEnabled());
   const [backupFiles,  setBackupFiles]    = useState<{ name: string; size: number; mtime: number }[]>([]);
   const [backupDir,    setBackupDir]      = useState<string | null>(null);
-
-  // ── Diagnostics ──
-  const [diagRunning,  setDiagRunning]  = useState(false);
-  const [diagResult,   setDiagResult]   = useState<null | { errors: number; warnings: number; passed: number; reportPath?: string; text: string }>(null);
-  const [nuclearRunning, setNuclearRunning] = useState(false);
 
   // ── About ──
   const [appVersionInfo, setAppVersionInfo] = useState<{ version: string; electron: string; node: string; platform: string } | null>(null);
@@ -218,33 +214,7 @@ export default function SettingsPage() {
     await (window as any).electron?.openSafetySnapshotFolder?.();
   };
 
-  const handleRunDiagnostics = async () => {
-    setDiagRunning(true);
-    setDiagResult(null);
-    try {
-      const result = await (window as any).electron?.runDiagnostics?.();
-      if (result?.success === false && result?.error) {
-        toast({ title: "Diagnostic Error", description: result.error, variant: "destructive" });
-      }
-      setDiagResult(result);
-    } catch (e: any) {
-      toast({ title: "Error", description: e?.message || "Diagnostic fail", variant: "destructive" });
-    } finally {
-      setDiagRunning(false);
-    }
-  };
 
-  const handleNuclearReset = async () => {
-    setNuclearRunning(true);
-    try {
-      const result = await (window as any).electron?.nuclearIndexedDBReset?.();
-      if (!result?.success) throw new Error(result?.error || "Storage reset disabled to protect offline data");
-      // App restart ho jaayega — ye code nahi chalega
-    } catch (e: any) {
-      toast({ title: "Reset Error", description: e?.message || "Reset fail hua", variant: "destructive" });
-      setNuclearRunning(false);
-    }
-  };
 
   const refreshBackupInfo = async () => {
     const dir = await getBackupFolderPath();
@@ -1275,173 +1245,7 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
 
-            {isElectron && (
-              <Card className="dash-card">
-                <CardHeader>
-                  <CardTitle style={{ fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <Activity style={{ width: "16px", height: "16px", color: "#6366f1" }} />
-                    🔍 Run Diagnostics — App Self-Check
-                  </CardTitle>
-                </CardHeader>
-                <CardContent style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  <p style={{ fontSize: "12.5px", color: "#5a6a84", lineHeight: 1.6 }}>
-                    Software khud apni saari files, data, internet aur settings check karega —
-                    aur ek detailed <strong>report file</strong> PC pe save karega.
-                    Agar koi error ya bug ho to wahan clearly likha milega.
-                  </p>
-
-                  <Button
-                    onClick={handleRunDiagnostics}
-                    disabled={diagRunning}
-                    style={{
-                      width: "fit-content", gap: "8px", fontSize: "13px",
-                      background: diagRunning ? "#94a3b8" : "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                      border: "none", color: "#fff",
-                    }}
-                  >
-                    {diagRunning
-                      ? <><Loader2 style={{ width: "14px", height: "14px", animation: "spin 1s linear infinite" }} />Checking...</>
-                      : <><Activity style={{ width: "14px", height: "14px" }} />Run Diagnostics</>
-                    }
-                  </Button>
-
-                  {/* ── Result Summary ── */}
-                  {diagResult && !diagRunning && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                      {/* Score card */}
-                      <div style={{
-                        display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px",
-                      }}>
-                        <div style={{ background: "#f0fdf4", border: "1.5px solid #bbf7d0", borderRadius: "10px", padding: "10px", textAlign: "center" }}>
-                          <CheckCircle2 style={{ width: "18px", height: "18px", color: "#16a34a", margin: "0 auto 4px" }} />
-                          <p style={{ fontSize: "20px", fontWeight: 800, color: "#16a34a", margin: 0 }}>{diagResult.passed}</p>
-                          <p style={{ fontSize: "10px", color: "#6b7280", margin: 0 }}>✅ Pass</p>
-                        </div>
-                        <div style={{ background: diagResult.warnings > 0 ? "#fffbeb" : "#f8fafc", border: `1.5px solid ${diagResult.warnings > 0 ? "#fcd34d" : "#e2e8f0"}`, borderRadius: "10px", padding: "10px", textAlign: "center" }}>
-                          <AlertTriangle style={{ width: "18px", height: "18px", color: diagResult.warnings > 0 ? "#d97706" : "#9ca3af", margin: "0 auto 4px" }} />
-                          <p style={{ fontSize: "20px", fontWeight: 800, color: diagResult.warnings > 0 ? "#d97706" : "#9ca3af", margin: 0 }}>{diagResult.warnings}</p>
-                          <p style={{ fontSize: "10px", color: "#6b7280", margin: 0 }}>⚠️ Warnings</p>
-                        </div>
-                        <div style={{ background: diagResult.errors > 0 ? "#fef2f2" : "#f8fafc", border: `1.5px solid ${diagResult.errors > 0 ? "#fca5a5" : "#e2e8f0"}`, borderRadius: "10px", padding: "10px", textAlign: "center" }}>
-                          <XCircle style={{ width: "18px", height: "18px", color: diagResult.errors > 0 ? "#dc2626" : "#9ca3af", margin: "0 auto 4px" }} />
-                          <p style={{ fontSize: "20px", fontWeight: 800, color: diagResult.errors > 0 ? "#dc2626" : "#9ca3af", margin: 0 }}>{diagResult.errors}</p>
-                          <p style={{ fontSize: "10px", color: "#6b7280", margin: 0 }}>❌ Errors</p>
-                        </div>
-                      </div>
-
-                      {/* Status banner */}
-                      <div style={{
-                        padding: "10px 14px", borderRadius: "10px",
-                        background: diagResult.errors > 0 ? "#fef2f2" : diagResult.warnings > 0 ? "#fffbeb" : "#f0fdf4",
-                        border: `1.5px solid ${diagResult.errors > 0 ? "#fca5a5" : diagResult.warnings > 0 ? "#fcd34d" : "#bbf7d0"}`,
-                        fontSize: "13px", fontWeight: 600,
-                        color: diagResult.errors > 0 ? "#dc2626" : diagResult.warnings > 0 ? "#92400e" : "#16a34a",
-                      }}>
-                        {diagResult.errors > 0
-                          ? "🚨 Kuch serious errors hain — report file dekho aur fix karo"
-                          : diagResult.warnings > 0
-                            ? "⚠️ Kuch warnings hain — niche report mein details dekho"
-                            : "🎉 Sab theek hai! Koi error nahi mila"
-                        }
-                      </div>
-
-                      {/* Report text preview */}
-                      <div style={{ position: "relative" }}>
-                        <p style={{ fontSize: "11px", fontWeight: 600, color: "#374151", marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
-                          <FileText style={{ width: "12px", height: "12px" }} />
-                          Report Preview (scroll karke poora dekho):
-                        </p>
-                        <pre style={{
-                          background: "#0f172a", color: "#e2e8f0", fontFamily: "Consolas, monospace",
-                          fontSize: "10.5px", padding: "12px 14px", borderRadius: "10px",
-                          maxHeight: "280px", overflowY: "auto", overflowX: "auto",
-                          whiteSpace: "pre-wrap", lineHeight: 1.7,
-                          border: "1px solid #1e293b",
-                        }}>
-                          {diagResult.text}
-                        </pre>
-                      </div>
-
-                      {/* Report file path */}
-                      {diagResult.reportPath && (
-                        <div style={{
-                          display: "flex", alignItems: "center", gap: "10px",
-                          padding: "10px 14px", borderRadius: "10px",
-                          background: "#f0f9ff", border: "1.5px solid #bae6fd",
-                        }}>
-                          <FileText style={{ width: "14px", height: "14px", color: "#0891b2", flexShrink: 0 }} />
-                          <div style={{ flex: 1 }}>
-                            <p style={{ fontSize: "11px", fontWeight: 600, color: "#0c4a6e", margin: 0 }}>Report File Save Hui:</p>
-                            <p style={{ fontSize: "10.5px", color: "#0369a1", margin: "2px 0 0", wordBreak: "break-all" }}>{diagResult.reportPath}</p>
-                          </div>
-                          <Button
-                            variant="outline" size="sm"
-                            onClick={() => (window as any).electron?.openFolder?.(diagResult.reportPath?.replace(/[^\\]+$/, ""))}
-                            style={{ fontSize: "11px", flexShrink: 0 }}
-                          >
-                            <FolderOpen style={{ width: "12px", height: "12px", marginRight: "4px" }} />
-                            Open
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {isElectron && (
-              <Card className="dash-card">
-                <CardHeader>
-                  <CardTitle style={{ fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <FileWarning style={{ width: "16px", height: "16px", color: "#dc2626" }} />
-                    🔴 Offline Storage Nuclear Reset
-                  </CardTitle>
-                </CardHeader>
-                <CardContent style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  <div style={{
-                    padding: "10px 14px", borderRadius: "10px",
-                    background: "#fef2f2", border: "1.5px solid #fca5a5",
-                  }}>
-                    <p style={{ fontSize: "12.5px", color: "#991b1b", fontWeight: 600, margin: "0 0 6px" }}>
-                      ⚠️ Sirf tab use karo jab app mein ye errors aayein:
-                    </p>
-                    <p style={{ fontSize: "11.5px", color: "#7f1d1d", margin: 0, lineHeight: 1.7 }}>
-                      • "queueGetAll retry bhi fail"<br/>
-                      • "Internal error opening backing store"<br/>
-                      • "Fresh DB bhi nahi khuli"<br/>
-                      • Log file mein 1000+ same errors
-                    </p>
-                  </div>
-
-                  <div style={{
-                    padding: "10px 14px", borderRadius: "10px",
-                    background: "#f0fdf4", border: "1.5px solid #bbf7d0",
-                  }}>
-                    <p style={{ fontSize: "12px", color: "#166534", lineHeight: 1.7, margin: 0 }}>
-                      ✅ <strong>Data bilkul safe rahega</strong> — patients, bills, reports sab Supabase
-                      aur <code style={{ fontSize: "11px" }}>C:\Balaji_Health_Backup\</code> mein hain.<br/>
-                      Sirf local browser cache delete hogi. App restart ke baad data wapas load ho jaayega.
-                    </p>
-                  </div>
-
-                  <Button
-                    onClick={handleNuclearReset}
-                    disabled={nuclearRunning}
-                    style={{
-                      width: "fit-content", gap: "8px", fontSize: "13px",
-                      background: nuclearRunning ? "#94a3b8" : "#dc2626",
-                      border: "none", color: "#fff",
-                    }}
-                  >
-                    {nuclearRunning
-                      ? <><Loader2 style={{ width: "14px", height: "14px", animation: "spin 1s linear infinite" }} />Reset ho raha hai... App band hoga</>
-                      : <><XCircle style={{ width: "14px", height: "14px" }} />Offline DB Reset &amp; Restart</>
-                    }
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
+            {isElectron && <DiagnosticsPanel />}
 
             {isElectron && (
               <Card className="dash-card">
@@ -1454,7 +1258,7 @@ export default function SettingsPage() {
                 <CardContent style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                   <p style={{ fontSize: "12.5px", color: "#5a6a84" }}>
                     Agar app mein kabhi koi error ya crash aaye, uska detail yahan ek log file mein save
-                    ho jaata hai — support ke liye yeh folder share kiya ja sakta hai.
+                    ho jaata hai। Support ke liye pehle diagnostic report nikalein; purane raw logs share karne se pehle sensitive details review karein।
                   </p>
                   {logsDir && (
                     <p style={{ fontSize: "11px", color: "#8a9ab0", wordBreak: "break-all" }}>{logsDir}</p>

@@ -21,6 +21,8 @@ files:
   - family-profile.cjs
   - invoice-document.cjs
   - preload.js
+  - diagnostics.cjs
+  - diagnostic-utils.cjs
   - logger.cjs
   - sqlite-store.cjs
   - sms-outbox.cjs

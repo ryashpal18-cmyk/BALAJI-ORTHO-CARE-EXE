@@ -261,7 +261,7 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     // Invalid legacy entries must stay reviewable, never be acknowledged as sent.
     if (!isValidMobile(mobile)) throw new Error("Invalid SMS recipient; correct or cancel this queued message");
 
-    cLog.info("sync", `SMS bhej raha hai — patient: ${patientName}, type: ${smsType}`);
+    cLog.info("sync", `SMS dispatch started — type: ${smsType}`);
 
     // Upgrade legacy queued messages in place; preserve their recipient/content.
     const messageId = m.payload.messageId || crypto.randomUUID();

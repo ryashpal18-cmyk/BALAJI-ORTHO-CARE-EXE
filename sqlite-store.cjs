@@ -379,8 +379,32 @@ function adjustStock(args) {
     return { ...medicine, stock_quantity: next, _pendingSync: true };
   })();
 }
+// Diagnostic reads are bounded and never alter clinical records or queue state.
+function diagnosticSnapshot({ deep = false } = {}) {
+  const db = getDb();
+  const max = 50000;
+  return db.transaction(() => {
+    const counts = db.prepare('SELECT table_name, count(*) AS n FROM table_cache GROUP BY table_name').all();
+    const raw = db.prepare('SELECT _key, table_name, data FROM table_cache LIMIT ?').all(max);
+    const cache = {}; let malformed = 0;
+    for (const r of raw) { try { (cache[r.table_name] ||= []).push(JSON.parse(r.data)); } catch { malformed++; } }
+    const queueCount = db.prepare('SELECT count(*) AS n FROM mutation_queue').get().n;
+    const queue = []; let malformedQueue = 0;
+    for (const r of db.prepare('SELECT * FROM mutation_queue ORDER BY id LIMIT ?').all(max)) {
+      try { queue.push(rowToMutation(r)); } catch { malformedQueue++; }
+    }
+    // Whitelist operational metadata; never export saved credentials or full SMS payloads.
+    const meta = {};
+    for (const key of ['last-cloud-sync-at', 'whatsapp:invoice-jobs', 'whatsapp:settings']) meta[key] = metaGet(key);
+    const smsJournal = db.prepare("SELECT value FROM meta WHERE key LIKE 'sms-dispatch:%' LIMIT ?").all(max).map(r => {try{return JSON.parse(r.value)?.state}catch{return 'invalid'}});
+    return { counts, cache, queue, queueCount:Number(queueCount), malformed, malformedQueue,
+      truncated: counts.reduce((n,r)=>n+Number(r.n),0)>max || Number(queueCount)>max || smsJournal.length>=max,
+      integrity: db.prepare(deep ? 'PRAGMA integrity_check(20)' : 'PRAGMA quick_check(1)').all(),
+      journalMode: db.prepare('PRAGMA journal_mode').get(), meta, smsJournal };
+  })();
+}
 module.exports = {
-  authorizedBatch, commitBatch, commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
+  diagnosticSnapshot, authorizedBatch, commitBatch, commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
   init, close,
   cacheGetAll, cacheGetRow, cacheSetRows, cacheReplaceTable, cacheUpsertRow, cacheDeleteRow, cacheReplaceRowKey,
   queueAdd, queueGetAll, queueRemove, queueUpdate,
