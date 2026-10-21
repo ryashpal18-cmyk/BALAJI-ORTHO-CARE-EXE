@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+env:
+  PUPPETEER_SKIP_DOWNLOAD: "true"
 permissions:
   contents: write
 concurrency:
@@ -43,6 +45,9 @@ jobs:
           node tests/core-offline.cjs
           node tests/billing-catalog.cjs
           node tests/clinic-updates.cjs
+          node tests/pc-family-whatsapp.cjs
+      - name: Check native QR invoice PDF
+        run: npx --no-install electron tests/invoice-pdf-smoke.cjs
       - name: Bump patch version
         id: bump
         shell: bash

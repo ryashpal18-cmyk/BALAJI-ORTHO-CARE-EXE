@@ -12,8 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { UserPlus, Search, FileText, Printer, Download, MessageCircle, Trash2 } from "lucide-react";
-import { useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useRef, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAddPatient, useSearchPatients, useAddPrescription, usePatients, useDeletePatient } from "@/hooks/useDatabase";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -89,6 +89,7 @@ function buildPrescriptionHTML(patient: any, rxForm: any, advice: string) {
 
 export default function OPD() {
   const navigate = useNavigate();
+  const familyLocation = useLocation();
   const [advice, setAdvice] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [regForm, setRegForm] = useState({ name: "", mobile: "", age: "", gender: "", address: "" });
@@ -101,6 +102,10 @@ export default function OPD() {
     setExistingPatient(patient); setNewFamilyMember(false);
     setRegForm(p => ({ ...p, name:patient.name || "", age:patient.age == null ? "" : String(patient.age), gender:patient.gender || "", address:patient.address || "" }));
   };
+  useEffect(() => {
+    const mobile = (familyLocation.state as any)?.familyMobile;
+    if (mobile) {setRegForm(p => ({...p,mobile,name:"",age:"",gender:""}));setExistingPatient(null);setNewFamilyMember(true);}
+  }, [familyLocation.key]);
   const [mobileSearchStatus, setMobileSearchStatus] = useState<"idle" | "searching" | "found" | "new">("idle");
   const [rxForm, setRxForm] = useState({ patient_id: "", diagnosis: "", medicines: "", followup_date: "" });
   const [isExporting, setIsExporting] = useState(false);

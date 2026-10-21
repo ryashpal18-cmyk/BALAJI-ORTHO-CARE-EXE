@@ -126,6 +126,7 @@ export default function PatientProfile() {
           <ArrowLeft className="h-4 w-4" /> Back
         </Button>
 
+        <Button variant="outline" onClick={() => navigate(`/family-profile/${id}`)}>Family Profile / QR</Button>
         {/* ── Patient Info Card ── */}
         <div className="border rounded-xl p-5 bg-card shadow-sm">
           {!editing ? (

@@ -4,6 +4,18 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electron', {
 
+  family: {list: () => ipcRenderer.invoke('family:list'), profile: id => ipcRenderer.invoke('family:profile', id)},
+  whatsapp: {
+    status: () => ipcRenderer.invoke('whatsapp:status'),
+    connect: () => ipcRenderer.invoke('whatsapp:connect'),
+    disconnect: () => ipcRenderer.invoke('whatsapp:disconnect'),
+    setAuto: value => ipcRenderer.invoke('whatsapp:auto', value),
+    enqueue: billId => ipcRenderer.invoke('whatsapp:enqueue', billId),
+    review: (id,action) => ipcRenderer.invoke('whatsapp:review', {id,action}),
+    pdf: (billId,save=false) => ipcRenderer.invoke('whatsapp:pdf', {billId,save}),
+    pendingFamily: () => ipcRenderer.invoke('family:pending'),
+  },
+
   // ── Auth ────────────────────────────────────────────────────
   login:     (data)   => ipcRenderer.invoke('auth:login',  data),
   establishSession: (token) => ipcRenderer.invoke('auth:establish', token),

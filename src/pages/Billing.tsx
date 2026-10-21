@@ -1,3 +1,4 @@
+import QRCode from "qrcode";
 import { invoiceNumber } from "@/lib/invoiceNumber";
 import { netBillAmount } from "@/lib/billAmounts";
 import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
@@ -289,6 +290,7 @@ function buildInvoiceHTML(bill: any, logoUrl: string = "/images/logo.png") {
           </tfoot>
         </table>
 
+        ${bill.familyQr ? `<div style="display:flex;align-items:center;gap:10px;padding:6px 0"><img src="${bill.familyQr}" alt="Family Profile QR" style="width:96px;height:96px"/><div style="font-size:9px">Clinic Family Profile<br>Login required</div></div>` : ""}
         <!-- Footer -->
         <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #e2e8f0;padding-top:4px;margin-top:2px;">
           <span style="font-size:7.5px;color:#94a3b8;">📞 +91 8005707783 &nbsp;|&nbsp; Opp Govt Hospital, Bay Pass Road, Khinwara</span>
@@ -299,10 +301,11 @@ function buildInvoiceHTML(bill: any, logoUrl: string = "/images/logo.png") {
   `;
 }
 
-function printInvoice(bill: any) {
+async function printInvoice(bill: any) {
   const logoUrl = window.location.origin + "/images/logo.png";
   const win = window.open("", "_blank", "width=900,height=700");
   if (!win) return;
+  try { bill = {...bill, familyQr:await QRCode.toDataURL("balajiclinic://family/"+String(bill.patient_id).replace(/^local_/,""),{width:180,margin:4})}; } catch {win.close();toast({title:"QR नहीं बना; दोबारा कोशिश करें",variant:"destructive"});return;}
   const invoiceHTML = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Invoice – ${(bill.patients as any)?.name || "Patient"}</title>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
@@ -354,10 +357,11 @@ function printInvoice(bill: any) {
   win.document.close();
 }
 
-function previewInvoice(bill: any) {
+async function previewInvoice(bill: any) {
   const logoUrl = window.location.origin + "/images/logo.png";
   const win = window.open("", "_blank", "width=700,height=900");
   if (!win) return;
+  try { bill = {...bill, familyQr:await QRCode.toDataURL("balajiclinic://family/"+String(bill.patient_id).replace(/^local_/,""),{width:180,margin:4})}; } catch {win.close();toast({title:"QR नहीं बना; दोबारा कोशिश करें",variant:"destructive"});return;}
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Preview – ${(bill.patients as any)?.name || "Patient"}</title>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
@@ -380,6 +384,7 @@ async function getBase64Image(url: string): Promise<string> {
 
 async function generateAndUploadPDF(bill: any): Promise<string | null> {
   const logoUrl = await getBase64Image(window.location.origin + "/images/logo.png");
+  bill = {...bill, familyQr:await QRCode.toDataURL("balajiclinic://family/"+String(bill.patient_id).replace(/^local_/,""),{width:180,margin:4})};
   const html = buildInvoiceHTML(bill, logoUrl);
 
   // ✅ Container bilkul screen se bahar rakho — white screen nahi aayegi
@@ -758,6 +763,12 @@ const filteredPatients = useMemo(() => {
   };
 
   const handleResendWhatsApp = async (bill: any) => {
+    const desktop = (window as any).electron?.whatsapp;
+    if (desktop) {
+      try {await desktop.enqueue(bill.id);toast({title:"QR वाला bill PDF WhatsApp queue में सेव है",description:"WhatsApp page में QR scan करके जोड़ें।"});}
+      catch(e:any){toast({title:"WhatsApp queue",description:e.message,variant:"destructive"});}
+      return;
+    }
     const patient = bill.patients as any;
     const mobile = patient?.mobile || "";
     const patientName = patient?.name || "Patient";
@@ -858,7 +869,12 @@ const filteredPatients = useMemo(() => {
       const mobile = patient?.mobile || "";
       const patientName = patient?.name || "Patient";
 
-      if (mobile) {
+      let whatsappQueued = false;
+      const desktopWhatsApp = (window as any).electron?.whatsapp;
+      if (mobile && desktopWhatsApp) {
+        try {await desktopWhatsApp.enqueue(editingBill.id);whatsappQueued=true;}
+        catch(e:any){toast({title:"बिल सेव है; WhatsApp queue जाँचें",description:e.message,variant:"destructive"});}
+      } else if (mobile) {
         const msg = getWhatsAppBillMessage(
           patientName,
           Math.max(newTotal - discountNum, 0),
@@ -870,7 +886,7 @@ const filteredPatients = useMemo(() => {
         openWhatsAppWeb(mobile, msg);
       }
 
-      toast({ title: "Success", description: "Bill updated & WhatsApp sent!" });
+      toast({ title: "Bill updated", description: whatsappQueued ? "QR वाला PDF WhatsApp queue में सेव है।" : "Bill सेव है। WhatsApp स्थिति अलग से जाँचें।" });
       setEditOpen(false);
       setEditingBill(null);
       setEditReason("");
@@ -1496,11 +1512,12 @@ const filteredPatients = useMemo(() => {
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7"
-                                onClick={() => previewInvoice(bill)}
+                                onClick={() => {const bridge=(window as any).electron?.whatsapp;if(bridge)void bridge.pdf(bill.id,false).catch((e:any)=>toast({title:e.message,variant:"destructive"}));else void previewInvoice(bill);}}
                                 title="Preview Invoice"
                               >
                                 <Eye className="h-3 w-3" />
                               </Button>
+                              {(window as any).electron?.whatsapp && <Button variant="ghost" size="icon" className="h-7 w-7" title="Download QR Bill PDF" onClick={() => void (window as any).electron.whatsapp.pdf(bill.id,true).catch((e:any)=>toast({title:e.message,variant:"destructive"}))}><Download className="h-3 w-3"/></Button>}
                               <Button
                                 variant="ghost"
                                 size="icon"

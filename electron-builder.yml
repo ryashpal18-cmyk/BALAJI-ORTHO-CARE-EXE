@@ -16,6 +16,10 @@ publish:
 files:
   - dist/**
   - main.js
+  - pc-messaging.cjs
+  - whatsapp-service.cjs
+  - family-profile.cjs
+  - invoice-document.cjs
   - preload.js
   - logger.cjs
   - sqlite-store.cjs
@@ -39,3 +43,7 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: "Balaji Ortho Care Connect"
   artifactName: "BalajiOrthoConnect-Setup-${version}.exe"
+
+protocols:
+  - name: Balaji Clinic Family Profile
+    schemes: [balajiclinic]

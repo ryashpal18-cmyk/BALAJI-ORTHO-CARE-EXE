@@ -1,3 +1,4 @@
+import { WhatsAppConnection } from "@/components/WhatsAppConnection";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -86,6 +87,7 @@ export default function WhatsApp() {
           </p>
         </div>
 
+        <WhatsAppConnection />
         <div className="grid gap-6 md:grid-cols-2">
           {/* Send Message Card */}
           <Card>

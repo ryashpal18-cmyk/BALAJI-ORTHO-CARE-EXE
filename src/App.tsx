@@ -1,3 +1,5 @@
+import FamilyProfile from "@/pages/FamilyProfile";
+import { FamilyDeepLinks } from "@/components/FamilyDeepLinks";
 import FollowUps from "@/pages/FollowUps";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
@@ -146,6 +148,7 @@ const App = () => {
               <BugAlertWatcher />
               {locked && <PinLockScreen onUnlock={handleUnlock} />}
               <HashRouter>
+                <FamilyDeepLinks />
                 <Routes>
                   <Route path="/" element={<Login />} />
                   <Route path="/login" element={<Login />} />
@@ -170,6 +173,8 @@ const App = () => {
                   <Route path="/whatsapp" element={<ProtectedRoute><WhatsApp /></ProtectedRoute>} />
                   <Route path="/medicine-master" element={<ProtectedRoute><MedicineMaster /></ProtectedRoute>} />
                   <Route path="/patient-medicine" element={<ProtectedRoute><PatientMedicine /></ProtectedRoute>} />
+                  <Route path="/families" element={<ProtectedRoute><FamilyProfile /></ProtectedRoute>} />
+                  <Route path="/family-profile/:id" element={<ProtectedRoute><FamilyProfile /></ProtectedRoute>} />
                   <Route path="/patient-profile/:id" element={<ProtectedRoute><PatientProfile /></ProtectedRoute>} />
                   <Route path="/prescription" element={<ProtectedRoute><Prescription /></ProtectedRoute>} />
                   <Route path="/ortho" element={<ProtectedRoute><Ortho /></ProtectedRoute>} />
