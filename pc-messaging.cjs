@@ -35,6 +35,14 @@ function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,acces
     if(save){const result=await dialog.showSaveDialog({defaultPath:'Balaji-Bill.pdf',filters:[{name:'PDF',extensions:['pdf']}]});if(result.canceled)return{cancelled:true};fs.copyFileSync(file,result.filePath);return{success:true};}
     const error=await shell.openPath(file);if(error)throw Error(error);return{success:true};
   }));
+  ipcMain.handle('statement:preview',admin((_e,id)=>service.previewStatement(id)));
+  ipcMain.handle('statement:enqueue',admin((_e,{patientId,fingerprint})=>service.enqueueStatement(patientId,fingerprint)));
+  ipcMain.handle('statement:pdf',admin(async(_e,{patientId,fingerprint,save})=>{
+    const file=await service.createStatementPdf(patientId,fingerprint);
+    if(!allowed())throw Error('Administrator login required');
+    if(save){const result=await dialog.showSaveDialog({defaultPath:'Balaji-Patient-Statement.pdf',filters:[{name:'PDF',extensions:['pdf']}]});if(result.canceled)return{cancelled:true};if(!allowed())throw Error('Administrator login required');fs.copyFileSync(file,result.filePath);return{success:true};}
+    const error=await shell.openPath(file);if(error)throw Error(error);return{success:true};
+  }));
   const timer=setInterval(()=>{void service.tick().catch(()=>{});},15000);
   app.on('before-quit',()=>{clearInterval(timer);service.stop();});
   return service;

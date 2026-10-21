@@ -1,6 +1,7 @@
+import { PatientStatement } from "@/components/PatientStatement";
 import { PaymentReceipts } from "@/components/PaymentReceipts";
 import { invoiceNumber } from "@/lib/invoiceNumber";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ export default function PatientProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
 
+  const loadEpoch = useRef(0);
   const [patient,  setPatient]  = useState<any>(null);
   const [bills,    setBills]    = useState<any[]>([]);
   const [physio,   setPhysio]   = useState<any[]>([]);
@@ -43,7 +45,7 @@ export default function PatientProfile() {
   // ── Data fetch — online + offline safe ─────────────────────────────────
   const fetchData = async () => {
     if (!id) return;
-    setLoading(true);
+    const epoch=++loadEpoch.current;
     try {
       // Offline fallback — cache se lo
       const [cachedPatients, cachedBills, cachedPhysio, cachedXrays, cachedMed] = await Promise.all([
@@ -54,6 +56,7 @@ export default function PatientProfile() {
         cacheGetAll("patient_medicines"),
       ]);
 
+      if(epoch!==loadEpoch.current)return;
       const pat = cachedPatients.find((p: any) => p.id.replace(/^local_/, "") === id.replace(/^local_/, "")) || null;
       setPatient(pat);
       setBills(cachedBills.filter((b: any) => b.patient_id?.replace(/^local_/, "") === id.replace(/^local_/, "")).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
@@ -62,14 +65,15 @@ export default function PatientProfile() {
       setMedicines(cachedMed.filter((m: any) => m.patient_id?.replace(/^local_/, "") === id.replace(/^local_/, "")));
       cLog.info("PatientProfile", `Offline cache se data liya — patient: ${id}`);
     } catch (err) {
+      if(epoch!==loadEpoch.current)return;
       cLog.error("PatientProfile", "Data fetch poora fail", err);
       toast({ title: "Error", description: "Data load nahi hua", variant: "destructive" });
     } finally {
-      setLoading(false);
+      if(epoch===loadEpoch.current)setLoading(false);
     }
   };
 
-  useEffect(() => { void fetchData(); const timer = setInterval(fetchData, 5000); return () => clearInterval(timer); }, [id]);
+  useEffect(() => { setLoading(true);setPatient(null);void fetchData(); const timer = setInterval(fetchData, 5000); return () => {loadEpoch.current++;clearInterval(timer);}; }, [id]);
 
   const startEdit = () => {
     setEditName(patient?.name    || "");
@@ -127,6 +131,7 @@ export default function PatientProfile() {
         </Button>
 
         <Button variant="outline" onClick={() => navigate(`/family-profile/${id}`)}>Family Profile / QR</Button>
+        <PatientStatement key={id} patientId={id!} />
         {/* ── Patient Info Card ── */}
         <div className="border rounded-xl p-5 bg-card shadow-sm">
           {!editing ? (

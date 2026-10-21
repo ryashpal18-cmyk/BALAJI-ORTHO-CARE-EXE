@@ -47,8 +47,11 @@ jobs:
           node tests/clinic-updates.cjs
           node tests/pc-family-whatsapp.cjs
           node tests/diagnostics.cjs
+          node tests/patient-statement.cjs
       - name: Check native diagnostic UI and error capture
         run: npx --no-install electron tests/diagnostics-electron.cjs
+      - name: Check native patient statement PDF and UI
+        run: npx --no-install electron tests/patient-statement-electron.cjs
       - name: Check native QR invoice PDF
         run: npx --no-install electron tests/invoice-pdf-smoke.cjs
       - name: Bump patch version

@@ -16,6 +16,12 @@ contextBridge.exposeInMainWorld('electron', {
     pendingFamily: () => ipcRenderer.invoke('family:pending'),
   },
 
+  statement: {
+    preview: patientId => ipcRenderer.invoke('statement:preview', patientId),
+    pdf: (patientId,fingerprint,save=false) => ipcRenderer.invoke('statement:pdf', {patientId,fingerprint,save}),
+    enqueue: (patientId,fingerprint) => ipcRenderer.invoke('statement:enqueue', {patientId,fingerprint}),
+  },
+
   // ── Auth ────────────────────────────────────────────────────
   login:     (data)   => ipcRenderer.invoke('auth:login',  data),
   establishSession: (token) => ipcRenderer.invoke('auth:establish', token),

@@ -379,6 +379,20 @@ function adjustStock(args) {
     return { ...medicine, stock_quantity: next, _pendingSync: true };
   })();
 }
+// Consistent local-only read for a single patient's account; no cloud request or mutation.
+function patientStatementRows(id) {
+  return getDb().transaction(() => {
+    const normalize=value=>String(value||'').replace(/^local_/,'');
+    const resolve=(table,value)=>normalize(metaGet('alias:'+table+':'+value)||value);
+    const target=resolve('patients',id);
+    const candidates=cacheGetAll('patients').filter(p=>resolve('patients',p.id)===target)
+      .sort((a,b)=>Number(!!b._pendingSync)-Number(!!a._pendingSync)||Number(String(a.id).startsWith('local_'))-Number(String(b.id).startsWith('local_')));
+    if(!candidates.length)throw Error('STATEMENT-001: Patient not found on this PC');
+    const patient={...candidates[0],id:target};
+    const bills=cacheGetAll('billing').filter(b=>resolve('patients',b.patient_id)===target).map(b=>({...b,_statementId:resolve('billing',b.id)}));
+    return {patient,bills,lastSyncAt:metaGet('last-cloud-sync-at')};
+  })();
+}
 // Diagnostic reads are bounded and never alter clinical records or queue state.
 function diagnosticSnapshot({ deep = false } = {}) {
   const db = getDb();
@@ -405,7 +419,7 @@ function diagnosticSnapshot({ deep = false } = {}) {
   })();
 }
 module.exports = {
-  diagnosticSnapshot, authorizedBatch, commitBatch, commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
+  patientStatementRows, diagnosticSnapshot, authorizedBatch, commitBatch, commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
   init, close,
   cacheGetAll, cacheGetRow, cacheSetRows, cacheReplaceTable, cacheUpsertRow, cacheDeleteRow, cacheReplaceRowKey,
   queueAdd, queueGetAll, queueRemove, queueUpdate,

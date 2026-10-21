@@ -2,6 +2,7 @@
 const fs=require('fs'),path=require('path'),crypto=require('crypto');
 const {normId,familyNumber,familyLink}=require('./family-profile.cjs');
 const {invoiceDocument}=require('./invoice-document.cjs');
+const {statementForPatient,statementDocument,statementSummary}=require('./patient-statement.cjs');
 function findBrowser() {
   const paths=[process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA].filter(Boolean).flatMap(root=>[path.join(root,'Microsoft','Edge','Application','msedge.exe'),path.join(root,'Google','Chrome','Application','chrome.exe')]);
   return paths.find(file=>fs.existsSync(file));
@@ -36,6 +37,32 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
     const job={id:waiting?.id||crypto.randomUUID(),billId:data.bill.id,patientName:data.patient.name,mobile:familyNumber(data.patient.mobile),fingerprint:data.fingerprint,state:'queued',createdAt:waiting?.createdAt||new Date(now()).toISOString(),attempts:0,error:''};
     save([...list.filter(j=>j.id!==job.id),job]);return job;
   }
+  function statementData(id){const statement=statementForPatient(store,id,now());return {statement,patient:statement.patient,fingerprint:statement.fingerprint};}
+  function previewStatement(id){assertAllowed();return statementSummary(statementData(id).statement);}
+  function enqueueStatement(id,expectedFingerprint){
+    assertAllowed();const data=statementData(id);
+    if(!familyNumber(data.patient.mobile))throw Error('STATEMENT-003: मरीज का सही mobile number चाहिए।');
+    if(!data.statement.rows.length)throw Error('STATEMENT-003: भेजने के लिए कोई सक्रिय bill उपलब्ध नहीं है।');
+    if(!expectedFingerprint||expectedFingerprint!==data.fingerprint)throw Error('STATEMENT-004: हिसाब बदल गया है; फिर preview करके भेजें।');
+    const list=jobs(),samePatient=j=>j.kind==='statement'&&normId(j.patientId)===normId(data.patient.id);
+    if(list.some(j=>samePatient(j)&&['sending','unconfirmed'].includes(j.state)))throw Error('STATEMENT-005: पहले इस मरीज के अनिश्चित WhatsApp परिणाम की जाँच करें।');
+    const same=list.find(j=>samePatient(j)&&j.fingerprint===data.fingerprint&&['sent','queued'].includes(j.state));if(same)return same;
+    const waiting=list.find(j=>samePatient(j)&&['queued','failed'].includes(j.state));
+    const job={id:waiting?.id||crypto.randomUUID(),kind:'statement',patientId:data.patient.id,patientName:data.patient.name,mobile:familyNumber(data.patient.mobile),fingerprint:data.fingerprint,state:'queued',createdAt:new Date(now()).toISOString(),attempts:0,error:''};
+    save([...list.filter(j=>j.id!==job.id),job]);return job;
+  }
+  async function createStatementPdf(id,expectedFingerprint){
+    assertAllowed();const data=statementData(id);
+    if(expectedFingerprint&&expectedFingerprint!==data.fingerprint)throw Error('STATEMENT-004: हिसाब बदल गया है; फिर preview करें।');
+    const bytes=await renderPdf(statementDocument(data.statement));assertAllowed();
+    if(statementData(id).fingerprint!==data.fingerprint)throw Error('STATEMENT-004: PDF बनते समय हिसाब बदला; फिर preview करें।');
+    if(!bytes||Buffer.from(bytes).subarray(0,5).toString()!=='%PDF-')throw Error('STATEMENT-006: PDF नहीं बनी।');
+    const dir=path.join(root,'statement-pdfs');fs.mkdirSync(dir,{recursive:true});
+    const file=path.join(dir,crypto.createHash('sha256').update(data.patient.id+data.fingerprint).digest('hex').slice(0,32)+'.pdf');
+    fs.writeFileSync(file+'.tmp',bytes);fs.renameSync(file+'.tmp',file);return file;
+  }
+  const stillQueued=job=>jobs().some(j=>j.id===job.id&&j.state==='queued'&&j.fingerprint===job.fingerprint);
+  const jobData=job=>job.kind==='statement'?statementData(job.patientId):billData(job.billId);
   function patch(id,values){const list=jobs(),job=list.find(j=>j.id===id);if(job)Object.assign(job,values);save(list);return job;}
   async function createPdf(id){
     assertAllowed();const {bill,patient,fingerprint}=billData(id);
@@ -77,26 +104,30 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
       const job=jobs().find(j=>j.state==='queued'&&(!j.retryAt||j.retryAt<=now()));if(!job)return;
       let handedOff=false;
       try{
-        const current=billData(job.billId),activeClient=client;
-        const pdfPath=await createPdf(job.billId);
-        const fresh=billData(job.billId);
-        if(fresh.fingerprint!==current.fingerprint)throw Error('Bill बदल गया; नवीनतम PDF दोबारा बनेगी');
+        const current=jobData(job),activeClient=client;
+        if(job.kind==='statement'&&job.fingerprint!==current.fingerprint)throw Error('STATEMENT-004: हिसाब बदला है; Patient Profile में फिर preview करके queue करें।');
+        const pdfPath=job.kind==='statement'?await createStatementPdf(job.patientId,job.fingerprint):await createPdf(job.billId);
+        if(!stillQueued(job))return;
+        const fresh=jobData(job);
+        if(fresh.fingerprint!==current.fingerprint)throw Error(job.kind==='statement'?'STATEMENT-004: हिसाब बदला; फिर preview करें।':'Bill बदल गया; नवीनतम PDF दोबारा बनेगी');
         const number=await bounded(activeClient.getNumberId('91'+familyNumber(fresh.patient.mobile)),30000);
+        if(!stillQueued(job))return;
         if(!number) {patch(job.id,{state:'failed',error:'इस नंबर पर WhatsApp account नहीं मिला'});return;}
         assertAllowed();if(client!==activeClient||!ready)throw Error('WhatsApp connection बदल गया');
-        if(billData(job.billId).fingerprint!==fresh.fingerprint)throw Error('Bill या mobile बदला; PDF दोबारा बनेगी');
+        if(jobData(job).fingerprint!==fresh.fingerprint)throw Error(job.kind==='statement'?'STATEMENT-004: हिसाब या mobile बदला; फिर preview करें।':'Bill या mobile बदला; PDF दोबारा बनेगी');
+        if(!stillQueued(job))return;
         const media=mediaFactory?mediaFactory(pdfPath):require('whatsapp-web.js').MessageMedia.fromFilePath(pdfPath);
         patch(job.id,{state:'sending',pdfPath,mobile:familyNumber(fresh.patient.mobile),patientName:fresh.patient.name,fingerprint:fresh.fingerprint,attempts:(job.attempts||0)+1,error:''});
         handedOff=true;
-        const sent=await bounded(activeClient.sendMessage(number._serialized,media,{sendMediaAsDocument:true,caption:`नमस्ते ${fresh.patient.name} जी, Balaji Digital X-Ray & Ortho Care Center का आपका bill PDF संलग्न है।`,waitUntilMsgSent:true}),timeoutMs);
+        const sent=await bounded(activeClient.sendMessage(number._serialized,media,{sendMediaAsDocument:true,caption:`नमस्ते ${fresh.patient.name} जी, Balaji Digital X-Ray & Ortho Care Center का आपका ${job.kind==='statement'?'पूरा account statement':'bill'} PDF संलग्न है।`,waitUntilMsgSent:true}),timeoutMs);
         if(!sent?.id?._serialized)throw Error('WhatsApp acknowledgment नहीं मिला');
         patch(job.id,{state:'sent',messageId:sent.id._serialized,sentAt:new Date(now()).toISOString(),error:''});
-      }catch(e){patch(job.id,{state:handedOff?'unconfirmed':'queued',retryAt:now()+60000,error:handedOff?'परिणाम अनिश्चित है। WhatsApp chat में जाँचें; अपने आप दोबारा नहीं भेजेंगे।':String(e.message||e)});}
+      }catch(e){if(!handedOff&&!stillQueued(job))return;patch(job.id,{state:handedOff?'unconfirmed':job.kind==='statement'&&/STATEMENT-00[124]/.test(String(e.message))?'failed':'queued',retryAt:now()+60000,error:handedOff?'परिणाम अनिश्चित है। WhatsApp chat में जाँचें; अपने आप दोबारा नहीं भेजेंगे।':String(e.message||e)});}
     }finally{busy=false;}
   }
   function setAuto(value){assertAllowed();if(typeof value!=='boolean')throw Error('Invalid setting');store.metaSet(settingsKey,{...settings(),auto:value});return status();}
   function review(id,action){assertAllowed();const job=jobs().find(j=>j.id===id);if(!job||!['unconfirmed','failed','queued'].includes(job.state))throw Error('Job review उपलब्ध नहीं');if(!['sent','retry','cancel'].includes(action))throw Error('Invalid review');patch(id,{state:action==='retry'?'queued':action==='cancel'?'cancelled':'sent',retryAt:0,error:'',reviewedAt:new Date(now()).toISOString(),reviewAction:action});return status();}
   function stop(){stopped=true;ready=false;const old=client;client=null;if(old)void old.destroy().catch(()=>{});}
-  return{connect,disconnect,status,setAuto,enqueue,createPdf,tick,review,stop};
+  return{connect,disconnect,status,setAuto,enqueue,createPdf,previewStatement,enqueueStatement,createStatementPdf,tick,review,stop};
 }
 module.exports={createWhatsAppService,findBrowser};
