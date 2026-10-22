@@ -22,6 +22,14 @@ contextBridge.exposeInMainWorld('electron', {
     enqueue: (patientId,fingerprint) => ipcRenderer.invoke('statement:enqueue', {patientId,fingerprint}),
   },
 
+  monthly: {
+    settings: () => ipcRenderer.invoke('monthly:settings'),
+    saveSettings: input => ipcRenderer.invoke('monthly:saveSettings', input),
+    preview: month => ipcRenderer.invoke('monthly:preview', month),
+    enqueue: input => ipcRenderer.invoke('monthly:enqueue', input),
+    pdf: input => ipcRenderer.invoke('monthly:pdf', input),
+  },
+
   // ── Auth ────────────────────────────────────────────────────
   login:     (data)   => ipcRenderer.invoke('auth:login',  data),
   establishSession: (token) => ipcRenderer.invoke('auth:establish', token),

@@ -43,6 +43,15 @@ function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,acces
     if(save){const result=await dialog.showSaveDialog({defaultPath:'Balaji-Patient-Statement.pdf',filters:[{name:'PDF',extensions:['pdf']}]});if(result.canceled)return{cancelled:true};if(!allowed())throw Error('Administrator login required');fs.copyFileSync(file,result.filePath);return{success:true};}
     const error=await shell.openPath(file);if(error)throw Error(error);return{success:true};
   }));
+  ipcMain.handle('monthly:settings',admin(()=>service.getMonthlySettings()));
+  ipcMain.handle('monthly:saveSettings',admin((_e,input)=>service.saveMonthlySettings(input)));
+  ipcMain.handle('monthly:preview',admin((_e,month)=>service.previewMonthly(month)));
+  ipcMain.handle('monthly:enqueue',admin((_e,input)=>service.enqueueMonthly(input.month,input.fingerprint,input.configId)));
+  ipcMain.handle('monthly:pdf',admin(async(_e,{month,fingerprint,save})=>{
+    const file=await service.createMonthlyPdf(month,fingerprint);if(!allowed())throw Error('Administrator login required');
+    if(save){const r=await dialog.showSaveDialog({defaultPath:'Balaji-Monthly-'+month+'.pdf',filters:[{name:'PDF',extensions:['pdf']}]});if(r.canceled)return{cancelled:true};if(!allowed())throw Error('Administrator login required');fs.copyFileSync(file,r.filePath);return{success:true};}
+    const error=await shell.openPath(file);if(error)throw Error(error);return{success:true};
+  }));
   const timer=setInterval(()=>{void service.tick().catch(()=>{});},15000);
   app.on('before-quit',()=>{clearInterval(timer);service.stop();});
   return service;

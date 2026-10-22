@@ -3,6 +3,7 @@ const fs=require('fs'),path=require('path'),crypto=require('crypto');
 const {normId,familyNumber,familyLink}=require('./family-profile.cjs');
 const {invoiceDocument}=require('./invoice-document.cjs');
 const {statementForPatient,statementDocument,statementSummary}=require('./patient-statement.cjs');
+const monthly=require('./monthly-report.cjs');
 function findBrowser() {
   const paths=[process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA].filter(Boolean).flatMap(root=>[path.join(root,'Microsoft','Edge','Application','msedge.exe'),path.join(root,'Google','Chrome','Application','chrome.exe')]);
   return paths.find(file=>fs.existsSync(file));
@@ -61,8 +62,53 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
     const file=path.join(dir,crypto.createHash('sha256').update(data.patient.id+data.fingerprint).digest('hex').slice(0,32)+'.pdf');
     fs.writeFileSync(file+'.tmp',bytes);fs.renameSync(file+'.tmp',file);return file;
   }
+  const monthlyKey='monthly-account:settings';
+  function monthlySettings(){const s=store.metaGet(monthlyKey);return {mobile:s?.mobile||'',enabled:s?.enabled===true,startMonth:s?.startMonth||null,configId:s?.configId||null};}
+  function getMonthlySettings(){assertAllowed();return monthlySettings();}
+  function saveMonthlySettings(input){
+    assertAllowed();if(typeof input?.enabled!=='boolean')throw Error('MONTHLY-003: Invalid automatic setting');
+    const mobile=familyNumber(input.mobile);if((input.mobile||input.enabled)&&!mobile)throw Error('MONTHLY-003: सही WhatsApp नंबर भरें।');
+    const old=monthlySettings();if(old.mobile===(mobile||'')&&old.enabled===input.enabled)return old;
+    const next={mobile:mobile||'',enabled:input.enabled,startMonth:monthly.monthKey(now()),configId:crypto.randomUUID()};
+    store.metaSet(monthlyKey,next);
+    save(jobs().map(j=>j.kind==='monthly'&&['queued','failed'].includes(j.state)?{...j,state:'cancelled',error:'Monthly report setting/recipient changed; new selection required'}:j));
+    return next;
+  }
+  function monthlyData(month){const report=monthly.monthlyForStore(store,month,now());return {report,patient:{name:'मासिक clinic हिसाब '+month,mobile:monthlySettings().mobile},fingerprint:report.fingerprint};}
+  function previewMonthly(month){assertAllowed();const data=monthlyData(month),config=monthlySettings();return {...monthly.monthlySummary(data.report),mobile:config.mobile,configId:config.configId};}
+  function enqueueMonthly(month,fingerprint,configId,automatic=false){
+    assertAllowed();monthly.validMonth(month);const cfg=monthlySettings();
+    if(!familyNumber(cfg.mobile)||!cfg.configId)throw Error('MONTHLY-003: पहले report प्राप्तकर्ता का WhatsApp नंबर save करें।');
+    if(cfg.configId!==configId)throw Error('MONTHLY-004: Recipient/settings बदली हैं; फिर preview करें।');
+    if(automatic&&!cfg.enabled)throw Error('MONTHLY-004: Automatic report बंद है।');
+    const sameMonth=j=>j.kind==='monthly'&&j.month===month&&j.configId===configId;
+    const list=jobs();if(list.some(j=>sameMonth(j)&&['sending','unconfirmed'].includes(j.state)))throw Error('MONTHLY-005: पहले इसी महीने के अनिश्चित परिणाम की जाँच करें।');
+    let report;
+    if(!automatic){report=monthlyData(month).report;if(!fingerprint||report.fingerprint!==fingerprint)throw Error('MONTHLY-004: हिसाब बदला; फिर preview करें।');}
+    const identity=automatic?'auto:'+month+':'+configId:fingerprint;
+    const prior=list.find(j=>sameMonth(j)&&['queued','sent'].includes(j.state)&&(automatic&&j.automatic||!automatic&&j.fingerprint===identity));if(prior)return prior;
+    const waiting=list.find(j=>sameMonth(j)&&['queued','failed'].includes(j.state));
+    const job={id:waiting?.id||crypto.randomUUID(),kind:'monthly',month,automatic,partial:report?.partial||false,configId,mobile:cfg.mobile,patientName:'मासिक हिसाब '+month,fingerprint:identity,state:'queued',createdAt:new Date(now()).toISOString(),attempts:0,error:''};
+    save([...list.filter(j=>j.id!==job.id),job]);return job;
+  }
+  function scheduleMonthly(){const cfg=monthlySettings();if(!cfg.enabled||!cfg.configId||!cfg.startMonth||!familyNumber(cfg.mobile))return;
+    let created=0;for(const month of monthly.readyMonths(cfg.startMonth,now(),1200)){
+      const exists=jobs().some(j=>j.kind==='monthly'&&j.month===month&&j.configId===cfg.configId&&(j.automatic||['sending','unconfirmed'].includes(j.state)||!j.partial&&['sent','queued'].includes(j.state)));
+      if(!exists){enqueueMonthly(month,null,cfg.configId,true);if(++created>=12)break;}
+    }
+  }
+  function assertMonthlyJob(job){const cfg=monthlySettings();if(cfg.configId!==job.configId||cfg.mobile!==job.mobile||job.automatic&&!cfg.enabled)throw Error('MONTHLY-004: Monthly recipient/settings changed');}
+  async function createMonthlyPdf(month,expectedFingerprint){
+    assertAllowed();const data=monthlyData(month);
+    if(expectedFingerprint&&data.fingerprint!==expectedFingerprint)throw Error('MONTHLY-004: हिसाब बदला; फिर preview करें।');
+    const bytes=await renderPdf(monthly.monthlyDocument(data.report));assertAllowed();
+    if(monthlyData(month).fingerprint!==data.fingerprint)throw Error('MONTHLY-004: PDF बनते समय हिसाब बदला; फिर कोशिश करें।');
+    if(!bytes||Buffer.from(bytes).subarray(0,5).toString()!=='%PDF-')throw Error('MONTHLY-006: PDF नहीं बनी।');
+    const dir=path.join(root,'monthly-pdfs');fs.mkdirSync(dir,{recursive:true});const file=path.join(dir,month+'-'+data.fingerprint.slice(0,24)+'.pdf');
+    fs.writeFileSync(file+'.tmp',bytes);fs.renameSync(file+'.tmp',file);return file;
+  }
   const stillQueued=job=>jobs().some(j=>j.id===job.id&&j.state==='queued'&&j.fingerprint===job.fingerprint);
-  const jobData=job=>job.kind==='statement'?statementData(job.patientId):billData(job.billId);
+  const jobData=job=>job.kind==='monthly'?(assertMonthlyJob(job),monthlyData(job.month)):job.kind==='statement'?statementData(job.patientId):billData(job.billId);
   function patch(id,values){const list=jobs(),job=list.find(j=>j.id===id);if(job)Object.assign(job,values);save(list);return job;}
   async function createPdf(id){
     assertAllowed();const {bill,patient,fingerprint}=billData(id);
@@ -95,6 +141,7 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
     if(stopped||busy||!allowed())return;
     busy=true;
     try{
+      try{scheduleMonthly();}catch(e){error=String(e.message||e);}
       if(settings().auto!==false){
         const since=store.metaGet('whatsapp:started-at');
         for(const bill of store.cacheGetAll('billing'))if(Date.parse(bill.created_at)>=since&&!jobs().some(j=>normId(j.billId)===normId(bill.id)))try{enqueue(bill.id);}catch{}
@@ -105,8 +152,8 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
       let handedOff=false;
       try{
         const current=jobData(job),activeClient=client;
-        if(job.kind==='statement'&&job.fingerprint!==current.fingerprint)throw Error('STATEMENT-004: हिसाब बदला है; Patient Profile में फिर preview करके queue करें।');
-        const pdfPath=job.kind==='statement'?await createStatementPdf(job.patientId,job.fingerprint):await createPdf(job.billId);
+        if((job.kind==='statement'||job.kind==='monthly'&&!job.automatic)&&job.fingerprint!==current.fingerprint)throw Error('STATEMENT-004: हिसाब बदला है; Patient Profile में फिर preview करके queue करें।');
+        const pdfPath=job.kind==='monthly'?await createMonthlyPdf(job.month,current.fingerprint):job.kind==='statement'?await createStatementPdf(job.patientId,job.fingerprint):await createPdf(job.billId);
         if(!stillQueued(job))return;
         const fresh=jobData(job);
         if(fresh.fingerprint!==current.fingerprint)throw Error(job.kind==='statement'?'STATEMENT-004: हिसाब बदला; फिर preview करें।':'Bill बदल गया; नवीनतम PDF दोबारा बनेगी');
@@ -114,20 +161,21 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
         if(!stillQueued(job))return;
         if(!number) {patch(job.id,{state:'failed',error:'इस नंबर पर WhatsApp account नहीं मिला'});return;}
         assertAllowed();if(client!==activeClient||!ready)throw Error('WhatsApp connection बदल गया');
+        if(job.kind==='monthly')assertMonthlyJob(job);
         if(jobData(job).fingerprint!==fresh.fingerprint)throw Error(job.kind==='statement'?'STATEMENT-004: हिसाब या mobile बदला; फिर preview करें।':'Bill या mobile बदला; PDF दोबारा बनेगी');
         if(!stillQueued(job))return;
         const media=mediaFactory?mediaFactory(pdfPath):require('whatsapp-web.js').MessageMedia.fromFilePath(pdfPath);
         patch(job.id,{state:'sending',pdfPath,mobile:familyNumber(fresh.patient.mobile),patientName:fresh.patient.name,fingerprint:fresh.fingerprint,attempts:(job.attempts||0)+1,error:''});
         handedOff=true;
-        const sent=await bounded(activeClient.sendMessage(number._serialized,media,{sendMediaAsDocument:true,caption:`नमस्ते ${fresh.patient.name} जी, Balaji Digital X-Ray & Ortho Care Center का आपका ${job.kind==='statement'?'पूरा account statement':'bill'} PDF संलग्न है।`,waitUntilMsgSent:true}),timeoutMs);
+        const sent=await bounded(activeClient.sendMessage(number._serialized,media,{sendMediaAsDocument:true,caption:`नमस्ते ${fresh.patient.name} जी, Balaji Digital X-Ray & Ortho Care Center का आपका ${job.kind==='monthly'?'मासिक हिसाब '+job.month:job.kind==='statement'?'पूरा account statement':'bill'} PDF संलग्न है।`,waitUntilMsgSent:true}),timeoutMs);
         if(!sent?.id?._serialized)throw Error('WhatsApp acknowledgment नहीं मिला');
         patch(job.id,{state:'sent',messageId:sent.id._serialized,sentAt:new Date(now()).toISOString(),error:''});
-      }catch(e){if(!handedOff&&!stillQueued(job))return;patch(job.id,{state:handedOff?'unconfirmed':job.kind==='statement'&&/STATEMENT-00[124]/.test(String(e.message))?'failed':'queued',retryAt:now()+60000,error:handedOff?'परिणाम अनिश्चित है। WhatsApp chat में जाँचें; अपने आप दोबारा नहीं भेजेंगे।':String(e.message||e)});}
+      }catch(e){if(!handedOff&&!stillQueued(job))return;patch(job.id,{state:handedOff?'unconfirmed':(job.kind==='statement'&&/STATEMENT-00[124]/.test(String(e.message))||job.kind==='monthly'&&(/STATEMENT-002|MONTHLY-00[12]/.test(String(e.message))||!job.automatic&&/STATEMENT-001|MONTHLY-004/.test(String(e.message))))?'failed':'queued',retryAt:now()+60000,error:handedOff?'परिणाम अनिश्चित है। WhatsApp chat में जाँचें; अपने आप दोबारा नहीं भेजेंगे।':String(e.message||e)});}
     }finally{busy=false;}
   }
   function setAuto(value){assertAllowed();if(typeof value!=='boolean')throw Error('Invalid setting');store.metaSet(settingsKey,{...settings(),auto:value});return status();}
   function review(id,action){assertAllowed();const job=jobs().find(j=>j.id===id);if(!job||!['unconfirmed','failed','queued'].includes(job.state))throw Error('Job review उपलब्ध नहीं');if(!['sent','retry','cancel'].includes(action))throw Error('Invalid review');patch(id,{state:action==='retry'?'queued':action==='cancel'?'cancelled':'sent',retryAt:0,error:'',reviewedAt:new Date(now()).toISOString(),reviewAction:action});return status();}
   function stop(){stopped=true;ready=false;const old=client;client=null;if(old)void old.destroy().catch(()=>{});}
-  return{connect,disconnect,status,setAuto,enqueue,createPdf,previewStatement,enqueueStatement,createStatementPdf,tick,review,stop};
+  return{connect,disconnect,status,setAuto,enqueue,createPdf,previewStatement,enqueueStatement,createStatementPdf,getMonthlySettings,saveMonthlySettings,previewMonthly,enqueueMonthly,createMonthlyPdf,tick,review,stop};
 }
 module.exports={createWhatsAppService,findBrowser};

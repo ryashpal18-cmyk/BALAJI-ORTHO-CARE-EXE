@@ -393,6 +393,18 @@ function patientStatementRows(id) {
     return {patient,bills,lastSyncAt:metaGet('last-cloud-sync-at')};
   })();
 }
+// Consistent read of all local account rows. Clinical data is never changed here.
+function monthlyAccountRows() {
+  return getDb().transaction(() => {
+    const norm=v=>String(v||'').replace(/^local_/,'');
+    const resolve=(table,value)=>norm(metaGet('alias:'+table+':'+value)||value);
+    const patients=new Map();
+    for(const p of cacheGetAll('patients').sort((a,b)=>Number(!!b._pendingSync)-Number(!!a._pendingSync)||Number(String(a.id).startsWith('local_'))-Number(String(b.id).startsWith('local_')))) {
+      const id=resolve('patients',p.id);if(!patients.has(id))patients.set(id,{...p,id});
+    }
+    return {patients:[...patients.values()],bills:cacheGetAll('billing').map(b=>({...b,patient_id:resolve('patients',b.patient_id),_statementId:resolve('billing',b.id)}))};
+  })();
+}
 // Diagnostic reads are bounded and never alter clinical records or queue state.
 function diagnosticSnapshot({ deep = false } = {}) {
   const db = getDb();
@@ -419,7 +431,7 @@ function diagnosticSnapshot({ deep = false } = {}) {
   })();
 }
 module.exports = {
-  patientStatementRows, diagnosticSnapshot, authorizedBatch, commitBatch, commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
+  monthlyAccountRows, patientStatementRows, diagnosticSnapshot, authorizedBatch, commitBatch, commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
   init, close,
   cacheGetAll, cacheGetRow, cacheSetRows, cacheReplaceTable, cacheUpsertRow, cacheDeleteRow, cacheReplaceRowKey,
   queueAdd, queueGetAll, queueRemove, queueUpdate,

@@ -21,6 +21,7 @@ files:
   - family-profile.cjs
   - invoice-document.cjs
   - patient-statement.cjs
+  - monthly-report.cjs
   - preload.js
   - diagnostics.cjs
   - diagnostic-utils.cjs
