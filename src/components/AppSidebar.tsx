@@ -3,7 +3,7 @@ import {
   LayoutDashboard, BedDouble, Calendar, Receipt, Activity,
   FileText, BarChart3, Settings, Stethoscope, LogOut,
   MessageCircle, MessageSquare, Pill, Bone, ClipboardList, RefreshCw, FilePlus2, IndianRupee,
-  Package, ShieldCheck, ShieldPlus, Building2, CalendarCheck, Wallet, UserPlus,
+  Package, ShieldCheck, ShieldPlus, Building2, CalendarCheck, Wallet, UserPlus, Search,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import logo from "@/assets/logo.png";
@@ -20,6 +20,7 @@ import { BranchSelector } from "@/components/BranchSelector";
 import { resetCloudConnection } from "@/lib/localSession";
 
 const ALL_MENU_ITEMS = [
+  { title: "Patient Search", url: "/patient-search", icon: Search },
   { title: "Family Profiles", url: "/families", icon: UserPlus },
   { title: "Follow-up List", url: "/follow-ups", icon: Calendar },
   { title: "Dashboard",           url: "/dashboard",           icon: LayoutDashboard },

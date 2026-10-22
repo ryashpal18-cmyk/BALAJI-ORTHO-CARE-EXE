@@ -76,6 +76,7 @@ import WhatsApp from "./pages/WhatsApp";
 import MedicineMaster from "./pages/MedicineMaster";
 import PatientMedicine from "./pages/PatientMedicine";
 import PatientProfile from "./pages/PatientProfile";
+import PatientSearch from "./pages/PatientSearch";
 import Prescription from "./pages/Prescription";
 import Ortho from "./pages/Ortho";
 import RecoveryTracker from "./pages/RecoveryTracker";
@@ -156,6 +157,7 @@ const App = () => {
                   <Route path="/book-appointment" element={<BookAppointment />} />
                   <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                   <Route path="/opd" element={<ProtectedRoute><OPD /></ProtectedRoute>} />
+                  <Route path="/patient-search" element={<ProtectedRoute><PatientSearch /></ProtectedRoute>} />
                   <Route path="/ipd" element={<ProtectedRoute><IPD /></ProtectedRoute>} />
                   <Route path="/appointments" element={<ProtectedRoute><Appointments /></ProtectedRoute>} />
                   <Route path="/products" element={<ProtectedRoute><Products /></ProtectedRoute>} />

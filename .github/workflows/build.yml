@@ -49,12 +49,15 @@ jobs:
           node tests/diagnostics.cjs
           node tests/patient-statement.cjs
           node tests/monthly-report.cjs
+          node tests/patient-directory.cjs
       - name: Check native diagnostic UI and error capture
         run: npx --no-install electron tests/diagnostics-electron.cjs
       - name: Check native patient statement PDF and UI
         run: npx --no-install electron tests/patient-statement-electron.cjs
       - name: Check native monthly report PDF and UI
         run: npx --no-install electron tests/monthly-report-electron.cjs
+      - name: Check native patient directory search UI
+        run: npx --no-install electron tests/patient-directory-electron.cjs
       - name: Check native QR invoice PDF
         run: npx --no-install electron tests/invoice-pdf-smoke.cjs
       - name: Bump patch version

@@ -394,6 +394,16 @@ function patientStatementRows(id) {
   })();
 }
 // Consistent read of all local account rows. Clinical data is never changed here.
+function patientDirectoryRows() {
+  return getDb().transaction(() => {
+    const patients = new Map();
+    for (const p of cacheGetAll('patients').sort((a,b)=>Number(!!b._pendingSync)-Number(!!a._pendingSync)||Number(String(a.id).startsWith('local_'))-Number(String(b.id).startsWith('local_')))) {
+      const id = String(metaGet('alias:patients:'+p.id)||p.id||'').replace(/^local_/,'');
+      if (id && !patients.has(id)) patients.set(id,{...p,id});
+    }
+    return [...patients.values()];
+  })();
+}
 function monthlyAccountRows() {
   return getDb().transaction(() => {
     const norm=v=>String(v||'').replace(/^local_/,'');
@@ -431,6 +441,7 @@ function diagnosticSnapshot({ deep = false } = {}) {
   })();
 }
 module.exports = {
+  patientDirectoryRows,
   monthlyAccountRows, patientStatementRows, diagnosticSnapshot, authorizedBatch, commitBatch, commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
   init, close,
   cacheGetAll, cacheGetRow, cacheSetRows, cacheReplaceTable, cacheUpsertRow, cacheDeleteRow, cacheReplaceRowKey,

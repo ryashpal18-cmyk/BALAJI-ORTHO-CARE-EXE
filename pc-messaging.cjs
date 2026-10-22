@@ -20,6 +20,7 @@ function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,acces
   }
   const service=require('./whatsapp-service.cjs').createWhatsAppService({store,root:path.join(app.getPath('userData'),'clinic-messaging'),allowed,renderPdf});
   const admin=fn=>(...args)=>{if(!allowed())throw Error('Administrator login required');return fn(...args);};
+  ipcMain.handle('patients:directory',admin(()=>store.patientDirectoryRows()));
   ipcMain.handle('family:list',admin(()=>familyGroups(store.cacheGetAll('patients'))));
   ipcMain.handle('family:profile',admin((_e,id)=>familyRecords(store,id)));
   ipcMain.handle('family:pending',admin(()=>{const id=pending;pending=null;return id;}));

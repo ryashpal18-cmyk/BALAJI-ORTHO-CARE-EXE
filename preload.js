@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('electron', {
   cloudSyncStatus: () => ipcRenderer.invoke('auth:cloudSyncStatus'),
 
   // ── Patient Operations ──────────────────────────────────────
+  patientDirectory: () => ipcRenderer.invoke('patients:directory'),
   savePatient:     (data)   => ipcRenderer.invoke('db:savePatient', data),
   getAllPatients:   ()       => ipcRenderer.invoke('db:getAllPatients'),
   searchPatient:   (mobile) => ipcRenderer.invoke('db:searchPatient', mobile),
