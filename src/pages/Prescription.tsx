@@ -52,9 +52,14 @@ export default function Prescription() {
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
 
+  const resetDraft = () => {
+    setDiagnosis(''); setMedicines([{ name: '', dose: '', duration: '' }]);
+    setAdvice(''); setFollowupDate(''); setSavedId(null);
+  };
+
   useEffect(() => {
     let active = true;
-    setPatient(null); setSavedId(null);
+    setPatient(null); resetDraft();
     if (presetPatientId) void readBranchTable("patients", selectedBranchId).then(rows => {
       if (active) setPatient(rows.find(p => p.id === presetPatientId) || null);
     }).catch(() => {});
@@ -77,8 +82,9 @@ export default function Prescription() {
   }, [query, selectedBranchId]);
 
   const selectPatient = (p: Patient) => {
+    if (saving) return;
+    if (patient?.id !== p.id) resetDraft();
     setPatient(p);
-    setSavedId(null);
     setQuery("");
     setShowDrop(false);
   };
@@ -224,7 +230,7 @@ export default function Prescription() {
                 <Button
                   variant="ghost" size="sm"
                   className="no-print"
-                  onClick={() => setPatient(null)}
+                  disabled={saving} onClick={() => { setPatient(null); resetDraft(); }}
                 >
                   Change
                 </Button>

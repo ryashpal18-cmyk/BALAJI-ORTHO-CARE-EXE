@@ -1,3 +1,4 @@
+import { billCareCategory } from "@/lib/billSmsMessage";
 import { cashTallyForPeriod } from "@/lib/collectionReport";
 import QRCode from "qrcode";
 import { invoiceNumber } from "@/lib/invoiceNumber";
@@ -696,10 +697,7 @@ const filteredPatients = useMemo(() => {
       }
 
       // ── Auto OrthoPanel: bill mein plaster ho to fracture case auto-add ──
-      const plasterKeywords = ["plaster", "p.o.p", "pop", "cast", "slab", "splint", "पलस्तर"];
-      const plasterService = validServices.find((s) =>
-        plasterKeywords.some((kw) => s.name.toLowerCase().includes(kw))
-      );
+      const plasterService = validServices.find(s => ['cast', 'slab'].includes(billCareCategory(s.name)));
       if (plasterService && selectedPatient) {
         try {
           const { cacheGetAll } = await import("@/lib/offlineDb");
@@ -825,6 +823,7 @@ const filteredPatients = useMemo(() => {
       const status = computeStatus();
       await updateBill.mutateAsync({
         id: editingBill.id,
+        expected_paid: Number(editingBill.amount_paid || 0),
         audit_reason: editReason.trim(),
         service: serviceStr,
         amount: newTotal,

@@ -68,6 +68,10 @@ function load(file) {
  await assert.rejects(helpers.offlineUpdate('billing',billId,{_collectAmount:10,_expectedPaid:100}));
  assert.equal((await db.queueGetAll()).length,before);assert.equal((await db.cacheGetRow('billing',billId)).amount_paid,300);
  console.log('PASS zero/negative/non-finite/overdue/stale payments leave disk and queue unchanged');
+ await assert.rejects(helpers.offlineUpdate('billing',billId,{amount:1000,amount_paid:100,discount:100,_expectedPaid:100,_auditReason:'stale edit'}));
+ assert.equal((await db.cacheGetRow('billing',billId)).amount_paid,300);
+ assert.equal((await db.queueGetAll()).length,before);
+ console.log('PASS stale full-bill edit cannot erase a later receipt or create a negative payment');
  await assert.rejects(db.commitBatch([
   {mutation:{table:'billing',op:'update',rowId:billId,expectedPaid:100,payload:{amount_paid:400}},row:{amount_paid:400}},
   {mutation:{table:'audit_logs',op:'insert',tempId:'never-created',payload:{}},row:{id:'never-created'}}

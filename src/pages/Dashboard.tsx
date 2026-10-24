@@ -68,6 +68,7 @@ export default function Dashboard() {
     try {
       await updateBill.mutateAsync({
         id: qpBill.id,
+        expected_paid: Number(qpBill.amount_paid || 0),
         amount: Number(qpBill.amount || 0),
         amount_paid: paid,
         status,
@@ -111,6 +112,7 @@ export default function Dashboard() {
     try {
       await updateBill.mutateAsync({
         id: editBill.id,
+        expected_paid: Number(editBill.amount_paid || 0),
         service: serviceStr,
         amount: total,
         amount_paid: paid,

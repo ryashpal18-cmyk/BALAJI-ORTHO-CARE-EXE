@@ -1,3 +1,4 @@
+import { attachPatients } from "@/lib/patientRecords";
 import { collectionRows } from "@/lib/paymentLedger";
 import { saveBillOffline } from "@/lib/saveBillOffline";
 import { useBranchContext } from "@/lib/branchContext";
@@ -66,8 +67,9 @@ export function usePatients() {
 export function useUpdateBill() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (bill: { id: string; amount: number; amount_paid: number; status: string; service?: string; payment_mode?: string; audit_reason?: string; discount?: number | null; doctor_id?: string | null; doctor_name?: string | null; doctor_commission_percent?: number | null }) => {
-      const updateData: any = { _auditReason: bill.audit_reason, amount: bill.amount, amount_paid: bill.amount_paid, status: bill.status };
+    mutationFn: async (bill: { id: string; expected_paid: number; amount: number; amount_paid: number; status: string; service?: string; payment_mode?: string; audit_reason?: string; discount?: number | null; doctor_id?: string | null; doctor_name?: string | null; doctor_commission_percent?: number | null }) => {
+      if (!Number.isFinite(bill.expected_paid)) throw new Error("बिल दोबारा खोलकर भुगतान जाँचें।");
+      const updateData: any = { _expectedPaid: bill.expected_paid, _auditReason: bill.audit_reason, amount: bill.amount, amount_paid: bill.amount_paid, status: bill.status };
       if (bill.service !== undefined) updateData.service = bill.service;
       if (bill.payment_mode !== undefined) updateData.payment_mode = bill.payment_mode;
       // Doctor sirf tab bheja jaata hai jab edit mein badla ho (purane flow par koi asar nahi).
@@ -125,7 +127,7 @@ export function usePhysioSessions() {
         if (error) throw error;
         return data || [];
       });
-      return [...rows].sort((a: any, b: any) => (b.created_at || "").localeCompare(a.created_at || ""));
+      return attachPatients(rows, await cacheGetAll("patients")).sort((a: any, b: any) => (b.created_at || "").localeCompare(a.created_at || ""));
     },
   });
 }
@@ -239,7 +241,7 @@ export function useAppointments() {
 export function useAddAppointment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (a: any) => offlineInsert("appointments", a),
+    mutationFn: async (a: any) => offlineInsert("appointments", { status: "Scheduled", ...a }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["appointments"] }),
   });
 }

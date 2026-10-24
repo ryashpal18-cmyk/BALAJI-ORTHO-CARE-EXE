@@ -1,3 +1,5 @@
+import { billCareCategory, billServiceNames } from "@/lib/billSmsMessage";
+import { recordId } from "@/lib/patientRecords";
 import { cacheGetAll } from "@/lib/offlineDb";
 import { offlineInsert } from "@/lib/offlineQuery";
 import { businessDate } from "@/lib/businessDate";
@@ -13,21 +15,11 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-const PLASTER_KEYWORDS = ["plaster", "p.o.p", "pop", "cast", "slab", "splint", "पलस्तर"];
-
 function hasPlaster(service: string): boolean {
-  if (!service) return false;
-  const lower = service.toLowerCase();
-  return PLASTER_KEYWORDS.some((kw) => lower.includes(kw));
+  return ['cast', 'slab'].includes(billCareCategory(service));
 }
-
 function getPlasterService(service: string): string {
-  if (!service) return "Plaster";
-  const parts = service.split("|").filter(Boolean);
-  const found = parts.find((s) =>
-    PLASTER_KEYWORDS.some((kw) => s.toLowerCase().includes(kw))
-  );
-  return found ? found.split(":")[0].trim() : "Plaster";
+  return billServiceNames(service).find(name => hasPlaster(name)) || 'Plaster';
 }
 
 export default function PlasterSync() {
@@ -61,7 +53,7 @@ export default function PlasterSync() {
       const activePatients = new Set(
         ((existingCases || []) as any[])
           .filter((c: any) => c.plaster_status === "Active")
-          .map((c: any) => c.patient_id)
+          .map((c: any) => recordId(c.patient_id))
       );
       addLog(`📊 ${activePatients.size} patients already OrthoPanel mein active hain`);
       addLog("─────────────────────────────────");
@@ -72,11 +64,11 @@ export default function PlasterSync() {
       for (const bill of plasterBills) {
         scanned++;
         const patient = (bill as any).patients;
-        const patientId = bill.patient_id;
+        const patientId = recordId(bill.patient_id);
         const patientName = patient?.name || patientId;
 
         // Already active case hai?
-        if (activePatients.has(patientId)) {
+        if (activePatients.has(patientId) || existingCases.some(c => c.doctor_notes?.includes(`Bill ID: ${bill.id})`))) {
           addLog(`⏭️  Skip: ${patientName} — already active case hai`);
           skipped++;
           continue;

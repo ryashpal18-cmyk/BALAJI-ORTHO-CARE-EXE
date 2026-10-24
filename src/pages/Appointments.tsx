@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { useAppointments, useAddAppointment, usePatients, useUpdateAppointment } from "@/hooks/useDatabase";
 import { useState } from "react";
 import { toast } from "@/hooks/use-toast";
+import { appointmentMinutes } from "@/lib/appointmentTime";
 
 const statusStyle: Record<string, string> = {
   Scheduled: "bg-info/10 text-info border-info/20",
@@ -30,6 +31,10 @@ export default function Appointments() {
     e.preventDefault();
     if (!form.patient_id || !form.date) {
       toast({ title: "Error", description: "Patient and date required", variant: "destructive" });
+      return;
+    }
+    if (form.time_slot && appointmentMinutes(form.time_slot) === null) {
+      toast({ title: "सही समय लिखें, जैसे 14:30 या 02:30 PM", variant: "destructive" });
       return;
     }
     try {

@@ -1,3 +1,5 @@
+import { patientXrays } from "@/lib/patientRecords";
+import { refreshClinicalUrl } from "@/lib/clinicalFiles";
 import { PatientStatement } from "@/components/PatientStatement";
 import { PaymentReceipts } from "@/components/PaymentReceipts";
 import { invoiceNumber } from "@/lib/invoiceNumber";
@@ -48,12 +50,14 @@ export default function PatientProfile() {
     const epoch=++loadEpoch.current;
     try {
       // Offline fallback — cache se lo
-      const [cachedPatients, cachedBills, cachedPhysio, cachedXrays, cachedMed] = await Promise.all([
+      const [cachedPatients, cachedBills, cachedPhysio, cachedXrays, cachedMed, cachedFractureXrays, cachedCases] = await Promise.all([
         cacheGetAll("patients"),
         cacheGetAll("billing"),
         cacheGetAll("physiotherapy_sessions"),
         cacheGetAll("xray_reports"),
         cacheGetAll("patient_medicines"),
+        cacheGetAll("fracture_xrays"),
+        cacheGetAll("fracture_cases"),
       ]);
 
       if(epoch!==loadEpoch.current)return;
@@ -61,7 +65,7 @@ export default function PatientProfile() {
       setPatient(pat);
       setBills(cachedBills.filter((b: any) => b.patient_id?.replace(/^local_/, "") === id.replace(/^local_/, "")).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
       setPhysio(cachedPhysio.filter((s: any) => s.patient_id?.replace(/^local_/, "") === id.replace(/^local_/, "")).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
-      setXrays(cachedXrays.filter((r: any) => r.patient_id?.replace(/^local_/, "") === id.replace(/^local_/, "")));
+      setXrays(patientXrays(cachedXrays, cachedFractureXrays, id, cachedCases));
       setMedicines(cachedMed.filter((m: any) => m.patient_id?.replace(/^local_/, "") === id.replace(/^local_/, "")));
       cLog.info("PatientProfile", `Offline cache se data liya — patient: ${id}`);
     } catch (err) {
@@ -106,6 +110,22 @@ export default function PatientProfile() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const openXray = async (report: any) => {
+    try {
+      const url = await refreshClinicalUrl(report._localFileUrl || report.file_url);
+      if (url.startsWith('data:application/pdf;base64,')) {
+        const link = document.createElement('a');
+        link.href = url; link.download = `report-${report.id}.pdf`;
+        document.body.appendChild(link); link.click(); link.remove();
+      } else if (/\.pdf(?:\?|$)/i.test(url)) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      } else {
+        navigate('/reports', { state: { openXrayViewer: true, xrayImage: url,
+          xrayName: report.report_type || 'X-Ray', patientName: patient?.name } });
+      }
+    } catch (e: any) { toast({ title: 'Report उपलब्ध नहीं है', description: e.message, variant: 'destructive' }); }
   };
 
   const totalBilled = bills.reduce((s, b) => s + Math.max(Number(b.amount || 0) - Number(b.discount || 0), 0), 0);
@@ -353,7 +373,7 @@ export default function PatientProfile() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4">
                 {xrays.map(r => (
-                  <div key={r.id} className="border rounded-lg p-3 space-y-2">
+                  <div key={`${r.source}:${r.id}`} className="border rounded-lg p-3 space-y-2">
                     <div className="flex items-center gap-2">
                       <Image className="h-4 w-4 text-primary" />
                       <span className="font-medium text-sm">{r.report_type || "X-Ray"}</span>
@@ -363,20 +383,9 @@ export default function PatientProfile() {
                     </div>
                     {r.file_url && (
                       <div className="flex flex-wrap gap-3">
-                        <a href={r.file_url} target="_blank" rel="noreferrer"
-                          className="text-xs text-primary underline">
-                          View Report
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => navigate("/reports", {
-                            state: {
-                              openXrayViewer: true,
-                              xrayImage: r.file_url,
-                              xrayName: r.report_type || "X-Ray",
-                              patientName: patient.name,
-                            },
-                          })}
+                        <button type="button" onClick={() => void openXray(r)}
+                          className="text-xs text-primary underline">View Report</button>
+                        <button type="button" onClick={() => void openXray(r)}
                           className="text-xs text-cyan-600 underline"
                         >
                           🩻 X-Ray Viewer me kholo

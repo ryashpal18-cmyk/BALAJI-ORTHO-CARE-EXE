@@ -110,6 +110,7 @@ export default function DueAmount() {
     try {
       await updateBill.mutateAsync({
         id: editTarget.id,
+        expected_paid: Number(editTarget.amount_paid || 0),
         amount: Number(editTarget.amount),
         amount_paid: paidNum,
         status: paidNum >= editTarget._total ? "Paid" : "Partial",
@@ -126,6 +127,7 @@ export default function DueAmount() {
     try {
       await updateBill.mutateAsync({
         id: bill.id,
+        expected_paid: Number(bill.amount_paid || 0),
         amount: Number(bill.amount),
         amount_paid: bill._total,
         status: "Paid",

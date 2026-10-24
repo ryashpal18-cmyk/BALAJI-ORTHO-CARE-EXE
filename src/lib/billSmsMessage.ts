@@ -5,7 +5,7 @@ export function billServiceNames(service: unknown): string[] {
   return service.split('|').map(part => part.trim().replace(/:\s*\d+(?:\.\d+)?\s*$/, '').trim()).filter(Boolean);
 }
 
-function isCastRemoval(name: string): boolean {
+export function isCastRemoval(name: string): boolean {
   const item = /\b(?:cast|plaster|p\.?o\.?p\.?)\b|प्लास्टर|पलस्तर|कास्ट/i;
   const removal = /\b(?:remov(?:e|ed|al|ing)|remve|rmov(?:e|al)?|cut(?:ting)?|off)\b|हटाना|हटाने|हटाया|उतारना|उतारने|उतारा|काटना|काटने|रिमूव/i;
   return item.test(name) && removal.test(name);

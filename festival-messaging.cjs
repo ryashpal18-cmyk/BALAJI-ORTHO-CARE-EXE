@@ -60,10 +60,18 @@ function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
    }if(selected)break;}
    if(!selected)return;
    const {c,j}=selected;patchJob(c.id,j.id,{state:'sending',attempts:j.attempts+1,error:''});nextSend=now()+intervalMs;
+   // Number lookup is asynchronous: cancel/pause/exclusion changes must be checked
+   // again immediately before WhatsApp hands the message to the paired client.
+   const validate=()=>{
+    if(!allowed())return 'cancelled';
+    const current=list().find(x=>x.id===c.id),job=current?.jobs.find(x=>x.id===j.id);
+    if(!current||current.state==='cancelled'||job?.state!=='sending'||current.date!==indiaDate(now())||exclusions().includes(j.mobile)||!audience().rows.some(p=>p.mobile===j.mobile))return 'cancelled';
+    return current.state==='active'?true:'wait';
+   };
    let result;
-   try{result=j.channel==='whatsapp'?await whatsapp.sendText(j.mobile,c.messages.whatsapp):await sendSMS({...gateway,requestId:'festival-'+j.id,mobile:j.mobile,message:c.messages.sms});}
+   try{result=j.channel==='whatsapp'?await whatsapp.sendText(j.mobile,c.messages.whatsapp,validate):await sendSMS({...gateway,requestId:'festival-'+j.id,mobile:j.mobile,message:c.messages.sms});}
    catch{result={ok:false,uncertain:true,error:'भेजने का परिणाम अनिश्चित है; चैट/gateway जाँचें।'};}
-   patchJob(c.id,j.id,{state:result.ok?'sent':result.uncertain?'unconfirmed':result.permanent?'failed':'queued',error:result.ok?'':result.error||'कनेक्शन की प्रतीक्षा में',retryAt:now()+60000,...(result.ok?{sentAt:new Date(now()).toISOString()}:{} )});
+   patchJob(c.id,j.id,{state:result.ok?'sent':result.cancelled?'cancelled':result.uncertain?'unconfirmed':result.permanent?'failed':'queued',error:result.ok?'':result.error||'कनेक्शन की प्रतीक्षा में',retryAt:now()+60000,...(result.ok?{sentAt:new Date(now()).toISOString()}:{} )});
   }finally{busy=false;}
  }
  return{preview,create,status,change,review,setExclusions,configureSMS,tick};

@@ -9,9 +9,7 @@ import {
   ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell,
 } from "recharts";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { cacheGetAll } from "@/lib/offlineDb";
-import { cLog } from "@/lib/clientLogger";
+import { readBranchTable } from "@/lib/branchData";
 
 const COLORS = [
   "hsl(210, 80%, 35%)", "hsl(185, 65%, 45%)", "hsl(142, 70%, 40%)",
@@ -26,37 +24,11 @@ function useAnalyticsData() {
     queryKey: ["analytics"],
     staleTime: 5 * 60 * 1000, // 5 min cache
     queryFn: async () => {
-      const online = navigator.onLine;
-
-      let bills: any[] = [];
-      let patients: any[] = [];
-      let physioSessions: any[] = [];
-
-      if (online) {
-        try {
-          const [billsRes, patientsRes, physioRes] = await Promise.all([
-            supabase.from("billing").select("id, amount, discount, amount_paid, status, created_at, service, payment_mode, payment_history"),
-            supabase.from("patients").select("id, created_at"),
-            supabase.from("physiotherapy_sessions").select("id, created_at"),
-          ]);
-          bills         = billsRes.data         || [];
-          patients      = patientsRes.data      || [];
-          physioSessions = physioRes.data       || [];
-        } catch (err) {
-          cLog.warn("analytics", "Online fetch fail — cache se le raha hai", err);
-        }
-      }
-
-      // Pending offline receipts must be visible before background cloud sync finishes.
-      const localBills = await cacheGetAll("billing");
-      if (!bills.length) bills = localBills;
-      else {
-        const byId = new Map(bills.map(b => [String(b.id || "").replace(/^local_/, ""), b]));
-        for (const bill of localBills) if (bill._pendingSync) byId.set(String(bill.id || "").replace(/^local_/, ""), bill);
-        bills = [...byId.values()];
-      }
-      if (!patients.length)       patients       = await cacheGetAll("patients");
-      if (!physioSessions.length) physioSessions = await cacheGetAll("physiotherapy_sessions");
+      // The same complete local ledger as Billing; paginated refresh happens in the background.
+      const [bills, patients, physioSessions] = await Promise.all([
+        readBranchTable('billing', null), readBranchTable('patients', null),
+        readBranchTable('physiotherapy_sessions', null),
+      ]);
 
       const receipts = collectionRows(bills);
 

@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { readBranchTable } from "@/lib/branchData";
+import { recordId } from "@/lib/patientRecords";
 import { useParams, useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -6,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useFractureXrays, uploadFractureXray, useFractureCases } from "@/hooks/useOrtho";
 import { useAddPhysioSession } from "@/hooks/useDatabase";
@@ -45,8 +47,7 @@ export default function RecoveryTracker() {
   const { caseId } = useParams();
   const navigate = useNavigate();
 
-  const [sessions, setSessions] = useState<PhysioSession[]>([]);
-  const [loading, setLoading] = useState(true);
+  const savingProgress = useRef(false);
 
   const [painScale, setPainScale] = useState("5");
   const [exercisePlan, setExercisePlan] = useState("");
@@ -58,71 +59,25 @@ export default function RecoveryTracker() {
   const addPhysioSession = useAddPhysioSession();
 
   const { data: allCases = [], isLoading: casesLoading } = useFractureCases();
-  const [directCase, setDirectCase] = useState<FractureCase | null>(null);
-  const [directTried, setDirectTried] = useState(false);
-
-  const cachedCase = allCases.find((c: any) => c.id === caseId) as FractureCase | undefined;
-  const fxCase = cachedCase || directCase;
-
-  const fetchData = async () => {
-    if (!caseId) return;
-    setLoading(true);
-
-    // Pehle offline-safe cached list me dhoondo (Ortho list isi se data leti hai,
-    // isliye yahan bhi wahi cache use karne se "Case not found" galti se nahi aayega)
-    if (!cachedCase && !directTried) {
-      // Cache me nahi mila — direct Supabase se try karo (e.g. bilkul naya case
-      // jo abhi cache me sync nahi hua, ya internet slow tha)
-      try {
-        const { data: c, error } = await supabase
-          .from("fracture_cases" as any)
-          .select("*, patients(name, mobile)")
-          .eq("id", caseId)
-          .maybeSingle();
-        if (!error && c) setDirectCase(c as any);
-      } catch {
-        /* offline ya network error — neeche cache/loading state se handle hoga */
-      } finally {
-        setDirectTried(true);
-      }
-    }
-
-
-    const patientId = cachedCase?.patient_id || directCase?.patient_id;
-    if (patientId) {
-      // Offline-safe: pehle online try karo, fail/offline ho to cache se fallback lo
-      const online = await isOnline();
-      if (online) {
-        try {
-          const { data: s, error } = await supabase
-            .from("physiotherapy_sessions")
-            .select("*")
-            .eq("fracture_case_id", caseId)
-            .order("created_at", { ascending: true });
-          if (error) throw error;
-          setSessions((s as any) || []);
-          setLoading(false);
-          return;
-        } catch {
-          /* offline ya network error — neeche cache se fallback */
-        }
-      }
-      const cachedSessions = await cacheGetAll("physiotherapy_sessions");
-      const filtered = (cachedSessions as any[])
-        .filter((sess) => sess.fracture_case_id === caseId)
-        .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
-      setSessions(filtered as any);
-    }
-    setLoading(false);
-  };
-
-  useEffect(() => { fetchData(); }, [caseId, cachedCase?.id]);
+  const fxCase = allCases.find((c: any) => recordId(c.id) === recordId(caseId)) as FractureCase | undefined;
+  const { data: sessions = [], isLoading: loading, refetch: refreshSessions } = useQuery({
+    queryKey: ['recovery-sessions', recordId(caseId)],
+    enabled: !!fxCase,
+    staleTime: 0,
+    queryFn: async (): Promise<PhysioSession[]> => {
+      const rows = await readBranchTable('physiotherapy_sessions', null);
+      return rows.filter(s => recordId(s.fracture_case_id) === recordId(caseId))
+        .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+    },
+  });
 
   const handleLogProgress = async () => {
-    if (!fxCase) return;
+    if (!fxCase || savingProgress.current) return;
+    savingProgress.current = true;
     setLogging(true);
-    const nextSessionNo = sessions.length + 1;
     try {
+      const current = (await cacheGetAll('physiotherapy_sessions')).filter(s => recordId(s.fracture_case_id) === recordId(fxCase.id));
+      const nextSessionNo = Math.max(0, ...current.map(s => Number(s.session_number) || 0)) + 1;
       // ✅ offline-safe insert — net na ho to IndexedDB queue me save hoga
       // aur internet wapas aate hi apne aap sync ho jayega
       await addPhysioSession.mutateAsync({
@@ -137,26 +92,25 @@ export default function RecoveryTracker() {
       const online = await isOnline();
       toast({ title: online ? "✅ Progress log ho gaya!" : "📥 Offline save ho gaya — net aane par sync hoga" });
       setExercisePlan(""); setNotes(""); setPainScale("5");
-      fetchData();
+      await refreshSessions();
     } catch (err: any) {
       toast({ title: "Error", description: err?.message || "Progress log fail ho gaya", variant: "destructive" });
-    }
-    setLogging(false);
+    } finally { savingProgress.current = false; setLogging(false); }
   };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !fxCase) return;
     setUploading(true);
-    const result = await uploadFractureXray(fxCase.id, fxCase.patient_id, file);
-    setUploading(false);
-    e.target.value = "";
-    if (result.ok) {
-      toast({
-        title: result.queued ? "📥 Queued — internet aane par upload hoga" : "✅ Photo upload ho gayi",
-      });
-      refetchXrays();
-    }
+    try {
+      const result = await uploadFractureXray(fxCase.id, fxCase.patient_id, file);
+      if (result.ok) {
+        toast({ title: 'Photo PC पर सेव है; internet आने पर sync होगी' });
+        await refetchXrays();
+      }
+    } catch (error: any) {
+      toast({ title: 'Photo upload नहीं हुई', description: error.message, variant: 'destructive' });
+    } finally { setUploading(false); e.target.value = ''; }
   };
 
   const chartData = sessions.map((s, i) => ({
@@ -169,7 +123,7 @@ export default function RecoveryTracker() {
   const firstPain = sessions.length ? sessions[0].pain_scale ?? 0 : null;
   const improvement = latestPain !== null && firstPain !== null ? firstPain - latestPain : null;
 
-  if (loading || casesLoading || (!fxCase && !directTried)) return <DashboardLayout><div className="p-8 text-center text-muted-foreground">Loading...</div></DashboardLayout>;
+  if (loading || casesLoading) return <DashboardLayout><div className="p-8 text-center text-muted-foreground">Loading...</div></DashboardLayout>;
   if (!fxCase) return <DashboardLayout><div className="p-8 text-center">Case not found</div></DashboardLayout>;
 
   return (

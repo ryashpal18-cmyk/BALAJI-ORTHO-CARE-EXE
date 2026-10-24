@@ -4,12 +4,14 @@ import { cacheGetAll, cacheReplaceTable } from "./offlineDb";
 import { fetchCompleteTable } from "./completeFetch";
 import { isOnline } from "./offlineSync";
 import { ensureCloudSession } from "./localSession";
+import { attachPatients } from "./patientRecords";
 export function inBranch(row: any, branch: string | null) { return !branch || row.branch_id === branch; }
 export async function readBranchTable(table: string, branch: string | null, select = "*") {
   const cached = await cacheGetAll(table);
   // Network refresh is independent of the screen's local read.
   void refreshBranchTable(table, select);
-  return cached.filter(row => inBranch(row, branch));
+  const rows = cached.filter(row => inBranch(row, branch));
+  return select.includes('patients(') ? attachPatients(rows, await cacheGetAll('patients')) : rows;
 }
 const refreshing = new Set<string>();
 const lastRefresh = new Map<string, number>();

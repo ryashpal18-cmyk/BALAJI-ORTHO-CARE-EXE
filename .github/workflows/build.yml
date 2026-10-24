@@ -45,6 +45,7 @@ jobs:
           node tests/core-offline.cjs
           node tests/billing-catalog.cjs
           node tests/clinic-updates.cjs
+          node tests/module-regressions.cjs
           node tests/due-collection-date.cjs
           node tests/message-and-estimate.cjs
           node tests/outreach.cjs

@@ -1,8 +1,9 @@
 import { businessDate } from "@/lib/businessDate";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { isOnline } from "@/lib/offlineSync";
+import { readBranchTable } from "@/lib/branchData";
+import { appointmentMinutes } from "@/lib/appointmentTime";
+import { recordId } from "@/lib/patientRecords";
 
 const NOTIFIED_KEY = "bocc_notified_appt_ids";
 
@@ -46,38 +47,28 @@ function showNotification(title: string, body: string) {
  * sirf ek hi baar (duplicate notification nahi aayega).
  */
 export function useAppointmentReminders() {
-  const checkedRef = useRef(false);
-
   const { data: appointments } = useQuery({
     queryKey: ["notif-upcoming-appointments"],
     staleTime: 0,
+    structuralSharing: false,
     refetchInterval: 5 * 60 * 1000, // har 5 minute check karo
     queryFn: async () => {
-      const online = await isOnline();
-      if (!online || !isNotificationEnabled()) return [];
       const today = businessDate();
-      const { data, error } = await supabase
-        .from("appointments")
-        .select("id, date, time_slot, status, patients(name)")
-        .eq("date", today)
-        .neq("status", "Cancelled");
-      if (error) return [];
-      return data || [];
+      const rows = await readBranchTable('appointments', null, '*, patients(name, mobile)');
+      return rows.filter(a => a.date === today && (!a.status || a.status === 'Scheduled'));
     },
   });
 
   useEffect(() => {
-    if (!appointments?.length) return;
+    if (!appointments?.length || !isNotificationEnabled()) return;
     const notified = getNotifiedIds();
     const now = new Date();
 
     for (const appt of appointments as any[]) {
-      if (!appt.time_slot || notified.has(appt.id)) continue;
-      // time_slot format expected "HH:MM" — parse karke compare karo
-      const [h, m] = appt.time_slot.split(":").map(Number);
-      if (Number.isNaN(h)) continue;
-      const apptTime = new Date();
-      apptTime.setHours(h, m || 0, 0, 0);
+      const minutes = appointmentMinutes(appt.time_slot);
+      const identity = `${recordId(appt.id)}:${appt.date}:${minutes}`;
+      if (minutes === null || notified.has(identity)) continue;
+      const apptTime = new Date(`${appt.date}T${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}:00+05:30`);
       const diffMin = (apptTime.getTime() - now.getTime()) / 60000;
 
       if (diffMin > 0 && diffMin <= 30) {
@@ -86,7 +77,7 @@ export function useAppointmentReminders() {
           "Upcoming Appointment",
           `${patientName} — ${appt.time_slot} baje (${Math.round(diffMin)} min baaki)`
         );
-        notified.add(appt.id);
+        notified.add(identity);
       }
     }
     saveNotifiedIds(notified);
