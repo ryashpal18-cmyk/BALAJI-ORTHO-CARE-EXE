@@ -23,6 +23,8 @@ files:
   - patient-statement.cjs
   - monthly-report.cjs
   - festival-messaging.cjs
+  - outreach-service.cjs
+  - attachment-cache.cjs
   - preload.js
   - diagnostics.cjs
   - diagnostic-utils.cjs

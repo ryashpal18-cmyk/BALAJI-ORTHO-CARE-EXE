@@ -1,3 +1,4 @@
+import { captureAttachments, restoreAttachmentData } from "./attachmentBackup";
 import { fetchCompleteTable, OPERATIONAL_TABLES } from "./completeFetch";
 import { getLocalSnapshot, restoreLocalSnapshot } from "./offlineDb";
 import { businessDate } from "@/lib/businessDate";
@@ -35,7 +36,7 @@ export function inspectBackup(json: string) {
   const tables = Object.values(backup.tables);
   if (tables.some(rows => !Array.isArray(rows))) throw new Error("Invalid backup table");
   return { records: tables.reduce((sum: number, rows: any[]) => sum + rows.length, 0), pending:backup.localSnapshot.queue.length,
-    generatedAt:backup.generatedAt, warnings:Array.isArray(backup.warnings) ? backup.warnings : [] };
+    attachments:backup.attachmentFiles?.files?.length||0, missingAttachments:backup.attachmentFiles?.missing?.length||0, generatedAt:backup.generatedAt, warnings:Array.isArray(backup.warnings) ? backup.warnings : [] };
 }
 
 export const BACKUP_STORAGE_KEYS = {
@@ -85,14 +86,33 @@ function clinicalLocalStorage() {
   }
   return notes;
 }
+function parkRestoredMessages(backup:any) {
+  const snapshot=backup.localSnapshot;
+  snapshot.queue=snapshot.queue.map((m:any)=>m.op==='sms'?{...m,payload:{...m.payload,deliveryState:'unconfirmed'},lastError:'Backup restore के बाद gateway में परिणाम जाँचें।'}:m);
+  const meta=Array.isArray(snapshot.meta)?snapshot.meta.map((m:any)=>({...m})):[];
+  const park=(jobs:any[])=>jobs.map(j=>['queued','sending'].includes(j.state)?{...j,state:'unconfirmed',error:'Backup restore के बाद चैट/gateway में जाँचें; अपने आप दोबारा नहीं भेजेंगे।'}:j);
+  for(const entry of meta){
+    let value;try{value=typeof entry.value==='string'?JSON.parse(entry.value):entry.value;}catch{continue;}
+    if(entry.key==='whatsapp:invoice-jobs'&&Array.isArray(value))value=park(value);
+    if(entry.key==='festival:campaigns'&&Array.isArray(value))value=value.map(c=>({...c,jobs:park(c.jobs||[])}));
+    if(entry.key==='outreach:v1'&&value?.campaigns)value={...value,campaigns:value.campaigns.map((c:any)=>({...c,jobs:park(c.jobs||[])}))};
+    entry.value=JSON.stringify(value);
+  }
+  let outreach=meta.find((m:any)=>m.key==='outreach:v1');
+  const value=outreach?JSON.parse(outreach.value):{settings:{enabled:true,channels:['whatsapp','sms']},campaigns:[],seen:[]};
+  value.seen=[...new Set([...(value.seen||[]),...(backup.tables.billing||[]).flatMap((bill:any)=>(bill.payment_history||[]).map((r:any)=>String(bill.id||'').replace(/^local_/,'')+':'+r.id))])];
+  if(outreach)outreach.value=JSON.stringify(value);else meta.push({key:'outreach:v1',value:JSON.stringify(value)});
+  snapshot.meta=meta;
+}
 export async function restoreBackup(json: string) {
   inspectBackup(json);
   const currentData = await getLocalSnapshot();
   if (currentData.queue.length || Object.entries(currentData.cache).some(([table, rows]) => !["branches", "profiles", "user_roles"].includes(table) && (rows as any[]).length))
     throw new Error("Restore केवल खाली नए डिवाइस पर करें। मौजूदा मरीज और pending डेटा सुरक्षित है।");
 
-  const backup = JSON.parse(json);
+  const backup = await restoreAttachmentData(JSON.parse(json));
   if (backup.formatVersion !== 2 || !backup.tables || !Array.isArray(backup.localSnapshot?.queue)) throw new Error("Version 2 JSON backup required");
+  parkRestoredMessages(backup);
   await restoreLocalSnapshot({ cache: backup.tables, queue: backup.localSnapshot.queue, meta: backup.localSnapshot.meta || [] });
   for (const [key,value] of Object.entries(backup.localStorage || {})) {
     if (key.startsWith("ortho_visits_") || ["bocc_service_catalog","bocc_selected_branch","bocc_dash_modules","bocc_app_theme"].includes(key)) localStorage.setItem(key, String(value));
@@ -107,6 +127,9 @@ export type BackupResult = {
   recordCounts: Record<string, number>;
   error?: string;
   warnings?: string[];
+  attachmentCount?: number;
+  attachmentMissing?: number;
+  complete?: boolean;
 };
 
 /**
@@ -114,7 +137,12 @@ export type BackupResult = {
  * disk par "Documents/Balaji_Ortho_Backups" folder mein, warna browser
  * download ke through.
  */
-export async function runBackupNow(label: string = "manual"): Promise<BackupResult> {
+let activeBackup:Promise<BackupResult>|null=null;
+export function runBackupNow(label: string = "manual", onProgress?:(done:number,total:number)=>void): Promise<BackupResult> {
+  if(activeBackup)return activeBackup;
+  activeBackup=performBackupNow(label,onProgress).finally(()=>{activeBackup=null;});return activeBackup;
+}
+async function performBackupNow(label: string, onProgress?:(done:number,total:number)=>void): Promise<BackupResult> {
   const recordCounts: Record<string, number> = {};
   const backupData: Record<string, any[]> = {};
 
@@ -141,6 +169,9 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
     backupData[table] = rows; recordCounts[table] = rows.length;
   }
 
+  const attachmentFiles = await captureAttachments({tables:backupData,queue:localSnapshot.queue},onProgress);
+  if(attachmentFiles.missing.length)warnings.push(`${attachmentFiles.missing.length} फोटो/फाइल नहीं मिलीं; यह आंशिक बैकअप है। Missing सूची JSON में है।`);
+  const photoResult={attachmentCount:attachmentFiles.files.length,attachmentMissing:attachmentFiles.missing.length,complete:attachmentFiles.complete};
   const now = new Date();
   const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const baseName = `balaji_ortho_backup_${label}_${stamp}`;
@@ -148,7 +179,8 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
   const fullJson = {
     formatVersion: 2,
     coverage, warnings, localSnapshot, localStorage: localStorageSnapshot,
-    attachments: "URLs and queued upload bytes only; separately copy existing image/storage files",
+    attachmentFiles,
+    attachments: attachmentFiles.complete ? "Self-contained verified photo/PDF bytes included" : "PARTIAL: see attachmentFiles.missing",
     generatedAt: now.toISOString(),
     label,
     clinic: "Balaji Ortho Care Center",
@@ -161,7 +193,10 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
   for (const table of Object.keys(backupData)) {
     const rows = backupData[table];
     const sheet = rows.length
-      ? XLSX.utils.json_to_sheet(rows)
+      ? XLSX.utils.json_to_sheet(rows.map(row=>Object.fromEntries(Object.entries(row).map(([key,value])=>{
+          const text=typeof value==='object'&&value!==null?JSON.stringify(value):value;
+          return[key,typeof text==='string'&&(/^data:[^;]+;base64,/.test(text)||text.length>30000)?'[फोटो/लंबा डेटा पूरा JSON backup में सुरक्षित है]':text];
+        }))))
       : XLSX.utils.aoa_to_sheet([["(no records)"]]);
     // Sheet name max 31 chars, Excel ki limit hai.
     XLSX.utils.book_append_sheet(wb, sheet, table.slice(0, 31));
@@ -179,7 +214,7 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
       }
 
       localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_BACKUP_AT, now.toISOString());
-      return recordBackupResult({ ok: true, mode: "electron", jsonPath: jsonRes.path, xlsxPath: xlsxRes.path, recordCounts, warnings });
+      return recordBackupResult({ ok: true, mode: "electron", jsonPath: jsonRes.path, xlsxPath: xlsxRes.path, recordCounts, warnings, ...photoResult });
     }
   } catch (e: any) {
     return recordBackupResult({ ok: false, mode: "electron", recordCounts, error: e?.message || String(e) });
@@ -190,7 +225,7 @@ export async function runBackupNow(label: string = "manual"): Promise<BackupResu
     downloadBlob(new Blob([jsonString], { type: "application/json" }), `${baseName}.json`);
     downloadBlob(new Blob([xlsxArrayBuffer], { type: "application/octet-stream" }), `${baseName}.xlsx`);
     localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_BACKUP_AT, now.toISOString());
-    return recordBackupResult({ ok: true, mode: "browser", recordCounts, warnings });
+    return recordBackupResult({ ok: true, mode: "browser", recordCounts, warnings, ...photoResult });
   } catch (e: any) {
     return recordBackupResult({ ok: false, mode: "browser", recordCounts, error: e?.message || String(e) });
   }
@@ -266,7 +301,7 @@ export function startAutoBackupScheduler() {
       const lastDaily = localStorage.getItem(BACKUP_STORAGE_KEYS.LAST_DAILY_BACKUP_DATE);
       if (lastDaily !== today) {
         const res = await runBackupNow("daily").catch((error: Error) => recordBackupResult({ok:false, mode:"browser", recordCounts:{}, error:error.message}));
-        if (res.ok) localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_DAILY_BACKUP_DATE, today);
+        if (res.ok && res.complete !== false) localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_DAILY_BACKUP_DATE, today);
       }
     }
 
@@ -275,7 +310,7 @@ export function startAutoBackupScheduler() {
       const isSunday = new Date().getDay() === 0;
       if (isSunday && lastWeekly !== today) {
         const res = await runBackupNow("weekly").catch((error: Error) => recordBackupResult({ok:false, mode:"browser", recordCounts:{}, error:error.message}));
-        if (res.ok) localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_WEEKLY_BACKUP_DATE, today);
+        if (res.ok && res.complete !== false) localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_WEEKLY_BACKUP_DATE, today);
       }
     }
   };

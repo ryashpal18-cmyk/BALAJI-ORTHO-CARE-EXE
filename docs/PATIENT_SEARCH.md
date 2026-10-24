@@ -9,3 +9,7 @@ Patients remain separate when family members share a phone. Canonical/local alia
 SMS number copy produces unique valid Indian mobile numbers (10 digits), excluding missing/invalid/dummy numbers. A shared family mobile occurs once. Copying/filtering never queues or sends an SMS. Clipboard failure provides a selectable number box. A local read failure is visible and disables copy until a successful refresh.
 
 Validation: synthetic SQLite alias/dedup/pending/read-only checks; name/phone/Hindi digit/village/combined/branch/invalid number tests; actual React UI in Windows Electron checks pagination, filter reset, all-results copy, profile navigation, empty results and read failures. Real clinic data completeness, spelling quality, recipient delivery and actual Windows clipboard remain device checks.
+
+The filtered list now includes a direct WhatsApp/SMS campaign panel with full-list
+preview, normalized-number deduplication and a durable queue. See
+[FIVE_CLINIC_UPDATES.md](FIVE_CLINIC_UPDATES.md) for controls and validation.

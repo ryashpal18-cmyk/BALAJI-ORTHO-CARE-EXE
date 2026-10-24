@@ -22,6 +22,15 @@ contextBridge.exposeInMainWorld('electron', {
     enqueue: (patientId,fingerprint) => ipcRenderer.invoke('statement:enqueue', {patientId,fingerprint}),
   },
 
+  attachment: {read: source => ipcRenderer.invoke('attachment:read', source), write: input => ipcRenderer.invoke('attachment:write', input)},
+  outreach: {
+    status: () => ipcRenderer.invoke('outreach:status'),
+    preview: input => ipcRenderer.invoke('outreach:preview', input),
+    enqueue: input => ipcRenderer.invoke('outreach:enqueue', input),
+    settings: input => ipcRenderer.invoke('outreach:settings', input),
+    change: (id,action) => ipcRenderer.invoke('outreach:change', {id,action}),
+    review: (id,jobId,action) => ipcRenderer.invoke('outreach:review', {id,jobId,action}),
+  },
   festival: {
     status: () => ipcRenderer.invoke('festival:status'),
     preview: input => ipcRenderer.invoke('festival:preview', input),

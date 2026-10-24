@@ -1,3 +1,4 @@
+import { VillageMessagePanel } from "@/components/VillageMessagePanel";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -41,6 +42,7 @@ export default function PatientSearch() {
     </div>
     <p className="text-xs text-muted-foreground">गाँव OPD के Village / Address से लिया गया है। पूरे पते में गाँव लिखा हो तो “गाँव / पते में खोजें” इस्तेमाल करें। हिंदी और English की अलग spelling अपने आप एक गाँव नहीं मानी जाती।</p>
     <div className="flex flex-wrap items-center gap-3"><strong aria-live="polite">मरीज: {filtered.length} · अलग सही मोबाइल: {numbers.length} · बिना सही मोबाइल: {missing}</strong><Button variant="outline" onClick={()=>{setQuery("");setVillage("");setExact(null);}}>Filter हटाएँ</Button><Button variant="outline" disabled={isFetching} onClick={()=>void refetch()}>Refresh</Button><Button disabled={!numbers.length||isError||isLoading} onClick={()=>void copy()}>SMS के नंबर Copy करें</Button></div>
+    <VillageMessagePanel patientIds={filtered.map(p=>p.id)} title={exact!==null?`गाँव: ${exact||"पता दर्ज नहीं"}`:village?`गाँव खोज: ${village}`:query?`मरीज खोज: ${query}`:"सभी चुने हुए मरीज"} disabled={isError||isLoading}/>
     {notice&&<p role="status">{notice}</p>}
     {isError&&<p role="alert" className="text-destructive">मरीजों की सूची refresh नहीं हुई: {(error as Error)?.message}। पुराना डेटा दिख सकता है। Refresh करें।</p>}
     {isLoading?<p>मरीज लोड हो रहे हैं…</p>:<>

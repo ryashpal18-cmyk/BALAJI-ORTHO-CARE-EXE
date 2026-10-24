@@ -60,7 +60,16 @@ function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,acces
   ipcMain.handle('festival:change',admin((_e,{id,action})=>festival.change(id,action)));
   ipcMain.handle('festival:review',admin((_e,{id,jobId,action})=>festival.review(id,jobId,action)));
   ipcMain.handle('festival:exclude',admin((_e,numbers)=>festival.setExclusions(numbers)));
-  ipcMain.handle('festival:smsConfig',admin((_e,config)=>festival.configureSMS(config)));
+  const outreach=require('./outreach-service.cjs').createOutreachService({store,allowed,whatsapp:service,sendSMS});
+  ipcMain.handle('outreach:status',admin(()=>outreach.status()));
+  ipcMain.handle('outreach:preview',admin((_e,input)=>outreach.previewBulk(input)));
+  ipcMain.handle('outreach:enqueue',admin((_e,input)=>outreach.enqueueBulk(input)));
+  ipcMain.handle('outreach:settings',admin((_e,input)=>outreach.setReceiptSettings(input)));
+  ipcMain.handle('outreach:change',admin((_e,{id,action})=>outreach.change(id,action)));
+  ipcMain.handle('outreach:review',admin((_e,{id,jobId,action})=>outreach.review(id,jobId,action)));
+  ipcMain.handle('festival:smsConfig',admin((_e,config)=>{festival.configureSMS(config);outreach.configureSMS(config);}));
+  const outreachTimer=setInterval(()=>{void outreach.tick().catch(()=>{});},5000);
+  app.on('before-quit',()=>clearInterval(outreachTimer));
   const festivalTimer=setInterval(()=>{void festival.tick().catch(()=>{});},5000);
   app.on('before-quit',()=>clearInterval(festivalTimer));
   const timer=setInterval(()=>{void service.tick().catch(()=>{});},15000);

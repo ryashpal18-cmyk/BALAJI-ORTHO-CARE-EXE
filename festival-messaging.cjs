@@ -23,9 +23,15 @@ function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
   for(const p of raw){const mobile=familyNumber(p.mobile);if(!mobile){invalid++;continue;}if(seen.has(mobile)){duplicates++;continue;}seen.add(mobile);if(blocked.has(mobile)){excluded++;continue;}rows.push({mobile,name:String(p.name||'परिवार'),patientId:p.id});}
   rows.sort((a,b)=>a.mobile.localeCompare(b.mobile));return{rows,invalid,duplicates,excluded};
  }
- function preview(input){assert();const data=inputData(input),a=audience();const fingerprint=createHash('sha256').update(JSON.stringify([data,a.rows,exclusions()])).digest('hex');return{...data,...a,count:a.rows.length,fingerprint};}
+ function estimate(messageCount,scheduledAt){
+  const start=Math.max(now(),Date.parse(scheduledAt)),minimumSeconds=Math.max(0,messageCount-1)*intervalMs/1000;
+  const earliestFinishAt=new Date(start+minimumSeconds*1000).toISOString(),day=indiaDate(Date.parse(scheduledAt)),dayEnd=Date.parse(day+'T23:59:59.999+05:30');
+  const backlog=list().filter(c=>c.state==='active').reduce((n,c)=>n+c.jobs.filter(j=>['queued','sending'].includes(j.state)).length,0);
+  return{messageCount,minimumSeconds,earliestFinishAt,dayEnd:new Date(dayEnd).toISOString(),fitsDay:start+minimumSeconds*1000<=dayEnd,otherPending:backlog};
+ }
+ function preview(input){assert();const data=inputData(input),a=audience();const fingerprint=createHash('sha256').update(JSON.stringify([data,a.rows,exclusions()])).digest('hex');return{...data,...a,count:a.rows.length,fingerprint,estimate:estimate(a.rows.length*data.channels.length,data.scheduledAt)};}
  function create(input){
-  assert();const p=preview(input);if(input.fingerprint!==p.fingerprint)throw Error('संदेश या नंबरों की सूची बदली है; फिर preview देखें।');if(!p.count)throw Error('भेजने के लिए सही मोबाइल नंबर नहीं हैं।');
+  assert();const p=preview(input);if(input.fingerprint!==p.fingerprint)throw Error('संदेश या नंबरों की सूची बदली है; फिर preview देखें।');if(!p.count)throw Error('भेजने के लिए सही मोबाइल नंबर नहीं हैं।');if(!p.estimate.fitsDay)throw Error('इतने संदेश चुने दिन में पूरे नहीं हो पाएँगे। समय पहले रखें या माध्यम/सूची कम करें।');
   if(Date.parse(p.scheduledAt)<now()-60000)throw Error('बीता हुआ समय नहीं चुन सकते।');
   const old=list();if(old.some(c=>c.festival===p.festival&&(p.festival!=='custom'||c.title===p.title)&&c.date===p.date&&c.channels.some(ch=>p.channels.includes(ch))&&(c.state!=='cancelled'||c.jobs.some(j=>['sent','sending','unconfirmed'].includes(j.state)))))throw Error('इस त्योहार/दिन और माध्यम का अभियान पहले से है। उसी की स्थिति देखें।');
   const campaign={id:randomUUID(),festival:p.festival,title:p.title,date:p.date,scheduledAt:p.scheduledAt,channels:p.channels,messages:p.messages,state:'active',createdAt:new Date(now()).toISOString(),jobs:p.rows.flatMap(r=>p.channels.map(channel=>({id:randomUUID(),...r,channel,state:'queued',attempts:0,error:''})))};
@@ -38,7 +44,7 @@ function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
  function review(cid,jid,action){assert();const all=list(),c=all.find(x=>x.id===cid),j=c?.jobs.find(x=>x.id===jid);if(!j||!['unconfirmed','failed'].includes(j.state))throw Error('इस संदेश की जाँच उपलब्ध नहीं है।');if(action==='sent')j.state='sent';else if(action==='cancel')j.state='cancelled';else throw Error('पहले WhatsApp/gateway में परिणाम जाँचें।');j.error='';save(all);}
  function setExclusions(numbers){assert();if(typeof numbers!=='string'||numbers.length>100000)throw Error('मोबाइल नंबरों की सूची सही नहीं है।');const values=numbers.split(/[\s,;]+/).filter(Boolean);const normalized=values.map(familyNumber);if(normalized.some(x=>!x))throw Error('हर नंबर 10 अंक या +91 के साथ लिखें; एक लाइन में एक नंबर।');store.metaSet(blockKey,[...new Set(normalized)].sort());}
  function configureSMS(config){assert();gateway={apiUrl:String(config?.apiUrl||''),apiKey:String(config?.apiKey||''),deviceId:String(config?.deviceId||'')};}
- function status(){assert();return{festivals:FESTIVALS,exclusions:exclusions(),smsReady:!!(gateway?.apiUrl&&gateway.apiKey&&gateway.deviceId),campaigns:list().slice().reverse().map(c=>({...c,counts:c.jobs.reduce((a,j)=>(a[j.state]=(a[j.state]||0)+1,a),{}),jobs:c.jobs}))};}
+ function status(){assert();return{festivals:FESTIVALS,exclusions:exclusions(),smsReady:!!(gateway?.apiUrl&&gateway.apiKey&&gateway.deviceId),campaigns:list().slice().reverse().map(c=>({...c,estimate:estimate(c.jobs.filter(j=>['queued','sending'].includes(j.state)).length,c.scheduledAt),counts:c.jobs.reduce((a,j)=>(a[j.state]=(a[j.state]||0)+1,a),{}),jobs:c.jobs}))};}
  async function tick(){
   if(busy||!allowed()||now()<nextSend)return;busy=true;
   try{

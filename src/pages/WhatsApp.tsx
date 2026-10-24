@@ -1,3 +1,6 @@
+import { normalizeIndianMobile } from "@/lib/mobile";
+import { personalizeMessage } from "@/lib/messagePersonalization";
+import { OutreachStatus } from "@/components/OutreachStatus";
 import { MonthlyReportPanel } from "@/components/MonthlyReportPanel";
 import { WhatsAppConnection } from "@/components/WhatsAppConnection";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -21,8 +24,8 @@ const TEMPLATES: Record<string, string> = {
 
 // ✅ IPC ke through Electron main process ko WhatsApp window open karne bolna
 export function openWhatsAppWeb(mobile: string, message: string) {
-  const cleanMobile = mobile?.replace(/\D/g, "") || "";
-  const num = cleanMobile.startsWith("91") ? cleanMobile : `91${cleanMobile}`;
+  let num:string;
+  try { num=normalizeIndianMobile(mobile); } catch { toast({title:"सही मोबाइल नंबर चुनें",variant:"destructive"}); return false; }
   const url = `https://web.whatsapp.com/send?phone=${num}&text=${encodeURIComponent(message)}`;
 
   // Electron mein IPC se bhejo
@@ -35,6 +38,7 @@ export function openWhatsAppWeb(mobile: string, message: string) {
     // Browser fallback (dev mein)
     window.open(url, "whatsapp_web_window", "width=1000,height=700,scrollbars=yes,resizable=yes");
   }
+  return true;
 }
 
 export default function WhatsApp() {
@@ -48,16 +52,19 @@ export default function WhatsApp() {
 
   const handleTemplateChange = (t: string) => {
     setTemplate(t);
-    const patientName = selectedPatientData?.name || "[NAME]";
-    setMessage(TEMPLATES[t]?.replace(/\[NAME\]/g, patientName) || "");
+    setMessage(TEMPLATES[t] || "");
   };
 
   const handlePatientChange = (id: string) => {
+    if (selectedPatient !== id && message !== TEMPLATES[template]) {
+      setMessage(TEMPLATES[template] || "");
+      toast({ title: "मरीज बदलने पर संपादित संदेश फिर जाँचें" });
+    }
     setSelectedPatient(id);
     const patient = patients?.find(p => p.id === id);
     if (patient) {
       setManualNumber(patient.mobile || "");
-      setMessage(prev => prev.replace(/\[NAME\]/g, patient.name));
+
     }
   };
 
@@ -71,7 +78,8 @@ export default function WhatsApp() {
       toast({ title: "Error", description: "Message लिखें", variant: "destructive" });
       return;
     }
-    openWhatsAppWeb(number, message);
+    if (selectedPatient && !selectedPatientData) { toast({ title: "मरीज फिर चुनें", variant: "destructive" }); return; }
+    if(!openWhatsAppWeb(number, personalizeMessage(message, selectedPatientData?.name)))return;
     toast({ title: "✅ WhatsApp Web Opened", description: "Same window mein message ready hai" });
   };
 
@@ -90,6 +98,7 @@ export default function WhatsApp() {
 
         <WhatsAppConnection />
         <MonthlyReportPanel />
+        <OutreachStatus />
         <div className="grid gap-6 md:grid-cols-2">
           {/* Send Message Card */}
           <Card>
@@ -116,10 +125,11 @@ export default function WhatsApp() {
 
               <div className="space-y-2">
                 <Label>या Manual Number डालें</Label>
+                <p className="text-xs text-muted-foreground">पहले मरीज / नंबर चुनें, फिर संदेश संपादित करें। मरीज बदलने पर संपादित संदेश फिर जाँचना होगा।</p>
                 <Input
                   placeholder="Mobile number"
                   value={manualNumber}
-                  onChange={e => setManualNumber(e.target.value)}
+                  onChange={e => { setManualNumber(e.target.value); setSelectedPatient(""); if (message !== TEMPLATES[template]) setMessage(TEMPLATES[template] || ""); }}
                 />
               </div>
 
@@ -146,6 +156,8 @@ export default function WhatsApp() {
                 />
               </div>
 
+              <p className="text-xs text-muted-foreground">[NAME] की जगह चुने हुए मरीज का नाम लगेगा। Manual नंबर पर नाम न हो तो “मित्र” आएगा।</p>
+              <div className="whitespace-pre-wrap rounded border p-3 text-sm" aria-label="Final WhatsApp message">{personalizeMessage(message, selectedPatientData?.name)}</div>
               <Button onClick={handleSend} className="w-full gap-2 bg-green-600 hover:bg-green-700">
                 <MessageCircle className="h-4 w-4" />
                 WhatsApp Web से भेजें
@@ -175,7 +187,7 @@ export default function WhatsApp() {
                         size="sm"
                         className="text-green-600 hover:text-green-700 hover:bg-green-50 gap-1 flex-shrink-0"
                         onClick={() => {
-                          const welcomeMsg = TEMPLATES.welcome.replace(/\[NAME\]/g, p.name);
+                          const welcomeMsg = personalizeMessage(TEMPLATES.welcome, p.name);
                           openWhatsAppWeb(p.mobile!, welcomeMsg);
                         }}
                       >

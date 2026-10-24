@@ -70,3 +70,8 @@ Live acceptance remains a device check after installing the resulting EXE:
 preview the list, connect the owner's WhatsApp and verify a deliberately chosen
 test recipient before activating any real campaign. No actual patient credentials,
 phone delivery or WhatsApp account was used in tests.
+
+Preview now includes message-count/duration/IST finish estimates and blocks a
+schedule whose lower-bound duration cannot fit before that festival day ends.
+The estimate includes both selected channels and explains connection/retry delay.
+See [FIVE_CLINIC_UPDATES.md](FIVE_CLINIC_UPDATES.md).

@@ -46,6 +46,11 @@ jobs:
           node tests/billing-catalog.cjs
           node tests/clinic-updates.cjs
           node tests/due-collection-date.cjs
+          node tests/message-and-estimate.cjs
+          node tests/outreach.cjs
+          node tests/receipt-origin.cjs
+          node tests/attachment-backup.cjs
+          node tests/full-backup-roundtrip.cjs
           node tests/pc-family-whatsapp.cjs
           node tests/festival-messaging.cjs
           node tests/diagnostics.cjs
@@ -64,6 +69,8 @@ jobs:
         run: npx --no-install electron tests/festival-greetings-electron.cjs
       - name: Check native due collection dates and Cash Tally
         run: npx --no-install electron tests/due-collection-electron.cjs
+      - name: Check native village and WhatsApp messaging UI
+        run: npx --no-install electron tests/messaging-ui-electron.cjs
       - name: Check native QR invoice PDF
         run: npx --no-install electron tests/invoice-pdf-smoke.cjs
       - name: Bump patch version

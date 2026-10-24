@@ -336,6 +336,11 @@ function commitMutation(mutation, row, idField = 'id') {
       if (!existing) throw new Error('Record not available locally; refresh before editing');
       if (mutation.table === 'billing' && mutation.expectedPaid !== undefined && Number(existing.amount_paid || 0) !== mutation.expectedPaid) throw new Error('Payment changed; reopen bill before collecting');
       saved = { ...existing, ...row, [idField]: mutation.rowId, _pendingSync: true };
+      if (mutation.table === 'billing' && Array.isArray(saved.payment_history)) {
+        const prior = new Set((existing.payment_history || []).map(r => r.id));
+        for (const receipt of saved.payment_history) if (typeof receipt.id === 'string' && !prior.has(receipt.id) && Number(receipt.amount) > 0 && !receipt.legacy && !receipt.id.startsWith('reclass:'))
+          metaSet('outreach:receipt-origin:' + String(saved.id).replace(/^local_/, '') + ':' + receipt.id, true);
+      }
     }
     if (mutation.op === 'delete') cascadeLocalDelete(mutation.table, mutation.rowId);
     else cacheUpsertRow(mutation.table, saved, idField);

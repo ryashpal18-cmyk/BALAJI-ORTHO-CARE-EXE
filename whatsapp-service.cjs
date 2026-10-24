@@ -174,7 +174,7 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
     }finally{busy=false;}
   }
   // Plain text campaigns share the paired client, but have a separate durable journal.
-  async function sendText(mobile,text){
+  async function sendText(mobile,text,validate=()=>true){
     assertAllowed();const normalized=familyNumber(mobile);
     if(!normalized||typeof text!=='string'||!text.trim()||text.length>1500)return{ok:false,permanent:true,error:'सही नंबर और संदेश चाहिए।'};
     if(!ready||!client||busy)return{ok:false,error:'WhatsApp कनेक्शन/पिछले संदेश की प्रतीक्षा में'};
@@ -183,6 +183,7 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
       const activeClient=client,number=await bounded(activeClient.getNumberId('91'+normalized),30000);
       if(!number)return{ok:false,permanent:true,error:'इस नंबर पर WhatsApp नहीं है।'};
       assertAllowed();if(client!==activeClient||!ready)return{ok:false,error:'WhatsApp connection बदल गया।'};
+      const check=validate();if(check!==true)return{ok:false,cancelled:check==='cancelled',error:'प्राप्तकर्ता या अभियान बदला है; संदेश रोका गया।'};
       handedOff=true;
       const sent=await bounded(activeClient.sendMessage(number._serialized,text,{waitUntilMsgSent:true}),timeoutMs);
       if(!sent?.id?._serialized)throw Error('Acknowledgment missing');

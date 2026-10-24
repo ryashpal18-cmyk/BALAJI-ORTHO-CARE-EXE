@@ -78,6 +78,7 @@ export default function SettingsPage() {
 
   // ── Backup ──
   const [backupRunning, setBackupRunning] = useState(false);
+  const [backupProgress,setBackupProgress]=useState("");
   const [lastBackupAt, setLastBackupAt]   = useState<string | null>(getLastBackupAt());
   const [dailyOn,      setDailyOn]        = useState(isDailyBackupEnabled());
   const [weeklyOn,     setWeeklyOn]       = useState(isWeeklyBackupEnabled());
@@ -225,17 +226,18 @@ export default function SettingsPage() {
 
   const handleBackupNow = async () => {
     setBackupRunning(true);
-    const res = await runBackupNow("manual").catch((error: any) => ({ ok: false, error: error.message, recordCounts: {}, warnings: [] } as any));
+    setBackupProgress("रिकॉर्ड तैयार हो रहे हैं…");
+    const res = await runBackupNow("manual",(done,total)=>setBackupProgress(`फोटो/फाइल: ${done} / ${total}`)).catch((error: any) => ({ ok: false, error: error.message, recordCounts: {}, warnings: [] } as any));
     setBackupRunning(false);
-    if (res.ok && res.warnings?.length) toast({ title: "Backup saved with coverage notes", description: `${res.warnings.length} tables used local cache. See JSON warnings; copy image folders separately.` });
+    if (res.ok && res.warnings?.length) toast({ title: "Backup saved with coverage notes", description: `${res.warnings.length} coverage notes हैं। फोटो/फाइल missing हों तो बैकअप आंशिक है। JSON में विवरण देखें।` });
     if (res.ok) {
       setLastBackupAt(getLastBackupAt());
       await refreshBackupInfo();
       const totalRecords = Object.values(res.recordCounts as Record<string, number>).reduce((a, b) => a + b, 0);
       toast({
-        title: res.warnings?.length ? "Backup saved — coverage limited" : "✅ Backup complete",
+        title: res.attachmentMissing ? "आंशिक बैकअप सेव हुआ — कुछ फोटो नहीं मिलीं" : res.warnings?.length ? "बैकअप सेव हुआ — coverage सीमित है" : "✅ फोटो सहित बैकअप पूरा",
         description: res.mode === "electron"
-          ? `${totalRecords} records backup ho gaye - Documents/Balaji_Ortho_Backups folder mein`
+          ? `${totalRecords} रिकॉर्ड और ${res.attachmentCount||0} फोटो/PDF सेव हैं। ${res.attachmentMissing||0} फाइल missing। Documents/Balaji_Ortho_Backups देखें।`
           : `${totalRecords} records backup ho gaye - download folder check karein`,
       });
     } else {
@@ -921,16 +923,17 @@ export default function SettingsPage() {
                   ) : (
                     <HardDriveDownload style={{ width: "14px", height: "14px" }} />
                   )}
-                  {backupRunning ? "Backup ho raha hai..." : "Backup Now"}
+                  {backupRunning ? "Backup ho raha hai..." : "फोटो सहित पूरा Backup"}
                 </Button>
 
+                {backupProgress&&<p role="status" className="text-sm">{backupProgress}{backupRunning?"":" — जाँच पूरी"}</p>}
                 <div className="my-4 border rounded p-3">
                   <p>Restore JSON (केवल खाली नए/test database पर; existing data overwrite नहीं होगा)</p>
                   <Input type="file" accept=".json" onChange={async e => {
                     const file = e.target.files?.[0]; if (!file) return;
                     try {
                       const json = await file.text(), info = inspectBackup(json);
-                      if (!window.confirm(`बैकअप में ${info.records} रिकॉर्ड और ${info.pending} pending काम हैं। ${info.warnings.length} coverage चेतावनियाँ हैं। केवल खाली डिवाइस पर restore करें। आगे बढ़ें?`)) return;
+                      if (!window.confirm(`बैकअप में ${info.records} रिकॉर्ड, ${info.attachments} फोटो/PDF, ${info.missingAttachments} missing फाइल और ${info.pending} pending काम हैं। ${info.warnings.length} coverage चेतावनियाँ हैं। केवल खाली डिवाइस पर restore करें। पुराने outgoing संदेश जाँच के लिए रोके जाएँगे। आगे बढ़ें?`)) return;
                       await restoreBackup(json); toast({ title: "Backup restored. Restart app." });
                     }
                     catch (error: any) { toast({ title: "Restore failed", description: error.message, variant: "destructive" }); }
@@ -975,7 +978,7 @@ export default function SettingsPage() {
                     <ToggleSwitch on={weeklyOn} onToggle={handleToggleWeekly} />
                   </div>
                   <p style={{ fontSize: "11px", color: "#8a9ab0", marginTop: "2px" }}>
-                    ऐप खुला रहने पर अपने आप backup बनेगा। इंटरनेट बंद हो तो उपलब्ध स्थानीय डेटा शामिल होगा; यह पूर्ण cloud backup नहीं होगा। X-ray और अन्य attachments की अलग कॉपी रखें।
+                    ऐप खुला रहने पर अपने आप backup बनेगा। इंटरनेट बंद हो तो उपलब्ध स्थानीय डेटा शामिल होगा; यह पूर्ण cloud backup नहीं होगा। उपलब्ध फोटो/PDF की असली bytes JSON में जुड़ेंगी। केवल cloud पर मौजूद फाइल के लिए इंटरनेट चाहिए; missing फाइल हो तो बैकअप “आंशिक” दिखेगा। पूरी JSON फाइल नए खाली PC पर फोटो सहित restore हो सकती है।
 </p>
                 </div>
               </CardContent>
