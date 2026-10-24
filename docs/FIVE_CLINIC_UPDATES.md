@@ -56,7 +56,9 @@ accepted SMS journal network resend रोकता है। Ambiguous WhatsApp
 Settings → Backup → **फोटो सहित पूरा Backup**। Existing automatic daily/weekly
 backup भी photo capture इस्तेमाल करता है। Patient/bill/queue records के साथ
 referenced JPEG, PNG, WebP और PDF की असली base64 bytes, MIME, size और SHA-256
-checksum JSON में रखे जाते हैं। Excel readable summary है; बड़े photo/binary
+checksum JSON में रखे जाते हैं। Version 3 JSON में हर फोटो की bytes एक बार
+रहती हैं; records/queued uploads में compact references हैं। Version 2 के पुराने
+backups भी restore होते हैं। Excel readable summary है; बड़े photo/binary
 fields Excel cell में नहीं भरे जाते, पूरा डेटा JSON में रहता है। नया dependency,
 SQL migration या data deletion नहीं है।
 

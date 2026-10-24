@@ -44,10 +44,18 @@ export async function captureAttachments(value:any,onProgress?:(done:number,tota
 }
 export async function restoreAttachmentData(backup:any){
  if(!backup.attachmentFiles)return backup;
- const archive=backup.attachmentFiles;if(archive.version!==1||!Array.isArray(archive.files))throw Error('Invalid photo backup');
- const replacements=new Map<string,string>();
- for(const file of archive.files){if(!Array.isArray(file.sources)||file.sources.some((s:any)=>typeof s!=='string'))throw Error('Invalid attachment reference');const actual=await pack(bytesFromBase64(file.base64),file.mime);if(actual.sha256!==file.sha256||actual.size!==file.size)throw Error('फोटो checksum नहीं मिला; restore रोका गया।');const data=`data:${actual.mime};base64,${actual.base64}`;for(const source of file.sources){if(replacements.has(source)&&replacements.get(source)!==data)throw Error('Duplicate photo reference conflict');replacements.set(source,data);if(source.startsWith('https:'))try{await (window as any).electron?.attachment?.write({source,...actual});}catch{}}
+ const archive=backup.attachmentFiles;if(![1,2].includes(archive.version)||!Array.isArray(archive.files))throw Error('Invalid photo backup');
+ const replacements=new Map<string,string>(),uploads=new Map<string,string>();
+ for(const file of archive.files){if(!Array.isArray(file.sources)||file.sources.some((s:any)=>typeof s!=='string'))throw Error('Invalid attachment reference');const actual=await pack(bytesFromBase64(file.base64),file.mime);if(actual.sha256!==file.sha256||actual.size!==file.size)throw Error('फोटो checksum नहीं मिला; restore रोका गया।');const data=`data:${actual.mime};base64,${actual.base64}`;for(const source of file.sources){if(source.startsWith('balaji-attachment:')&&source!=='balaji-attachment:'+file.sha256)throw Error('Invalid photo reference checksum');if(replacements.has(source)&&replacements.get(source)!==data)throw Error('Duplicate photo reference conflict');replacements.set(source,data);if(source.startsWith('balaji-attachment:'))uploads.set(source,actual.base64);if(source.startsWith('https:'))try{await (window as any).electron?.attachment?.write({source,...actual});}catch{}}
  }
- const rewrite=(v:any,key=''):any=>{if(typeof v==='string')return FIELDS.has(key)?replacements.get(v)||v:v;if(Array.isArray(v))return v.map(x=>rewrite(x));if(v&&typeof v==='object')return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,rewrite(x,k)]));return v;};
+ const rewrite=(v:any,key=''):any=>{if(typeof v==='string'){if(v.startsWith('balaji-attachment:')&&((key==='fileBase64'&&!uploads.has(v))||(FIELDS.has(key)&&!replacements.has(v))))throw Error('फोटो reference backup में नहीं मिला।');return key==='fileBase64'?uploads.get(v)||v:FIELDS.has(key)?replacements.get(v)||v:v;}if(Array.isArray(v))return v.map(x=>rewrite(x));if(v&&typeof v==='object')return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,rewrite(x,k)]));return v;};
  return{...backup,tables:rewrite(backup.tables),localSnapshot:{...backup.localSnapshot,cache:rewrite(backup.localSnapshot?.cache),queue:rewrite(backup.localSnapshot?.queue)}};
+}
+/** Store each photo once; compact references prevent multi-megabyte URL duplication. */
+export function compactAttachmentBackup(backup:any){
+ const archive=backup.attachmentFiles;if(!archive)return backup;
+ const replacements=new Map<string,string>(),uploads=new Map<string,string>();
+ for(const file of archive.files){const token='balaji-attachment:'+file.sha256;for(const source of file.sources)replacements.set(source,token);uploads.set(file.base64,token);}
+ const rewrite=(v:any,key=''):any=>{if(typeof v==='string'){if(v.startsWith('balaji-attachment:')&&((key==='fileBase64'&&!uploads.has(v))||(FIELDS.has(key)&&!replacements.has(v))))throw Error('फोटो reference backup में नहीं मिला।');return key==='fileBase64'?uploads.get(v)||v:FIELDS.has(key)?replacements.get(v)||v:v;}if(Array.isArray(v))return v.map(x=>rewrite(x));if(v&&typeof v==='object')return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,rewrite(x,k)]));return v;};
+ return{...backup,formatVersion:3,tables:rewrite(backup.tables),localSnapshot:{...backup.localSnapshot,cache:rewrite(backup.localSnapshot?.cache),queue:rewrite(backup.localSnapshot?.queue)},attachmentFiles:{...archive,version:2,files:archive.files.map((file:AttachmentFile)=>({...file,sources:[...new Set(['balaji-attachment:'+file.sha256,...file.sources.filter(s=>!s.startsWith('data:'))])]}))}};
 }

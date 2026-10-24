@@ -25,7 +25,7 @@ const deps={store,logger,reportDir,backupDir,dataDir:dir,appInfo:()=>({version:'
  store.queueAdd({table:'patients',op:'insert',payload:{id:'patient-test',name:'Synthetic Named Patient'},tempId:'patient-test',retries:7,lastError:'HTTP 403'});
  store.queueAdd({table:'sms_logs',op:'sms',payload:{mobile:'9876543210',deliveryState:'unconfirmed'},tempId:'sms-test'});
  store.metaSet('sms-dispatch:synthetic',{state:'uncertain',fingerprint:'synthetic'});store.metaSet('whatsapp:invoice-jobs',[{state:'unconfirmed',patientName:'Synthetic Named Patient',mobile:'9876543210'}]);
- fs.writeFileSync(path.join(backupDir,'backup.json'),JSON.stringify({formatVersion:2,tables:{patients:[]},localSnapshot:{cache:{},queue:[]}}));
+ fs.writeFileSync(path.join(backupDir,'backup.json'),JSON.stringify({formatVersion:3,tables:{patients:[]},localSnapshot:{cache:{},queue:[]}}));
  const before=JSON.stringify(store.snapshot());const service=createDiagnostics(deps);const pending=service.run({mode:'deep'});assert.equal(service.run({mode:'quick'}),pending);const r=await pending;
  assert.equal(JSON.stringify(store.snapshot()),before);assert.equal(r.success,true);assert.ok(r.summary.errors>0);assert.ok(r.summary.skipped>0);
  assert.equal(r.checks.find(c=>c.code==='SYNC-001').evidence.pending,1);assert.equal(r.checks.find(c=>c.code==='SMS-001').evidence.queued,1);assert.equal(r.checks.find(c=>c.code==='WA-001').evidence.failedOrUnconfirmed,1);pass('real SQLite queue, SMS and WhatsApp counts; no clinical or journal mutations; concurrent runs coalesce');

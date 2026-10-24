@@ -1,4 +1,4 @@
-import { captureAttachments, restoreAttachmentData } from "./attachmentBackup";
+import { captureAttachments, restoreAttachmentData, compactAttachmentBackup } from "./attachmentBackup";
 import { fetchCompleteTable, OPERATIONAL_TABLES } from "./completeFetch";
 import { getLocalSnapshot, restoreLocalSnapshot } from "./offlineDb";
 import { businessDate } from "@/lib/businessDate";
@@ -32,7 +32,8 @@ function recordBackupResult(result: BackupResult): BackupResult {
 }
 export function inspectBackup(json: string) {
   const backup = JSON.parse(json);
-  if (backup.formatVersion !== 2 || !backup.tables || !Array.isArray(backup.localSnapshot?.queue)) throw new Error("Version 2 JSON backup required");
+  if (![2,3].includes(backup.formatVersion) || !backup.tables || !Array.isArray(backup.localSnapshot?.queue)) throw new Error("Version 2/3 JSON backup required");
+  if(backup.formatVersion===3&&(backup.attachmentFiles?.version!==2||!Array.isArray(backup.attachmentFiles.files)||!Array.isArray(backup.attachmentFiles.missing)))throw new Error('Version 3 photo archive missing or invalid');
   const tables = Object.values(backup.tables);
   if (tables.some(rows => !Array.isArray(rows))) throw new Error("Invalid backup table");
   return { records: tables.reduce((sum: number, rows: any[]) => sum + rows.length, 0), pending:backup.localSnapshot.queue.length,
@@ -111,7 +112,7 @@ export async function restoreBackup(json: string) {
     throw new Error("Restore केवल खाली नए डिवाइस पर करें। मौजूदा मरीज और pending डेटा सुरक्षित है।");
 
   const backup = await restoreAttachmentData(JSON.parse(json));
-  if (backup.formatVersion !== 2 || !backup.tables || !Array.isArray(backup.localSnapshot?.queue)) throw new Error("Version 2 JSON backup required");
+  if (![2,3].includes(backup.formatVersion) || !backup.tables || !Array.isArray(backup.localSnapshot?.queue)) throw new Error("Version 2/3 JSON backup required");
   parkRestoredMessages(backup);
   await restoreLocalSnapshot({ cache: backup.tables, queue: backup.localSnapshot.queue, meta: backup.localSnapshot.meta || [] });
   for (const [key,value] of Object.entries(backup.localStorage || {})) {
@@ -176,7 +177,7 @@ async function performBackupNow(label: string, onProgress?:(done:number,total:nu
   const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const baseName = `balaji_ortho_backup_${label}_${stamp}`;
 
-  const fullJson = {
+  const fullJson = compactAttachmentBackup({
     formatVersion: 2,
     coverage, warnings, localSnapshot, localStorage: localStorageSnapshot,
     attachmentFiles,
@@ -185,7 +186,7 @@ async function performBackupNow(label: string, onProgress?:(done:number,total:nu
     label,
     clinic: "Balaji Ortho Care Center",
     tables: backupData,
-  };
+  });
   const jsonString = JSON.stringify(fullJson, null, 2);
 
   // Excel: ek sheet per table, taaki Dr Excel mein khol kar seedha dekh sakein.
