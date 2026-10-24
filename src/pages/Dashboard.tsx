@@ -37,7 +37,7 @@ export default function Dashboard() {
   const [editServices, setEditServices] = useState<{name:string; amount:string}[]>([]);
   const [editSaving, setEditSaving] = useState(false);
 
-  const todayTotalAmount = todayBills?.reduce((sum, b) => sum + Number(b.amount), 0) || 0;
+  const todayTotalAmount = Number(stats?.todayRevenue || 0);
   const pendingTotal = pendingBills?.reduce((sum, b) => sum + billDue(b), 0) || 0;
 
   // ── WhatsApp Reminder ──
@@ -166,7 +166,7 @@ export default function Dashboard() {
           <StatCard title="Today's Patients" value={todayBills?.length ?? 0} icon={Users} variant="primary" />
           <StatCard title="Appointments" value={stats?.todayAppointments ?? 0} icon={Calendar} variant="secondary" />
           <StatCard title="Pending Payments" value={`₹${pendingTotal.toLocaleString()}`} icon={Receipt} variant="warning" />
-          <StatCard title="Today's Revenue" value={`₹${todayTotalAmount.toLocaleString()}`} icon={IndianRupee} variant="success" />
+          <StatCard title="आज प्राप्त / Collected" value={`₹${todayTotalAmount.toLocaleString()}`} icon={IndianRupee} variant="success" />
         </div>
 
         {/* Today's Patients */}

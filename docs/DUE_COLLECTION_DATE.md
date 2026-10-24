@@ -23,8 +23,9 @@
 - Analytics में payment_history पढ़ी जाती है, मासिक प्राप्ति receipt month से
   आती है और pending local receipt को cloud sync का इंतजार नहीं करना पड़ता।
   बिल save/edit/delete होने पर Analytics cache invalidate होती है।
-- Dashboard और Daily Cash Book पहले से receipt dates का इस्तेमाल करते थे।
-  उनकी write/sync logic नहीं बदली गई।
+- Dashboard के होम कार्ड को भी receipt-based todayRevenue से जोड़ा गया है;
+  पहले hook में सही जोड़ होने पर भी कार्ड invoice gross दिखाता था। Daily Cash
+  Book पहले से receipt dates का इस्तेमाल करता था। write/sync logic नहीं बदली।
 
 कोई migration, patient-data rewrite, bill-date rewrite या schema change नहीं है।
 Payment saving, receipt identities, offline storage, audit, background sync,
@@ -35,7 +36,7 @@ SMS और WhatsApp sending के code paths नहीं बदले गए�
 
 ## Validation
 
-`tests/due-collection-date.cjs`: 11 synthetic checks covering partial/full recovery,
+`tests/due-collection-date.cjs`: 12 synthetic checks covering partial/full recovery,
 no-new-bill day, original invoice date, India midnight, negative correction,
 legacy records, real screen expressions, Analytics pending-local/cloud overlay,
 and printed report totals/escaping.
