@@ -359,7 +359,7 @@ function snapshot() {
 function restoreSnapshot(dump) {
   if (!dump || !dump.cache || !Array.isArray(dump.queue)) throw new Error('Invalid backup');
   return getDb().transaction(() => {
-    if (queueGetAll().length || getDb().prepare('SELECT count(*) AS n FROM table_cache').get().n)
+    if (queueGetAll().length || getDb().prepare("SELECT count(*) AS n FROM table_cache WHERE table_name NOT IN ('branches','profiles','user_roles')").get().n)
       throw new Error('Restore requires an empty test/new database; existing data was not changed');
     for (const [table, rows] of Object.entries(dump.cache)) cacheSetRows(table, rows, 'id');
     for (const m of dump.queue) { const id = queueAdd(m); queueUpdate(id, { ...m, id }); }

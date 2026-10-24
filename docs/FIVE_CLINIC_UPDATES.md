@@ -78,7 +78,8 @@ coverage का दावा नहीं है। JSON में patient data 
 backup के रूप में संभालें। Auth files और WhatsApp browser session की copy नहीं है।
 
 Restore preview photo/missing counts दिखाता है। केवल खाली नए/test database पर
-restore होता है; existing patients/pending work overwrite नहीं हो सकते। Checksum
+restore होता है; शुरुआत की branch/profile settings खाली clinic को नहीं रोकतीं,
+लेकिन existing patients/pending work overwrite नहीं हो सकते। Checksum
 न मिले तो database write से पहले restore रुकता है। Photos offline data references
 में लौटती हैं। पुराने outgoing SMS/WhatsApp/bulk jobs को restore के बाद review के
 लिए park किया जाता है, और restored historic receipts को नये confirmations नहीं
