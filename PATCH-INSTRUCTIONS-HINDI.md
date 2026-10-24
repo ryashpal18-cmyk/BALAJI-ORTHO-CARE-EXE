@@ -1,3 +1,5 @@
+> ऐतिहासिक दस्तावेज़: यह पुराने 2.0.41 patch का विवरण है। वर्तमान installation के लिए GitHub की latest EXE release लें। पुराने checksum manifest को हटाया गया है; नीचे की file list वर्तमान project की सूची नहीं है।
+
 # बग 1–20: सिर्फ आवश्यक बदली हुई फाइलों का patch
 
 प्रोजेक्ट: Balaji Digital X-Ray & Ortho Care Center — source version 2.0.41
@@ -104,7 +106,7 @@ Windows पर EXE बनाना/जाँचना उचित है; SQLit
 
 ## ZIP की सामग्री
 
-नीचे केवल बदली/नई runtime files हैं। node_modules, dist, images, .env और पूरा project शामिल नहीं है। Tests की dependencies भी ZIP में नहीं हैं। PATCH-FILES.sha256 में हर runtime file का checksum है।
+नीचे केवल बदली/नई runtime files हैं। node_modules, dist, images, .env और पूरा project शामिल नहीं है। Tests की dependencies भी ZIP में नहीं हैं।
 
 - `access-control.cjs`
 - `auth-public-config.json`
@@ -211,7 +213,6 @@ Windows EXE और live Supabase का end-to-end परीक्षण यह�
 - `node tests/offline-first.cjs`: असली अस्थायी SQLite file बंद/खोलकर row, queue और retry deadline; stalled network पर local reads; 8 से अधिक failures के बाद retry; Ortho local edit; request timeout।
 - `node tests/offline-cashbook.cjs`: test-only `@electric-sql/pglite` चाहिए (या `PGLITE_MODULE_PATH`); N01–N07 और conflicting corrections के tests। Live clinic data इस्तेमाल नहीं किया गया।
 - पुराने regression/login tests, TypeScript और production React build पास हैं। Windows/live Supabase deployment की पुष्टि अलग से करनी होगी।
-- `PATCH-FILES.sha256` में workflow द्वारा बदलने वाली package version files शामिल नहीं हैं।
 
 
 ## अगली जाँच: delete / Ortho / cash refresh / SMS / external link
