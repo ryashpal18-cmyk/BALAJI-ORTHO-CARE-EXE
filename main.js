@@ -1306,7 +1306,7 @@ app.whenReady().then(() => {
   } catch (e) {
     logger.logError('app-lifecycle', `SQLite offline store init fail: ${e.message}`);
   }
-  try {require('./pc-messaging.cjs').registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store:sqliteStore,access});}
+  try {require('./pc-messaging.cjs').registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store:sqliteStore,access,sendSMS:sendDurableSMS});}
   catch(error){logger.logError('whatsapp','Messaging setup unavailable: '+error.message);}
   seedPatientsOnFirstRun();
   ensureAppBackupDir();

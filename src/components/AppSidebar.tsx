@@ -44,6 +44,7 @@ const ALL_MENU_ITEMS = [
   { title: "PlasterSync",         url: "/plaster-sync",        icon: RefreshCw },
   { title: "Analytics",           url: "/analytics",           icon: BarChart3 },
   { title: "Revenue Dashboard",   url: "/revenue-dashboard",   icon: IndianRupee },
+  { title: "त्योहार शुभकामनाएँ", url: "/festival-greetings", icon: Calendar },
   { title: "WhatsApp",            url: "/whatsapp",            icon: MessageCircle },
   { title: "SMS Logs",            url: "/sms-logs",            icon: MessageSquare },
   { title: "Insurance Claims",    url: "/insurance-claims",    icon: ShieldPlus },
@@ -64,6 +65,7 @@ export function AppSidebar() {
 
   const menuItems = ALL_MENU_ITEMS.filter(item => {
     if (isAdmin) return true;
+    if (item.url === "/festival-greetings") return false;
     if (item.url === "/settings" || item.url === "/audit-log" || item.url === "/branches") return false;
     return perms.includes(item.url);
   });

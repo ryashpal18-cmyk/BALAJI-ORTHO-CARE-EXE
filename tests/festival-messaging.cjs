@@ -1,0 +1,41 @@
+'use strict';
+const assert=require('node:assert/strict'),{EventEmitter}=require('events');
+const {createFestivalService,FESTIVALS,indiaDate}=require('../festival-messaging.cjs');
+const {createWhatsAppService}=require('../whatsapp-service.cjs');
+const {createSmsSender}=require('../sms-outbox.cjs');
+const memory=()=>{const data=new Map();return{metaGet:k=>data.has(k)?structuredClone(data.get(k)):undefined,metaSet:(k,v)=>data.set(k,structuredClone(v)),patientDirectoryRows:()=>patients,cacheGetAll:()=>[]};};
+let patients=[{id:'p1',name:'One',mobile:'9876543210'},{id:'p2',name:'Two',mobile:'+91 98765 43210'},{id:'p3',name:'Three',mobile:'9123456780'},{id:'p4',name:'Invalid',mobile:'0000000000'}];
+let clock=Date.parse('2026-11-01T03:30:00Z'),authorized=true,waReady=true,mode='ok',waCalls=0,smsCalls=0,passes=0;
+const pass=s=>{passes++;console.log('PASS '+s);};
+const whatsapp={status:()=>({ready:waReady}),sendText:async()=>{waCalls++;return mode==='timeout'?{ok:false,uncertain:true,error:'ambiguous'}:mode==='offline'?{ok:false,error:'offline'}:{ok:true};}};
+const store=memory(),gateway={apiUrl:'https://synthetic.invalid/send',apiKey:'synthetic',deviceId:'synthetic'};
+const sender=createSmsSender({store,fetchImpl:async()=>{smsCalls++;return{ok:true};}});
+const opts={store,allowed:()=>authorized,whatsapp,sendSMS:sender,now:()=>clock,intervalMs:0};
+const input=(festival='diwali',channels=['whatsapp','sms'])=>({festival,title:'Synthetic '+festival,channels,scheduledAt:new Date(clock).toISOString(),whatsapp:'Synthetic शुभकामनाएँ',sms:'Synthetic SMS'});
+const queue=(s,i)=>s.create({...i,fingerprint:s.preview(i).fingerprint});
+(async()=>{
+ let service=createFestivalService(opts);service.configureSMS(gateway);
+ assert.equal(FESTIVALS.length,14);assert.equal(indiaDate(Date.parse('2026-10-31T19:00:00Z')),'2026-11-01');
+ const p=service.preview(input());assert.equal(p.count,2);assert.equal(p.duplicates,1);assert.equal(p.invalid,1);assert.equal(waCalls+smsCalls,0);pass('templates, IST boundary, phone normalization, deduplication, invalid-number exclusion and preview never dispatch');
+ assert.throws(()=>service.create({...input(),fingerprint:'stale'}),/preview/);patients.push({id:'new',mobile:'9234567890'});assert.throws(()=>service.create({...input(),fingerprint:p.fingerprint}),/preview/);patients.pop();
+ assert.throws(()=>service.preview({...input(),channels:[]}),/चुनें/);assert.throws(()=>service.preview({...input(),scheduledAt:'2026-11-01T09:00:00'}),/समय/);pass('stale audience/message and malformed input cannot activate');
+ const id=queue(service,input());assert.equal(waCalls+smsCalls,0);assert.throws(()=>queue(service,input()),/पहले/);
+ authorized=false;assert.throws(()=>service.status(),/Administrator/);assert.throws(()=>queue(service,input('holi')),/Administrator/);await service.tick();assert.equal(waCalls,0);authorized=true;
+ service.change(id,'pause');await service.tick();assert.equal(waCalls,0);service.change(id,'resume');waReady=false;await service.tick();assert.equal(smsCalls,1);assert.equal(waCalls,0);waReady=true;
+ for(let n=0;n<8;n++)await service.tick();assert.equal(smsCalls,2);assert.equal(waCalls,2);assert.equal(service.status().campaigns[0].counts.sent,4);pass('admin gating, pause/resume, disconnected WhatsApp does not block SMS and each channel sends once');
+ service=createFestivalService(opts);service.configureSMS(gateway);await service.tick();assert.equal(smsCalls,2);assert.equal(waCalls,2);pass('restart preserves completed campaigns without resending');
+ mode='timeout';const uncertain=queue(service,input('holi',['whatsapp']));await service.tick();await service.tick();const before=waCalls;await service.tick();assert.equal(waCalls,before);assert.equal(service.status().campaigns[0].counts.unconfirmed,2);pass('ambiguous WhatsApp result is parked and never automatically resent');
+ service.review(uncertain,service.status().campaigns[0].jobs[0].id,'sent');assert.equal(service.status().campaigns[0].jobs[0].state,'sent');
+ mode='ok';const stop=queue(service,input('rakhi'));service.change(stop,'cancel');await service.tick();assert.equal(waCalls,before);pass('cancel prevents every queued recipient/channel; manual review records known acceptance');
+ const future={...input('navratri',['whatsapp']),scheduledAt:new Date(clock+3600000).toISOString()};queue(service,future);await service.tick();assert.equal(waCalls,before);clock+=3600000;await service.tick();assert.equal(waCalls,before+1);service.setExclusions('9876543210');await service.tick();assert.equal(waCalls,before+1);assert.equal(service.status().campaigns[0].counts.cancelled,1);assert.throws(()=>service.setExclusions('bad'),/हर नंबर/);pass('scheduled sends wait for time and new exclusions stop queued greetings');
+ service.setExclusions('');queue(service,input('eid',['sms']));patients=patients.filter(p=>p.mobile!=='9123456780');await service.tick();assert.equal(service.status().campaigns[0].counts.cancelled,1);pass('removed patient number cannot receive an old queued greeting');
+ const crashStore=memory();const crashService=createFestivalService({...opts,store:crashStore});queue(crashService,input('christmas'));const saved=crashStore.metaGet('festival:campaigns');saved[0].jobs.forEach(j=>j.state='sending');crashStore.metaSet('festival:campaigns',saved);const resumed=createFestivalService({...opts,store:crashStore});assert.ok(resumed.status().campaigns[0].jobs.every(j=>j.state===(j.channel==='whatsapp'?'unconfirmed':'queued')));pass('crash recovery parks WhatsApp and delegates SMS recovery to its idempotent journal');
+ clock+=86400000;await resumed.tick();assert.ok(resumed.status().campaigns[0].jobs.filter(j=>j.channel==='sms').every(j=>j.state==='expired'));pass('late offline restart expires old-day queued greetings');
+ const sameId='synthetic-fixed-id';await sender({...gateway,requestId:sameId,mobile:'9876543210',message:'same'});const calls=smsCalls;await sender({...gateway,requestId:sameId,mobile:'9876543210',message:'same'});assert.equal(smsCalls,calls);pass('SMS acceptance journal prevents network resend after acknowledgement');
+ // Exercise the real paired WhatsApp plain-text path with a synthetic client only.
+ const ws=memory();let fake,textCalls=0;
+ class Client extends EventEmitter{async initialize(){}async destroy(){}async getNumberId(){return{_serialized:'919876543210@c.us'};}async sendMessage(number,text,options){textCalls++;assert.equal(text,'plain text');assert.equal(options.waitUntilMsgSent,true);return{id:{_serialized:'synthetic-id'}};}}
+ const real=createWhatsAppService({store:ws,root:'/synthetic',allowed:()=>authorized,renderPdf:async()=>{throw Error('text must not render PDF');},browserPath:()=>'/synthetic/browser',clientFactory:()=>fake=new Client()});
+ assert.equal((await real.sendText('9876543210','plain text')).ok,false);await real.connect();await new Promise(setImmediate);fake.emit('ready');await new Promise(setImmediate);assert.equal((await real.sendText('9876543210','plain text')).ok,true);assert.equal(textCalls,1);authorized=false;await assert.rejects(()=>real.sendText('9876543210','plain text'),/Administrator/);authorized=true;real.stop();pass('real paired connector sends text without PDF and checks session authorization');
+ console.log(`${passes} festival checks passed; synthetic recipients and mocked transports only.`);
+})().catch(e=>{console.error(e);process.exitCode=1;});

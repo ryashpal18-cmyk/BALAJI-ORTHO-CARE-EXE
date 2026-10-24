@@ -1,7 +1,7 @@
 'use strict';
 const path=require('path'),fs=require('fs');
 const {parseFamilyLink,familyGroups,familyRecords}=require('./family-profile.cjs');
-function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,access}) {
+function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,access,sendSMS}) {
   let pending=null;
   const accept=args=>{for(const arg of args||[]){const id=parseFamilyLink(arg);if(id)pending=id;}};
   accept(process.argv);
@@ -53,6 +53,16 @@ function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,acces
     if(save){const r=await dialog.showSaveDialog({defaultPath:'Balaji-Monthly-'+month+'.pdf',filters:[{name:'PDF',extensions:['pdf']}]});if(r.canceled)return{cancelled:true};if(!allowed())throw Error('Administrator login required');fs.copyFileSync(file,r.filePath);return{success:true};}
     const error=await shell.openPath(file);if(error)throw Error(error);return{success:true};
   }));
+  const festival=require('./festival-messaging.cjs').createFestivalService({store,allowed,whatsapp:service,sendSMS});
+  ipcMain.handle('festival:status',admin(()=>festival.status()));
+  ipcMain.handle('festival:preview',admin((_e,input)=>festival.preview(input)));
+  ipcMain.handle('festival:create',admin((_e,input)=>festival.create(input)));
+  ipcMain.handle('festival:change',admin((_e,{id,action})=>festival.change(id,action)));
+  ipcMain.handle('festival:review',admin((_e,{id,jobId,action})=>festival.review(id,jobId,action)));
+  ipcMain.handle('festival:exclude',admin((_e,numbers)=>festival.setExclusions(numbers)));
+  ipcMain.handle('festival:smsConfig',admin((_e,config)=>festival.configureSMS(config)));
+  const festivalTimer=setInterval(()=>{void festival.tick().catch(()=>{});},5000);
+  app.on('before-quit',()=>clearInterval(festivalTimer));
   const timer=setInterval(()=>{void service.tick().catch(()=>{});},15000);
   app.on('before-quit',()=>{clearInterval(timer);service.stop();});
   return service;

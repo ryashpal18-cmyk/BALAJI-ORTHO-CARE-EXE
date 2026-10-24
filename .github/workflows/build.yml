@@ -46,6 +46,7 @@ jobs:
           node tests/billing-catalog.cjs
           node tests/clinic-updates.cjs
           node tests/pc-family-whatsapp.cjs
+          node tests/festival-messaging.cjs
           node tests/diagnostics.cjs
           node tests/patient-statement.cjs
           node tests/monthly-report.cjs
@@ -58,6 +59,8 @@ jobs:
         run: npx --no-install electron tests/monthly-report-electron.cjs
       - name: Check native patient directory search UI
         run: npx --no-install electron tests/patient-directory-electron.cjs
+      - name: Check native festival greetings UI
+        run: npx --no-install electron tests/festival-greetings-electron.cjs
       - name: Check native QR invoice PDF
         run: npx --no-install electron tests/invoice-pdf-smoke.cjs
       - name: Bump patch version

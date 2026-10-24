@@ -173,9 +173,26 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
       }catch(e){if(!handedOff&&!stillQueued(job))return;patch(job.id,{state:handedOff?'unconfirmed':(job.kind==='statement'&&/STATEMENT-00[124]/.test(String(e.message))||job.kind==='monthly'&&(/STATEMENT-002|MONTHLY-00[12]/.test(String(e.message))||!job.automatic&&/STATEMENT-001|MONTHLY-004/.test(String(e.message))))?'failed':'queued',retryAt:now()+60000,error:handedOff?'परिणाम अनिश्चित है। WhatsApp chat में जाँचें; अपने आप दोबारा नहीं भेजेंगे।':String(e.message||e)});}
     }finally{busy=false;}
   }
+  // Plain text campaigns share the paired client, but have a separate durable journal.
+  async function sendText(mobile,text){
+    assertAllowed();const normalized=familyNumber(mobile);
+    if(!normalized||typeof text!=='string'||!text.trim()||text.length>1500)return{ok:false,permanent:true,error:'सही नंबर और संदेश चाहिए।'};
+    if(!ready||!client||busy)return{ok:false,error:'WhatsApp कनेक्शन/पिछले संदेश की प्रतीक्षा में'};
+    busy=true;let handedOff=false;
+    try{
+      const activeClient=client,number=await bounded(activeClient.getNumberId('91'+normalized),30000);
+      if(!number)return{ok:false,permanent:true,error:'इस नंबर पर WhatsApp नहीं है।'};
+      assertAllowed();if(client!==activeClient||!ready)return{ok:false,error:'WhatsApp connection बदल गया।'};
+      handedOff=true;
+      const sent=await bounded(activeClient.sendMessage(number._serialized,text,{waitUntilMsgSent:true}),timeoutMs);
+      if(!sent?.id?._serialized)throw Error('Acknowledgment missing');
+      return{ok:true,messageId:sent.id._serialized};
+    }catch{return{ok:false,uncertain:handedOff,error:handedOff?'परिणाम अनिश्चित है; WhatsApp चैट में जाँचें।':'WhatsApp connection की प्रतीक्षा में'};}
+    finally{busy=false;}
+  }
   function setAuto(value){assertAllowed();if(typeof value!=='boolean')throw Error('Invalid setting');store.metaSet(settingsKey,{...settings(),auto:value});return status();}
   function review(id,action){assertAllowed();const job=jobs().find(j=>j.id===id);if(!job||!['unconfirmed','failed','queued'].includes(job.state))throw Error('Job review उपलब्ध नहीं');if(!['sent','retry','cancel'].includes(action))throw Error('Invalid review');patch(id,{state:action==='retry'?'queued':action==='cancel'?'cancelled':'sent',retryAt:0,error:'',reviewedAt:new Date(now()).toISOString(),reviewAction:action});return status();}
   function stop(){stopped=true;ready=false;const old=client;client=null;if(old)void old.destroy().catch(()=>{});}
-  return{connect,disconnect,status,setAuto,enqueue,createPdf,previewStatement,enqueueStatement,createStatementPdf,getMonthlySettings,saveMonthlySettings,previewMonthly,enqueueMonthly,createMonthlyPdf,tick,review,stop};
+  return{sendText,connect,disconnect,status,setAuto,enqueue,createPdf,previewStatement,enqueueStatement,createStatementPdf,getMonthlySettings,saveMonthlySettings,previewMonthly,enqueueMonthly,createMonthlyPdf,tick,review,stop};
 }
 module.exports={createWhatsAppService,findBrowser};

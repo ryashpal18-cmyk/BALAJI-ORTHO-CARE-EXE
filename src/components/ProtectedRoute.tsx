@@ -33,7 +33,11 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
           if (profile) {
             displaySession(profile);
             startAutoSync();
-            if (profile.role === "admin") startAutoBackupScheduler();
+            if (profile.role === "admin") {
+              startAutoBackupScheduler();
+              // Compiled gateway config stays in main-process memory, never campaign metadata.
+              void bridge?.festival?.configureSMS({apiUrl:import.meta.env.VITE_TEXTBEE_API_URL,apiKey:import.meta.env.VITE_TEXTBEE_API_KEY,deviceId:import.meta.env.VITE_TEXTBEE_DEVICE_ID}).catch(()=>{});
+            }
             localStorage.setItem(STORAGE_KEYS.USER_ROLE, profile.role);
             localStorage.setItem(STORAGE_KEYS.USER_PERMS, JSON.stringify(profile.pages || []));
           }

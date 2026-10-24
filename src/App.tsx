@@ -1,4 +1,5 @@
 import { reportRuntimeIssue } from "@/lib/clientLogger";
+import FestivalGreetings from "@/pages/FestivalGreetings";
 import FamilyProfile from "@/pages/FamilyProfile";
 import { FamilyDeepLinks } from "@/components/FamilyDeepLinks";
 import FollowUps from "@/pages/FollowUps";
@@ -173,6 +174,7 @@ const App = () => {
                   <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
                   <Route path="/revenue-dashboard" element={<ProtectedRoute><RevenueDashboard /></ProtectedRoute>} />
                   <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+                  <Route path="/festival-greetings" element={<ProtectedRoute><FestivalGreetings /></ProtectedRoute>} />
                   <Route path="/whatsapp" element={<ProtectedRoute><WhatsApp /></ProtectedRoute>} />
                   <Route path="/medicine-master" element={<ProtectedRoute><MedicineMaster /></ProtectedRoute>} />
                   <Route path="/patient-medicine" element={<ProtectedRoute><PatientMedicine /></ProtectedRoute>} />

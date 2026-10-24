@@ -22,6 +22,16 @@ contextBridge.exposeInMainWorld('electron', {
     enqueue: (patientId,fingerprint) => ipcRenderer.invoke('statement:enqueue', {patientId,fingerprint}),
   },
 
+  festival: {
+    status: () => ipcRenderer.invoke('festival:status'),
+    preview: input => ipcRenderer.invoke('festival:preview', input),
+    create: input => ipcRenderer.invoke('festival:create', input),
+    change: (id,action) => ipcRenderer.invoke('festival:change', {id,action}),
+    review: (id,jobId,action) => ipcRenderer.invoke('festival:review', {id,jobId,action}),
+    exclude: numbers => ipcRenderer.invoke('festival:exclude', numbers),
+    configureSMS: config => ipcRenderer.invoke('festival:smsConfig', config),
+  },
+
   monthly: {
     settings: () => ipcRenderer.invoke('monthly:settings'),
     saveSettings: input => ipcRenderer.invoke('monthly:saveSettings', input),
