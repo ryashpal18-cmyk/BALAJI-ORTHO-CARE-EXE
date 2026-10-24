@@ -89,6 +89,7 @@ export function useUpdateBill() {
       qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
       qc.invalidateQueries({ queryKey: ["audit-logs"] });
       qc.invalidateQueries({ queryKey: ["report_payments"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
     },
   });
 }
@@ -157,6 +158,7 @@ export function useAddBill() {
       qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
       qc.invalidateQueries({ queryKey: ["audit-logs"] });
       qc.invalidateQueries({ queryKey: ["report_payments"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
     },
   });
 }
@@ -173,6 +175,7 @@ export function useDeleteBill() {
       qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
       qc.invalidateQueries({ queryKey: ["audit-logs"] });
       qc.invalidateQueries({ queryKey: ["report_payments"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
     },
   });
 }

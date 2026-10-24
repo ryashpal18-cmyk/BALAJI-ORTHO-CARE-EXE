@@ -1,3 +1,4 @@
+import { cashTallyForPeriod } from "@/lib/collectionReport";
 import QRCode from "qrcode";
 import { invoiceNumber } from "@/lib/invoiceNumber";
 import { netBillAmount } from "@/lib/billAmounts";
@@ -543,18 +544,7 @@ export default function Billing() {
     return tb - ta;
   });
 
-  const cashTally = filteredBills.reduce(
-    (acc, bill) => {
-      const amount = Number(bill.amount || 0);
-      const paid = Number((bill as any).amount_paid || 0);
-      acc.total += amount;
-      acc.received += paid;
-      acc.pending += Math.max(amount - Number((bill as any).discount || 0) - paid, 0);
-      return acc;
-    },
-    { total: 0, received: 0, pending: 0 },
-  );
-
+  const cashTally = cashTallyForPeriod(bills || [], fromDate, toDate);
   
 // 🚀 PERF: ye filter+sort pehle HAR render par poore patients array (50k+ tak)
 // par dobara chalta tha — chahe patientSearch na badla ho (jaise amount/services
@@ -1361,8 +1351,9 @@ const filteredPatients = useMemo(() => {
                 <b className="text-primary">₹{cashTally.total.toLocaleString()}</b>
               </div>
               <div className="rounded-lg bg-success/10 p-3">
-                <p className="text-xs text-muted-foreground">Aaya / Paid</p>
+                <p className="text-xs text-muted-foreground">इस अवधि में जमा / Received</p>
                 <b className="text-success">₹{cashTally.received.toLocaleString()}</b>
+                <p className="text-xs text-muted-foreground">पुराने बिलों का जमा बकाया शामिल: ₹{cashTally.previousDueReceived.toLocaleString()}</p>
               </div>
               <div className="rounded-lg bg-warning/10 p-3">
                 <p className="text-xs text-muted-foreground">Baki / Due</p>

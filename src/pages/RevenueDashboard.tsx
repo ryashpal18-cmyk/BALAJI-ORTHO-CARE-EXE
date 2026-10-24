@@ -1,3 +1,4 @@
+import { collectionRows } from "@/lib/paymentLedger";
 import { businessDate } from "@/lib/businessDate";
 import { useMemo } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -36,17 +37,18 @@ export default function RevenueDashboard() {
 
   const stats = useMemo(() => {
     const all = bills || [];
+    const receipts = collectionRows(all);
     const today = businessDate();
     const thisMonth = businessDate().slice(0, 7);
     const days = getLast30Days();
 
-    const todayRevenue = all
+    const todayRevenue = receipts
       .filter((b: any) => businessDate(b.created_at || "") === today)
-      .reduce((s: number, b: any) => s + Number(b.amount || 0), 0);
+      .reduce((s: number, b: any) => s + Number(b.amount_paid || 0), 0);
 
-    const monthRevenue = all
-      .filter((b: any) => (b.created_at || "").startsWith(thisMonth))
-      .reduce((s: number, b: any) => s + Number(b.amount || 0), 0);
+    const monthRevenue = receipts
+      .filter((b: any) => businessDate(b.created_at || "").startsWith(thisMonth))
+      .reduce((s: number, b: any) => s + Number(b.amount_paid || 0), 0);
 
     const totalCollected = all.reduce((s: number, b: any) => s + Number(b.amount_paid || 0), 0);
 
@@ -56,15 +58,15 @@ export default function RevenueDashboard() {
 
     // Daily revenue — last 30 days
     const dailyRevenue = days.map((d) => {
-      const rev = all
+      const rev = receipts
         .filter((b: any) => businessDate(b.created_at || "") === d)
-        .reduce((s: number, b: any) => s + Number(b.amount || 0), 0);
+        .reduce((s: number, b: any) => s + Number(b.amount_paid || 0), 0);
       return { date: d.slice(5), revenue: rev };
     });
 
     // Payment mode breakdown
     const modeMap: Record<string, number> = {};
-    all.forEach((b: any) => {
+    receipts.forEach((b: any) => {
       const mode = b.payment_mode || "Not Set";
       modeMap[mode] = (modeMap[mode] || 0) + Number(b.amount_paid || 0);
     });
@@ -112,12 +114,12 @@ export default function RevenueDashboard() {
       <div className="space-y-6">
         <div>
           <h1 className="module-header">Revenue Dashboard</h1>
-          <p className="text-sm text-muted-foreground">OPD billing, collections aur pending dues — real-time</p>
+          <p className="text-sm text-muted-foreground">आज की प्राप्ति में नए बिलों की जमा रकम और आज जमा हुआ पुराना बकाया शामिल है।</p>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard title="Today's Revenue" value={isLoading ? "..." : fmt(stats.todayRevenue)} icon={IndianRupee} variant="primary" />
-          <StatCard title="This Month" value={isLoading ? "..." : fmt(stats.monthRevenue)} icon={TrendingUp} variant="success" />
+          <StatCard title="आज प्राप्त / Collected" value={isLoading ? "..." : fmt(stats.todayRevenue)} icon={IndianRupee} variant="primary" />
+          <StatCard title="इस महीने प्राप्त" value={isLoading ? "..." : fmt(stats.monthRevenue)} icon={TrendingUp} variant="success" />
           <StatCard title="Total Collected" value={isLoading ? "..." : fmt(stats.totalCollected)} icon={Wallet} variant="secondary" />
           <StatCard title="Outstanding Dues" value={isLoading ? "..." : fmt(stats.outstanding)} icon={AlertCircle} variant="warning" />
         </div>
@@ -131,7 +133,7 @@ export default function RevenueDashboard() {
             {/* Daily revenue trend */}
             <Card>
               <CardHeader>
-                <CardTitle className="font-heading text-base">Daily Revenue — Last 30 Days</CardTitle>
+                <CardTitle className="font-heading text-base">Daily Collections — Last 30 Days</CardTitle>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={240}>

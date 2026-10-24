@@ -1,3 +1,5 @@
+import { collectionRows } from "@/lib/paymentLedger";
+import { businessDate } from "@/lib/businessDate";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/StatCard";
@@ -33,7 +35,7 @@ function useAnalyticsData() {
       if (online) {
         try {
           const [billsRes, patientsRes, physioRes] = await Promise.all([
-            supabase.from("billing").select("amount, discount, amount_paid, status, created_at, service, payment_mode"),
+            supabase.from("billing").select("id, amount, discount, amount_paid, status, created_at, service, payment_mode, payment_history"),
             supabase.from("patients").select("id, created_at"),
             supabase.from("physiotherapy_sessions").select("id, created_at"),
           ]);
@@ -45,10 +47,18 @@ function useAnalyticsData() {
         }
       }
 
-      // Offline fallback — cache se lo
-      if (!bills.length)          bills          = await cacheGetAll("billing");
+      // Pending offline receipts must be visible before background cloud sync finishes.
+      const localBills = await cacheGetAll("billing");
+      if (!bills.length) bills = localBills;
+      else {
+        const byId = new Map(bills.map(b => [String(b.id || "").replace(/^local_/, ""), b]));
+        for (const bill of localBills) if (bill._pendingSync) byId.set(String(bill.id || "").replace(/^local_/, ""), bill);
+        bills = [...byId.values()];
+      }
       if (!patients.length)       patients       = await cacheGetAll("patients");
       if (!physioSessions.length) physioSessions = await cacheGetAll("physiotherapy_sessions");
+
+      const receipts = collectionRows(bills);
 
       // ── Monthly patients (last 6 months) ──────────────────────────────
       const now      = new Date();
@@ -67,10 +77,10 @@ function useAnalyticsData() {
 
       // ── Monthly revenue (last 6 months) ─────────────────────────────
       const monthlyRevenue = last6.map(({ year, month }) => {
-        const revenue = bills
+        const revenue = receipts
           .filter((b: any) => {
-            const d = new Date(b.created_at);
-            return d.getFullYear() === year && d.getMonth() === month;
+            const date = businessDate(b.created_at || "");
+            return date.slice(0, 7) === `${year}-${String(month + 1).padStart(2, "0")}`;
           })
           .reduce((sum: number, b: any) => sum + Number(b.amount_paid || 0), 0);
         return { month: MONTHS[month], revenue };
@@ -78,13 +88,12 @@ function useAnalyticsData() {
 
       // ── Summary stats ────────────────────────────────────────────────
       const totalPatients  = patients.length;
-      const thisMonth      = new Date().getMonth();
-      const thisYear       = new Date().getFullYear();
+      const thisMonth      = Number(businessDate().slice(5, 7)) - 1;
+      const thisYear       = Number(businessDate().slice(0, 4));
 
-      const monthlyRevTotal = bills
+      const monthlyRevTotal = receipts
         .filter((b: any) => {
-          const d = new Date(b.created_at);
-          return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
+          return businessDate(b.created_at || "").slice(0, 7) === `${thisYear}-${String(thisMonth + 1).padStart(2, "0")}`;
         })
         .reduce((sum: number, b: any) => sum + Number(b.amount_paid || 0), 0);
 
@@ -114,7 +123,7 @@ function useAnalyticsData() {
 
       // ── Payment mode breakdown ────────────────────────────────────────
       const paymentModes: Record<string, number> = {};
-      bills.forEach((b: any) => {
+      receipts.forEach((b: any) => {
         const mode = b.payment_mode || "Cash";
         paymentModes[mode] = (paymentModes[mode] || 0) + Number(b.amount_paid || 0);
       });

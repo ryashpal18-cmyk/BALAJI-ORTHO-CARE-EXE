@@ -35,7 +35,7 @@ export function withPaymentHistory(existing: any, changes: any, eventId: string,
 }
 export function collectionRows(bills: any[]) {
   return bills.flatMap(bill => paymentHistory(bill).map(receipt => ({ ...bill,
-    id: receipt.id, bill_id: bill.id, created_at: receipt.paid_at, amount_paid: receipt.amount,
+    id: receipt.id, bill_id: bill.id, bill_created_at: bill.created_at, created_at: receipt.paid_at, amount_paid: receipt.amount,
     payment_mode: receipt.payment_mode, legacy_collection: !!receipt.legacy })));
 }
 

@@ -1,3 +1,4 @@
+import { cashTallyForPeriod, periodCollections } from "@/lib/collectionReport";
 import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { businessDate } from "@/lib/businessDate";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -18,6 +19,7 @@ import { useState } from "react";
 
 function printDailyReport(
   bills: any[],
+  receipts: any[],
   tally: { total: number; received: number; pending: number },
   fromDate: string,
   toDate: string,
@@ -33,8 +35,8 @@ function printDailyReport(
     .map((bill) => {
       const paid = Number(bill.amount_paid || 0);
       const due = Math.max(Number(bill.amount || 0) - Number((bill as any).discount || 0) - paid, 0);
-      const name = bill.patients?.name || "—";
-      const mobile = bill.patients?.mobile || "";
+      const name = escapeHtml(bill.patients?.name || "—");
+      const mobile = escapeHtml(bill.patients?.mobile || "");
       return `<tr>
         <td>${name}${mobile ? `<br/><span class="muted">${mobile}</span>` : ""}</td>
         <td class="right">₹${Number(bill.amount || 0).toLocaleString("en-IN")}</td>
@@ -43,6 +45,12 @@ function printDailyReport(
       </tr>`;
     })
     .join("");
+
+  const receivedRows = receipts.map(row => `<tr>
+    <td>${escapeHtml(businessDate(row.created_at))}</td><td>${escapeHtml(row.patients?.name || "—")}</td>
+    <td>${escapeHtml(businessDate(row.bill_created_at || ""))}</td><td>${escapeHtml(row.payment_mode || "Cash")}</td>
+    <td class="right paid">₹${Number(row.amount_paid || 0).toLocaleString("en-IN")}</td></tr>`).join("");
+  const invoicePaid = bills.reduce((sum, bill) => sum + Number(bill.amount_paid || 0), 0);
 
   writeReportDocument(win, `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Daily Report</title>
   <style>
@@ -70,17 +78,22 @@ function printDailyReport(
     <div class="muted">Dr. S. S. Rathore (DMRT | BPT) · Opp Govt Hospital, Bay Pass Road, Khinwara, Raj. – 306502</div>
     <div class="muted">Phone: +91 8005707783</div>
   </div>
-  <h2>Daily Report — ${rangeLabel}</h2>
+  <h2>Daily Report — ${rangeLabel}</h2><p class="muted">Income जमा होने की तारीख से है; पुराने bills का इस अवधि में जमा बकाया शामिल है।</p>
   <div class="summary">
     <div class="box"><div class="label">Patients</div><div class="value">${bills.length}</div></div>
     <div class="box"><div class="label">Total</div><div class="value">₹${tally.total.toLocaleString("en-IN")}</div></div>
     <div class="box"><div class="label">Income</div><div class="value paid">₹${tally.received.toLocaleString("en-IN")}</div></div>
     <div class="box"><div class="label">Pending Due</div><div class="value due">₹${tally.pending.toLocaleString("en-IN")}</div></div>
   </div>
+  <h2>इस अवधि में जमा रकम / Collections</h2>
+  <table><thead><tr><th>Payment Date</th><th>Patient</th><th>Bill Date</th><th>Mode</th><th class="right">Received</th></tr></thead>
+    <tbody>${receivedRows || '<tr><td colspan="5">इस अवधि में कोई भुगतान नहीं है</td></tr>'}</tbody>
+    <tfoot><tr><td colspan="4">कुल जमा</td><td class="right paid">₹${tally.received.toLocaleString("en-IN")}</td></tr></tfoot></table>
+  <h2>इस अवधि के Bills — Paid = अब तक कुल जमा</h2>
   <table>
     <thead><tr><th>Patient</th><th class="right">Total</th><th class="right">Paid</th><th class="right">Due</th></tr></thead>
     <tbody>${rows || `<tr><td colspan="4" style="text-align:center;color:#64748b;padding:20px">Koi bill nahi hai</td></tr>`}</tbody>
-    <tfoot><tr><td>Total</td><td class="right">₹${tally.total.toLocaleString("en-IN")}</td><td class="right paid">₹${tally.received.toLocaleString("en-IN")}</td><td class="right due">₹${tally.pending.toLocaleString("en-IN")}</td></tr></tfoot>
+    <tfoot><tr><td>Total</td><td class="right">₹${tally.total.toLocaleString("en-IN")}</td><td class="right paid">₹${invoicePaid.toLocaleString("en-IN")}</td><td class="right due">₹${tally.pending.toLocaleString("en-IN")}</td></tr></tfoot>
   </table>
   <button onclick="window.print()" style="margin-top:16px;padding:8px 16px">Print</button>
   <script>window.onload=function(){window.print()}</script>
@@ -121,18 +134,8 @@ export default function CashTally() {
     return date >= fromDate && date <= toDate;
   });
 
-  const tally = filteredBills.reduce(
-    (acc, bill) => {
-      const amount = Number(bill.amount || 0);
-      const paid = Number((bill as any).amount_paid || 0);
-      acc.total += amount;
-      acc.received += paid;
-      acc.pending += Math.max(amount - Number((bill as any).discount || 0) - paid, 0);
-      return acc;
-    },
-    { total: 0, received: 0, pending: 0 },
-  );
-
+  const filteredReceipts = periodCollections(bills || [], fromDate, toDate);
+  const tally = cashTallyForPeriod(bills || [], fromDate, toDate);
   return (
     <DashboardLayout>
       <div className="space-y-6 page-enter">
@@ -156,7 +159,7 @@ export default function CashTally() {
             </div>
           </div>
           <Button
-            onClick={() => printDailyReport(filteredBills, tally, fromDate, toDate)}
+            onClick={() => printDailyReport(filteredBills, filteredReceipts, tally, fromDate, toDate)}
             className="gap-2"
           >
             <Printer className="h-4 w-4" /> Print Daily Report
@@ -187,6 +190,7 @@ export default function CashTally() {
               <Label className="text-xs">From Date</Label>
               <Input
                 type="date"
+                aria-label="Cash Tally from date"
                 value={fromDate}
                 onChange={(e) => {
                   setRangeMode("custom");
@@ -198,6 +202,7 @@ export default function CashTally() {
               <Label className="text-xs">To Date</Label>
               <Input
                 type="date"
+                aria-label="Cash Tally to date"
                 value={toDate}
                 onChange={(e) => {
                   setRangeMode("custom");
@@ -223,8 +228,9 @@ export default function CashTally() {
           </Card>
           <Card>
             <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">Aaya / Paid</p>
+              <p className="text-xs text-muted-foreground">इस अवधि में जमा / Received</p>
               <p className="text-2xl font-bold text-success">₹{tally.received.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground">पुराने बिलों का जमा बकाया शामिल: ₹{tally.previousDueReceived.toLocaleString()}</p>
             </CardContent>
           </Card>
           <Card>
@@ -236,9 +242,22 @@ export default function CashTally() {
         </div>
 
         <Card>
+          <CardHeader><CardTitle className="font-heading text-base">इस अवधि में जमा रकम / Collections</CardTitle></CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">नए बिलों की जमा रकम और पुराने बकाये की इस अवधि में मिली रकम का जोड़। बिल की मूल तारीख वही रहती है।</p>
+            {isLoading ? <p>Loading...</p> : <div className="overflow-x-auto"><table className="w-full text-sm">
+              <thead><tr className="border-b text-left"><th className="py-2">जमा तारीख</th><th>मरीज</th><th>बिल की तारीख</th><th>माध्यम</th><th className="text-right">जमा राशि</th></tr></thead>
+              <tbody>{filteredReceipts.length === 0 ? <tr><td colSpan={5} className="py-6 text-center">इस अवधि में कोई भुगतान नहीं है</td></tr> : filteredReceipts.map(row => <tr key={`${row.bill_id}:${row.id}`} className="border-b">
+                <td className="py-2">{businessDate(row.created_at)}</td><td>{row.patients?.name || "—"}</td><td>{businessDate(row.bill_created_at || "") || "—"}</td><td>{row.payment_mode || "Cash"}</td><td className="text-right text-success">₹{Number(row.amount_paid || 0).toLocaleString("en-IN")}</td>
+              </tr>)}</tbody><tfoot><tr><td colSpan={4} className="py-2 font-semibold">कुल जमा</td><td className="text-right font-semibold">₹{tally.received.toLocaleString("en-IN")}</td></tr></tfoot>
+            </table></div>}
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader>
             <CardTitle className="font-heading text-base flex items-center gap-2">
-              <Receipt className="h-4 w-4 text-primary" /> Bills Detail
+              <Receipt className="h-4 w-4 text-primary" /> Bills Detail — बिल की तारीख से
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -252,7 +271,7 @@ export default function CashTally() {
                       <th className="text-left py-2">Date</th>
                       <th className="text-left py-2">Patient</th>
                       <th className="text-right py-2">Total</th>
-                      <th className="text-right py-2">Paid</th>
+                      <th className="text-right py-2">अब तक कुल जमा</th>
                       <th className="text-right py-2">Due</th>
                     </tr>
                   </thead>
