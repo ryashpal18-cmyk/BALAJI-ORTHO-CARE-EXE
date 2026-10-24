@@ -58,6 +58,7 @@ function describe(code,message) {
     'WA-011':['WhatsApp PDF job failed','Job reference, PDF/send stage और stack देखें; unconfirmed हो तो चैट जाँचकर ही resend करें।'],
     'WA-012':['WhatsApp text send failed','Job/campaign reference और native error देखें; अनिश्चित संदेश स्वतः दोबारा न भेजें।'],
     'WA-013':['WhatsApp scheduling failed','Queue/scheduler error और local record references जाँचें; pending data न हटाएँ।'],
+    'SMS-010':['SMS gateway or journal failed','Native cause/code, HTTP status और request reference देखें; अनिश्चित परिणाम में gateway जाँचें।'],
     'MSG-010':['Background messaging worker failed','Worker का नाम, stack और storage/connector error देखें।'],
     'MSG-011':['Campaign message send failed','Channel, job/campaign reference और error देखें; gateway/chat में परिणाम जाँचें।'],
     'UI-007':['Renderer startup error','Startup stack और bundled JS/assets जाँचें; UI monitor शुरू होने से पहले error आया।'],

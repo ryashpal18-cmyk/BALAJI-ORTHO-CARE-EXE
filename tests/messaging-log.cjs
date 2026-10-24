@@ -34,6 +34,11 @@ const makeStore=()=>{const meta=new Map();return{metaGet:k=>structuredClone(meta
   await s.tick();assert.ok(events().some(e=>e.code==='MSG-011'&&e.message.includes(type+' gateway exception')&&e.stack&&e.detail.channel==='sms'));
  }
  console.log('PASS festival and outreach SMS exceptions log the real cause/stack without logging bodies or gateway credentials');
+ const {createSmsSender}=require('../sms-outbox.cjs');
+ const cause=Object.assign(Error('Synthetic DNS lookup failure'),{code:'ENOTFOUND'});
+ const sender=createSmsSender({store:makeStore(),logger,fetchImpl:async()=>{throw Error('fetch failed',{cause});}});
+ const retry=await sender({requestId:'synthetic-sms-request',apiUrl:'https://synthetic.invalid',apiKey:'PRIVATE_KEY',deviceId:'private-device',mobile:'9876543210',message:'PRIVATE_BODY'});
+ assert.equal(retry.uncertain,undefined);const smsEvent=events().find(e=>e.code==='SMS-010'&&e.detail.nativeCode==='ENOTFOUND');assert.ok(smsEvent);assert.equal(smsEvent.detail.nativeCause.code,'ENOTFOUND');assert.ok(smsEvent.stack);assert.equal(JSON.stringify(smsEvent).includes('PRIVATE_KEY'),false);console.log('PASS durable SMS sender preserves the actual nested network cause/code in disk logs');
  const timers=[];const app=new EventEmitter();app.getPath=()=>dir;app.setAsDefaultProtocolClient=()=>{};
  const registerModule={exports:{}};const serviceStub={tick:async()=>{throw Error('Synthetic worker tick fault')},stop(){}};
  const customRequire=name=>name==='./whatsapp-service.cjs'?{createWhatsAppService:()=>serviceStub}:name==='./festival-messaging.cjs'?{createFestivalService:()=>serviceStub}:name==='./outreach-service.cjs'?{createOutreachService:()=>serviceStub}:name.startsWith('./')?require(path.join(__dirname,'..',name)):require(name);

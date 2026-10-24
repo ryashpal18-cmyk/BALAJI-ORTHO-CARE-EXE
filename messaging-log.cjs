@@ -18,7 +18,8 @@ function createMessagingLog(logger,source,now=Date.now){
       logger.record({level:context.level==='warn'?'warn':'error',source,code,
         message:`${stage}: ${reason}`,stack:String(error?.stack||'').replace(/data:[^\s]+/g,'[file data]'),
         detail:{stage,jobRef,campaignRef,kind:context.kind,channel:context.channel,
-          attempt:context.attempt,deliveryState:context.deliveryState,nativeCode:error?.code,
+          attempt:context.attempt,deliveryState:context.deliveryState,nativeCode:error?.code||error?.cause?.code,
+          nativeCause:error?.cause?{name:error.cause.name,message:error.cause.message,code:error.cause.code}:undefined,
           suppressedRepeats:previous?.suppressed||0}});
     }catch{/* A broken/full log disk must not interrupt billing or trigger a resend. */}
   };

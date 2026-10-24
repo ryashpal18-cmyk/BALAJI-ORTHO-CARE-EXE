@@ -10,6 +10,7 @@ Captured paths include PDF rendering, number lookup, document handoff, plain tex
 - `WA-011`: PDF queue failure
 - `WA-012`: text sending failure
 - `WA-013`: automatic queue/scheduler failure
+- `SMS-010`: actual gateway response/network cause or local SMS journal failure
 - `MSG-010`: background worker exception
 - `MSG-011`: campaign transport/SMS failure
 

@@ -1116,7 +1116,7 @@ ipcMain.on('open-whatsapp', (_e, payload) => {
 });
 
 // ─── SMS — Main process se bhejo (CORS issue fix) ────────────────────────────
-const sendDurableSMS = require('./sms-outbox.cjs').createSmsSender({ store: sqliteStore });
+const sendDurableSMS = require('./sms-outbox.cjs').createSmsSender({ store: sqliteStore, logger });
 ipcMain.handle('app:sendSMS', async (_e, input) => sendDurableSMS(input));
 
 // Diagnostic checks only read clinical data. Reports are separate, local files.

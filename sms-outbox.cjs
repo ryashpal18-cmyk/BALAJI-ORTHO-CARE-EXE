@@ -1,5 +1,6 @@
 'use strict';
 const { createHash } = require('crypto');
+const { createMessagingLog } = require('./messaging-log.cjs');
 // A failure that happened BEFORE the request could leave this PC (DNS, refused/unreachable
 // connection, connect timeout, TLS handshake) proves nothing was delivered, so a later retry
 // cannot create a duplicate SMS. Anything else (our own timeout, reset mid-request, 5xx,
@@ -23,7 +24,8 @@ function provablyNotSent(error) {
   return found.length > 0 && found.every(c => NOT_SENT_CODES.has(c));
 }
 // Persist BEFORE dispatch. A crash/timeout after dispatch is ambiguous, never an automatic resend.
-function createSmsSender({ store, fetchImpl = fetch, timeoutMs = 15000 }) {
+function createSmsSender({ store, fetchImpl = fetch, timeoutMs = 15000, logger }) {
+  const report = createMessagingLog(logger, 'sms-outbox');
   const active = new Map();
   return async function send(input) {
     const { requestId, apiUrl, apiKey, deviceId, mobile, message } = input || {};
@@ -55,6 +57,7 @@ function createSmsSender({ store, fetchImpl = fetch, timeoutMs = 15000 }) {
         if (!response.ok) {
           // Only explicit client rejection is safe to retry. Server errors may follow acceptance.
           if (response.status >= 400 && response.status < 500 && response.status !== 408) {
+            report('SMS-010', 'SMS gateway response', Error(`SMS gateway rejected request (${response.status})`), { jobId:requestId, channel:'sms', deliveryState:'queued' });
             store.metaSet(key, { fingerprint, state: 'rejected' });
             return { ok: false, error: `SMS gateway rejected request (${response.status})` };
           }
@@ -64,6 +67,7 @@ function createSmsSender({ store, fetchImpl = fetch, timeoutMs = 15000 }) {
         store.metaSet(key, { fingerprint, state: 'accepted', acceptedAt });
         return { ok: true, acceptedAt };
       } catch (error) {
+        report('SMS-010', 'SMS gateway dispatch', error, { jobId:requestId, channel:'sms', deliveryState:provablyNotSent(error)?'queued':'unconfirmed' });
         if (provablyNotSent(error)) {
           // Nothing reached the gateway: release the journal so the normal backoff retry can send it.
           try { store.metaSet(key, { fingerprint, state: 'not_sent' }); return { ok: false, error: 'SMS gateway unreachable (internet/DNS); retry hoga' }; }
@@ -72,7 +76,7 @@ function createSmsSender({ store, fetchImpl = fetch, timeoutMs = 15000 }) {
         try { store.metaSet(key, { fingerprint, state: 'uncertain' }); } catch { /* durable dispatching marker still prevents resend */ }
         return { ok: false, uncertain: true, error: 'SMS delivery unconfirmed; check gateway before resending' };
       } finally { clearTimeout(timer); }
-    } catch (error) { return { ok: false, error: 'SMS local journal unavailable; no new dispatch confirmed' }; }
+    } catch (error) { report('SMS-010', 'SMS local journal', error, { jobId:requestId, channel:'sms' }); return { ok: false, error: 'SMS local journal unavailable; no new dispatch confirmed' }; }
     finally { active.delete(key); }
   };
 }
