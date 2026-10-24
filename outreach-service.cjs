@@ -1,7 +1,9 @@
 'use strict';
+const {createMessagingLog}=require('./messaging-log.cjs');
 const {randomUUID,createHash}=require('crypto'),{familyNumber,normId}=require('./family-profile.cjs');
 const clinic='Balaji Digital X-Ray & Ortho Care Center';
-function createOutreachService({store,allowed,whatsapp,sendSMS,now=Date.now,intervalMs=30000}){
+function createOutreachService({store,allowed,whatsapp,sendSMS,now=Date.now,intervalMs=30000,logger}){
+ const report=createMessagingLog(logger,'outreach-service',now);
  const key='outreach:v1';let busy=false,nextSend=0,gateway=null;
  const initial=()=>({settings:{channels:['whatsapp','sms'],enabled:true},seen:[],campaigns:[]});
  const read=()=>store.metaGet(key)||initial(),save=s=>store.metaSet(key,s),assert=()=>{if(!allowed())throw Error('Administrator login required');};
@@ -50,7 +52,8 @@ function createOutreachService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
    }if(selected)break;}if(!selected)return;
    const{c,j}=selected;patch(c.id,j.id,{state:'sending',attempts:j.attempts+1,error:''});if(c.kind==='bulk')nextSend=now()+intervalMs;
    const validate=()=>{const current=read().campaigns.find(x=>x.id===c.id);if(!current||current.state==='cancelled')return 'cancelled';if(current.state!=='active')return 'wait';const person=patients().find(p=>normId(p.id)===j.patientId);if(!person||familyNumber(person.mobile)!==j.mobile)return 'cancelled';if(c.kind==='bulk'&&(store.metaGet('festival:excluded')||[]).includes(j.mobile))return 'cancelled';if(c.kind==='receipt'){const bill=store.cacheGetAll('billing').find(b=>normId(b.id)===c.billId);if(!bill||['cancelled','canceled','deleted','void'].includes(String(bill.status).toLowerCase())||!bill.payment_history?.some(r=>r.id===c.receiptId))return 'cancelled';}return true;};
-   let result;try{result=j.channel==='whatsapp'?await whatsapp.sendText(j.mobile,j.message,validate):await sendSMS({...gateway,requestId:'outreach-'+j.id,mobile:j.mobile,message:j.message});}catch{result={ok:false,uncertain:true,error:'भेजने का परिणाम अनिश्चित है; चैट/gateway जाँचें।'};}
+   let result,transportFailed=false;try{result=j.channel==='whatsapp'?await whatsapp.sendText(j.mobile,j.message,validate,{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',attempt:j.attempts+1}):await sendSMS({...gateway,requestId:'outreach-'+j.id,mobile:j.mobile,message:j.message});}catch(e){transportFailed=true;report('MSG-011','Campaign transport',e,{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',channel:j.channel,attempt:j.attempts+1,deliveryState:'unconfirmed'});result={ok:false,uncertain:true,error:'भेजने का परिणाम अनिश्चित है; चैट/gateway जाँचें।'};}
+   if(!transportFailed&&j.channel==='sms'&&!result.ok&&!result.cancelled)report('MSG-011','Campaign SMS result',result.error||'SMS gateway did not accept request',{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',channel:'sms',attempt:j.attempts+1,deliveryState:result.uncertain?'unconfirmed':'queued',level:result.uncertain?'warn':undefined});
    patch(c.id,j.id,{state:result.ok?'sent':result.cancelled?'cancelled':result.uncertain?'unconfirmed':result.permanent?'failed':'queued',error:result.ok?'':result.error||'कनेक्शन की प्रतीक्षा',retryAt:now()+60000,...(result.ok?{sentAt:new Date(now()).toISOString()}: {})});
   }finally{busy=false;}
  }

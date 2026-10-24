@@ -1260,8 +1260,8 @@ export default function SettingsPage() {
                 </CardHeader>
                 <CardContent style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                   <p style={{ fontSize: "12.5px", color: "#5a6a84" }}>
-                    Agar app mein kabhi koi error ya crash aaye, uska detail yahan ek log file mein save
-                    ho jaata hai। Support ke liye pehle diagnostic report nikalein; purane raw logs share karne se pehle sensitive details review karein।
+                    सॉफ्टवेयर की त्रुटियाँ और WhatsApp/PDF/SMS में रुकावट का समय, चरण और वास्तविक कारण यहाँ अपने आप सेव होंगे।
+                    समस्या समझने के लिए diagnostic report निकालें या नीचे से log folder खोलें। मरीज का पूरा संदेश और gateway की गुप्त जानकारी logs में शामिल नहीं होती।
                   </p>
                   {logsDir && (
                     <p style={{ fontSize: "11px", color: "#8a9ab0", wordBreak: "break-all" }}>{logsDir}</p>

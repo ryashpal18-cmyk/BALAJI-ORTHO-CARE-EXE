@@ -1306,7 +1306,7 @@ app.whenReady().then(() => {
   } catch (e) {
     logger.logError('app-lifecycle', `SQLite offline store init fail: ${e.message}`);
   }
-  try {require('./pc-messaging.cjs').registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store:sqliteStore,access,sendSMS:sendDurableSMS});}
+  try {require('./pc-messaging.cjs').registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store:sqliteStore,access,sendSMS:sendDurableSMS,logger});}
   catch(error){logger.logError('whatsapp','Messaging setup unavailable: '+error.message);}
   const attachmentCache=require('./attachment-cache.cjs').createAttachmentCache({cacheRoot:path.join(app.getPath('userData'),'clinical-photo-cache'),localRoots:[XRAYS_DIR,path.join(app.getPath('userData'),'clinical-files')],cloudOrigin:new URL(authPublicConfig.url).origin});
   ipcMain.handle('attachment:read',(_e,source)=>{if(access.getPrincipal()?.role!=='admin')throw Error('Administrator login required');return attachmentCache.read(source);});

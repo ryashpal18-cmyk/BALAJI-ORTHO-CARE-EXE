@@ -1,10 +1,12 @@
 'use strict';
+const {createMessagingLog}=require('./messaging-log.cjs');
 const {randomUUID,createHash}=require('crypto');
 const {familyNumber}=require('./family-profile.cjs');
 const CLINIC='Balaji Digital X-Ray & Ortho Care Center';
 const FESTIVALS=[['diwali','दीपावली','दीयों का उजाला आपके जीवन में सुख, समृद्धि और खुशियाँ लाए।'],['holi','होली','खुशियों के रंगों से आपका जीवन सदा रंगीन रहे।'],['rakhi','रक्षाबंधन','स्नेह और विश्वास का यह बंधन सदा अटूट रहे।'],['navratri','नवरात्रि','माँ दुर्गा आपके परिवार को सुख, शक्ति और अच्छा स्वास्थ्य दें।'],['dussehra','दशहरा','यह पर्व आपके जीवन में नई आशा और खुशियाँ लाए।'],['dhanteras','धनतेरस','आपके घर में सुख, समृद्धि और अच्छे स्वास्थ्य का वास हो।'],['bhaidooj','भाई दूज','भाई-बहन का स्नेह जीवन में खुशियाँ भरता रहे।'],['janmashtami','जन्माष्टमी','श्रीकृष्ण की कृपा से आपके घर में आनंद और शांति बनी रहे।'],['ganesh','गणेश चतुर्थी','श्रीगणेश आपके जीवन में मंगल और खुशियाँ लाएँ।'],['sankranti','मकर संक्रांति','यह पर्व आपके जीवन में नई उमंग और खुशियाँ लाए।'],['newyear','नव वर्ष','नया साल आपके लिए नई उम्मीदें और अच्छा स्वास्थ्य लेकर आए।'],['eid','ईद','आपके परिवार में अमन, खुशियाँ और बरकत बनी रहे।'],['christmas','क्रिसमस','आपके जीवन में प्रेम, शांति और खुशियाँ बनी रहें।'],['custom','अन्य त्योहार','']].map(([id,name,line])=>({id,name,whatsapp:`🙏 आप और आपके परिवार को ${name} की हार्दिक शुभकामनाएँ!\n\n${line}\nआप सभी स्वस्थ रहें और मुस्कुराते रहें।\n\nसादर,\n${CLINIC}`,sms:`आप और आपके परिवार को ${name} की हार्दिक शुभकामनाएँ। सुख, शांति और अच्छे स्वास्थ्य की मंगलकामनाएँ। — ${CLINIC}`}));
 const indiaDate=t=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(t));
-function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,intervalMs=30000}){
+function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,intervalMs=30000,logger}){
+ const report=createMessagingLog(logger,'festival-messaging',now);
  const key='festival:campaigns',blockKey='festival:excluded';let busy=false,nextSend=0,gateway=null;
  const list=()=>store.metaGet(key)||[],save=rows=>store.metaSet(key,rows);
  const assert=()=>{if(!allowed())throw Error('Administrator login required');};
@@ -68,9 +70,10 @@ function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
     if(!current||current.state==='cancelled'||job?.state!=='sending'||current.date!==indiaDate(now())||exclusions().includes(j.mobile)||!audience().rows.some(p=>p.mobile===j.mobile))return 'cancelled';
     return current.state==='active'?true:'wait';
    };
-   let result;
-   try{result=j.channel==='whatsapp'?await whatsapp.sendText(j.mobile,c.messages.whatsapp,validate):await sendSMS({...gateway,requestId:'festival-'+j.id,mobile:j.mobile,message:c.messages.sms});}
-   catch{result={ok:false,uncertain:true,error:'भेजने का परिणाम अनिश्चित है; चैट/gateway जाँचें।'};}
+   let result,transportFailed=false;
+   try{result=j.channel==='whatsapp'?await whatsapp.sendText(j.mobile,c.messages.whatsapp,validate,{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',attempt:j.attempts+1}):await sendSMS({...gateway,requestId:'festival-'+j.id,mobile:j.mobile,message:c.messages.sms});}
+   catch(e){transportFailed=true;report('MSG-011','Campaign transport',e,{jobId:j.id,campaignId:c.id,kind:'festival',channel:j.channel,attempt:j.attempts+1,deliveryState:'unconfirmed'});result={ok:false,uncertain:true,error:'भेजने का परिणाम अनिश्चित है; चैट/gateway जाँचें।'};}
+   if(!transportFailed&&j.channel==='sms'&&!result.ok&&!result.cancelled)report('MSG-011','Campaign SMS result',result.error||'SMS gateway did not accept request',{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',channel:'sms',attempt:j.attempts+1,deliveryState:result.uncertain?'unconfirmed':'queued',level:result.uncertain?'warn':undefined});
    patchJob(c.id,j.id,{state:result.ok?'sent':result.cancelled?'cancelled':result.uncertain?'unconfirmed':result.permanent?'failed':'queued',error:result.ok?'':result.error||'कनेक्शन की प्रतीक्षा में',retryAt:now()+60000,...(result.ok?{sentAt:new Date(now()).toISOString()}:{} )});
   }finally{busy=false;}
  }

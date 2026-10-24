@@ -54,6 +54,12 @@ function normalizeEvent(input, time = Date.now()) {
 function describe(code,message) {
   const rule=RULES.find(r=>r[1]===code);if(rule)return {code,title:rule[2],action:rule[3]};
   const known={
+    'WA-010':['WhatsApp connection failed','Connection/login failure का stage और native error देखें; QR/session बिना कारण reset न करें।'],
+    'WA-011':['WhatsApp PDF job failed','Job reference, PDF/send stage और stack देखें; unconfirmed हो तो चैट जाँचकर ही resend करें।'],
+    'WA-012':['WhatsApp text send failed','Job/campaign reference और native error देखें; अनिश्चित संदेश स्वतः दोबारा न भेजें।'],
+    'WA-013':['WhatsApp scheduling failed','Queue/scheduler error और local record references जाँचें; pending data न हटाएँ।'],
+    'MSG-010':['Background messaging worker failed','Worker का नाम, stack और storage/connector error देखें।'],
+    'MSG-011':['Campaign message send failed','Channel, job/campaign reference और error देखें; gateway/chat में परिणाम जाँचें।'],
     'UI-007':['Renderer startup error','Startup stack और bundled JS/assets जाँचें; UI monitor शुरू होने से पहले error आया।'],
     'UI-004':['React screen crashed','Component stack और screen/action से render failure reproduce करें।'],
     'UI-005':['Main screen load failed','Installed assets/preload और release files जाँचें।'],

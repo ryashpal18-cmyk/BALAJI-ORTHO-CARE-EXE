@@ -18,6 +18,7 @@ files:
   - main.js
   - pc-messaging.cjs
   - whatsapp-service.cjs
+  - messaging-log.cjs
   - family-profile.cjs
   - invoice-document.cjs
   - patient-statement.cjs
