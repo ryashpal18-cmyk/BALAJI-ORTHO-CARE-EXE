@@ -4,6 +4,11 @@ const {normId,familyNumber,familyLink}=require('./family-profile.cjs');
 const {invoiceDocument}=require('./invoice-document.cjs');
 const {statementForPatient,statementDocument,statementSummary}=require('./patient-statement.cjs');
 const monthly=require('./monthly-report.cjs');
+function serializedId(value){
+  const id=typeof value==='string'?value:value?._serialized||value?.$1;
+  return typeof id==='string'&&id.trim()?id:null;
+}
+function errorDetail(error){return String(error?.message||error||'Unknown WhatsApp error').replace(/data:[^\s]+/g,'[file data]').slice(0,600);}
 function findBrowser() {
   const paths=[process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA].filter(Boolean).flatMap(root=>[path.join(root,'Microsoft','Edge','Application','msedge.exe'),path.join(root,'Google','Chrome','Application','chrome.exe')]);
   return paths.find(file=>fs.existsSync(file));
@@ -149,7 +154,7 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
       if(!client&&settings().paired&&now()>=nextConnect){nextConnect=now()+60000;await connect();}
       if(!ready||!client)return;
       const job=jobs().find(j=>j.state==='queued'&&(!j.retryAt||j.retryAt<=now()));if(!job)return;
-      let handedOff=false;
+      let handedOff=false,failureStage='PDF बनाना';
       try{
         const current=jobData(job),activeClient=client;
         if((job.kind==='statement'||job.kind==='monthly'&&!job.automatic)&&job.fingerprint!==current.fingerprint)throw Error('STATEMENT-004: हिसाब बदला है; Patient Profile में फिर preview करके queue करें।');
@@ -157,20 +162,24 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
         if(!stillQueued(job))return;
         const fresh=jobData(job);
         if(fresh.fingerprint!==current.fingerprint)throw Error(job.kind==='statement'?'STATEMENT-004: हिसाब बदला; फिर preview करें।':'Bill बदल गया; नवीनतम PDF दोबारा बनेगी');
+        failureStage='WhatsApp नंबर जाँचना';
         const number=await bounded(activeClient.getNumberId('91'+familyNumber(fresh.patient.mobile)),30000);
         if(!stillQueued(job))return;
         if(!number) {patch(job.id,{state:'failed',error:'इस नंबर पर WhatsApp account नहीं मिला'});return;}
+        const chatId=serializedId(number);if(!chatId)throw Error('WhatsApp chat ID नहीं मिली; connector compatibility जाँचें');
         assertAllowed();if(client!==activeClient||!ready)throw Error('WhatsApp connection बदल गया');
         if(job.kind==='monthly')assertMonthlyJob(job);
         if(jobData(job).fingerprint!==fresh.fingerprint)throw Error(job.kind==='statement'?'STATEMENT-004: हिसाब या mobile बदला; फिर preview करें।':'Bill या mobile बदला; PDF दोबारा बनेगी');
         if(!stillQueued(job))return;
         const media=mediaFactory?mediaFactory(pdfPath):require('whatsapp-web.js').MessageMedia.fromFilePath(pdfPath);
         patch(job.id,{state:'sending',pdfPath,mobile:familyNumber(fresh.patient.mobile),patientName:fresh.patient.name,fingerprint:fresh.fingerprint,attempts:(job.attempts||0)+1,error:''});
+        failureStage='WhatsApp को PDF भेजना';
         handedOff=true;
-        const sent=await bounded(activeClient.sendMessage(number._serialized,media,{sendMediaAsDocument:true,caption:`नमस्ते ${fresh.patient.name} जी, Balaji Digital X-Ray & Ortho Care Center का आपका ${job.kind==='monthly'?'मासिक हिसाब '+job.month:job.kind==='statement'?'पूरा account statement':'bill'} PDF संलग्न है।`,waitUntilMsgSent:true}),timeoutMs);
-        if(!sent?.id?._serialized)throw Error('WhatsApp acknowledgment नहीं मिला');
-        patch(job.id,{state:'sent',messageId:sent.id._serialized,sentAt:new Date(now()).toISOString(),error:''});
-      }catch(e){if(!handedOff&&!stillQueued(job))return;patch(job.id,{state:handedOff?'unconfirmed':(job.kind==='statement'&&/STATEMENT-00[124]/.test(String(e.message))||job.kind==='monthly'&&(/STATEMENT-002|MONTHLY-00[12]/.test(String(e.message))||!job.automatic&&/STATEMENT-001|MONTHLY-004/.test(String(e.message))))?'failed':'queued',retryAt:now()+60000,error:handedOff?'परिणाम अनिश्चित है। WhatsApp chat में जाँचें; अपने आप दोबारा नहीं भेजेंगे।':String(e.message||e)});}
+        const sent=await bounded(activeClient.sendMessage(chatId,media,{sendSeen:false,sendMediaAsDocument:true,caption:`नमस्ते ${fresh.patient.name} जी, Balaji Digital X-Ray & Ortho Care Center का आपका ${job.kind==='monthly'?'मासिक हिसाब '+job.month:job.kind==='statement'?'पूरा account statement':'bill'} PDF संलग्न है।`,waitUntilMsgSent:true}),timeoutMs);
+        const messageId=serializedId(sent?.id);
+        if(!messageId)throw Error('WhatsApp acknowledgment नहीं मिला');
+        patch(job.id,{state:'sent',messageId,sentAt:new Date(now()).toISOString(),error:'',errorDetail:'',failureStage:''});
+      }catch(e){if(!handedOff&&!stillQueued(job))return;patch(job.id,{state:handedOff?'unconfirmed':(job.kind==='statement'&&/STATEMENT-00[124]/.test(String(e.message))||job.kind==='monthly'&&(/STATEMENT-002|MONTHLY-00[12]/.test(String(e.message))||!job.automatic&&/STATEMENT-001|MONTHLY-004/.test(String(e.message))))?'failed':'queued',retryAt:now()+60000,errorDetail:errorDetail(e),failureStage,failedAt:new Date(now()).toISOString(),error:handedOff?'परिणाम अनिश्चित है। WhatsApp chat में जाँचें; अपने आप दोबारा नहीं भेजेंगे।':String(e.message||e)});}
     }finally{busy=false;}
   }
   // Plain text campaigns share the paired client, but have a separate durable journal.
@@ -182,18 +191,19 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
     try{
       const activeClient=client,number=await bounded(activeClient.getNumberId('91'+normalized),30000);
       if(!number)return{ok:false,permanent:true,error:'इस नंबर पर WhatsApp नहीं है।'};
+      const chatId=serializedId(number);if(!chatId)return{ok:false,error:'WhatsApp chat ID नहीं मिली; connector compatibility जाँचें।'};
       assertAllowed();if(client!==activeClient||!ready)return{ok:false,error:'WhatsApp connection बदल गया।'};
       const check=validate();if(check!==true)return{ok:false,cancelled:check==='cancelled',error:'प्राप्तकर्ता या अभियान बदला है; संदेश रोका गया।'};
       handedOff=true;
-      const sent=await bounded(activeClient.sendMessage(number._serialized,text,{waitUntilMsgSent:true}),timeoutMs);
-      if(!sent?.id?._serialized)throw Error('Acknowledgment missing');
-      return{ok:true,messageId:sent.id._serialized};
-    }catch{return{ok:false,uncertain:handedOff,error:handedOff?'परिणाम अनिश्चित है; WhatsApp चैट में जाँचें।':'WhatsApp connection की प्रतीक्षा में'};}
+      const sent=await bounded(activeClient.sendMessage(chatId,text,{sendSeen:false,waitUntilMsgSent:true}),timeoutMs);
+      const messageId=serializedId(sent?.id);if(!messageId)throw Error('WhatsApp acknowledgment missing');
+      return{ok:true,messageId};
+    }catch(e){return{ok:false,uncertain:handedOff,error:(handedOff?'परिणाम अनिश्चित है; WhatsApp चैट में जाँचें।':'WhatsApp connection की प्रतीक्षा में')+' कारण: '+errorDetail(e)};}
     finally{busy=false;}
   }
   function setAuto(value){assertAllowed();if(typeof value!=='boolean')throw Error('Invalid setting');store.metaSet(settingsKey,{...settings(),auto:value});return status();}
-  function review(id,action){assertAllowed();const job=jobs().find(j=>j.id===id);if(!job||!['unconfirmed','failed','queued'].includes(job.state))throw Error('Job review उपलब्ध नहीं');if(!['sent','retry','cancel'].includes(action))throw Error('Invalid review');patch(id,{state:action==='retry'?'queued':action==='cancel'?'cancelled':'sent',retryAt:0,error:'',reviewedAt:new Date(now()).toISOString(),reviewAction:action});return status();}
+  function review(id,action){assertAllowed();const job=jobs().find(j=>j.id===id);if(!job||!['unconfirmed','failed','queued'].includes(job.state))throw Error('Job review उपलब्ध नहीं');if(!['sent','retry','cancel'].includes(action))throw Error('Invalid review');patch(id,{state:action==='retry'?'queued':action==='cancel'?'cancelled':'sent',retryAt:0,error:'',errorDetail:'',failureStage:'',reviewedAt:new Date(now()).toISOString(),reviewAction:action});return status();}
   function stop(){stopped=true;ready=false;const old=client;client=null;if(old)void old.destroy().catch(()=>{});}
   return{sendText,connect,disconnect,status,setAuto,enqueue,createPdf,previewStatement,enqueueStatement,createStatementPdf,getMonthlySettings,saveMonthlySettings,previewMonthly,enqueueMonthly,createMonthlyPdf,tick,review,stop};
 }
-module.exports={createWhatsAppService,findBrowser};
+module.exports={createWhatsAppService,findBrowser,serializedId};

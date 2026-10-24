@@ -53,6 +53,7 @@ jobs:
           node tests/attachment-backup.cjs
           node tests/full-backup-roundtrip.cjs
           node tests/pc-family-whatsapp.cjs
+          node tests/whatsapp-compat.cjs
           node tests/festival-messaging.cjs
           node tests/diagnostics.cjs
           node tests/patient-statement.cjs
