@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { supabase } from "@/integrations/supabase/client";
+import LetterpadPatientPrint from "@/components/LetterpadPatientPrint";
 import { toast } from "@/hooks/use-toast";
 import { openWhatsApp, CLINIC_NAME } from "@/lib/whatsappOrtho";
 import {
@@ -38,6 +38,7 @@ export default function Prescription() {
   const [searchParams] = useSearchParams();
   const presetPatientId = searchParams.get("patientId");
 
+  const [printMode, setPrintMode] = useState<"letterpad" | "full">("letterpad");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Patient[]>([]);
   const [showDrop, setShowDrop] = useState(false);
@@ -155,8 +156,8 @@ export default function Prescription() {
           <Button variant="ghost" onClick={() => navigate(-1)} className="gap-2 -ml-2">
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={handlePrint} className="gap-1.5">
+          {printMode === "full" && <div className="flex gap-2">
+            <Button disabled={!patient} variant="outline" size="sm" onClick={handlePrint} className="gap-1.5">
               <Printer className="h-3.5 w-3.5" /> Print / PDF
             </Button>
             <Button
@@ -167,9 +168,14 @@ export default function Prescription() {
             >
               <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
             </Button>
-          </div>
+          </div>}
         </div>
 
+        <div className="flex flex-wrap gap-2 no-print">
+          <Button variant={printMode === "letterpad" ? "default" : "outline"} onClick={() => setPrintMode("letterpad")}>लेटरपैड: केवल मरीज की जानकारी</Button>
+          <Button variant={printMode === "full" ? "default" : "outline"} onClick={() => setPrintMode("full")}>पूरा Prescription</Button>
+          {patient && <Button variant="ghost" disabled={saving} onClick={() => { setPatient(null); resetDraft(); }}>मरीज बदलें</Button>}
+        </div>
         {/* Patient search — no-print */}
         {!patient && (
           <div className="border rounded-xl p-4 bg-card no-print relative">
@@ -209,6 +215,8 @@ export default function Prescription() {
           </div>
         )}
 
+        {printMode === "letterpad" && <LetterpadPatientPrint key={patient?.id || "none"} patient={patient} />}
+        {printMode === "full" && <>
         {/* Prescription Pad */}
         <div className="border rounded-xl bg-card shadow-sm print-area" id="prescription-print">
           {/* Letterhead */}
@@ -325,11 +333,13 @@ export default function Prescription() {
             {saving ? "Saving..." : savedId ? "Saved ✓ — Update Again" : "Save Prescription"}
           </Button>
         </div>
+        </>}
       </div>
 
       {/* Print styles scoped to this page */}
       <style>{`
         @media print {
+          ${printMode === "letterpad" ? "body { display: none !important; }" : ""}
           .no-print { display: none !important; }
           .print-only { display: block !important; }
           body * { visibility: hidden; }

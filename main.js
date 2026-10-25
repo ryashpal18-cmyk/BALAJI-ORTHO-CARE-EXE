@@ -855,10 +855,10 @@ ipcMain.handle('db:getStats', async () => {
 });
 
 ipcMain.handle('shell:openFolder', async (_e, folderPath) => { shell.openPath(folderPath || BACKUP_DIR); });
-ipcMain.handle('shell:print',      async (_e, html) => {
+ipcMain.handle('shell:print',      async (_e, html, options) => {
   const pw = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: false } });
   pw.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-  pw.webContents.on('did-finish-load', () => { pw.webContents.print({ silent: false, printBackground: true }, () => pw.close()); });
+  pw.webContents.on('did-finish-load', () => { pw.webContents.print({ silent: false, printBackground: true, ...(options?.patientLetterpad === true ? { pageSize: 'A4', landscape: false, margins: { marginType: 'none' }, scaleFactor: 100, printBackground: false } : {}) }, () => pw.close()); });
   return { success: true };
 });
 

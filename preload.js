@@ -104,7 +104,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // ── Shell ────────────────────────────────────────────────────
   openFolder:      (dir)    => ipcRenderer.invoke('shell:openFolder', dir),
-  print:           (html)   => ipcRenderer.invoke('shell:print', html),
+  print:           (html, options) => ipcRenderer.invoke('shell:print', html, options),
 
   // ── App Paths ─────────────────────────────────────────────────
   getBackupDir:    ()       => ipcRenderer.invoke('app:getBackupDir'),
