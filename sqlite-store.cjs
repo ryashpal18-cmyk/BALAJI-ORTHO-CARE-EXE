@@ -19,6 +19,29 @@ const path = require('path');
 const fs   = require('fs');
 const Database = require('better-sqlite3');
 const logger = require('./logger.cjs');
+const registration = (() => {
+// A primary clinic PC allocates offline numbers only after one complete,
+// numbered cloud snapshot has initialized its durable high-water mark.
+const KEY = 'patient-registration:last-number';
+const serial = value => /^BAOR\d{4,}$/.test(String(value || '')) ? Number(String(value).slice(4)) : 0;
+const format = n => 'BAOR' + String(n).padStart(4, '0');
+function observe(store, rows, complete = false) {
+  const previous = store.metaGet(KEY);
+  const maximum = Math.max(Number(previous || 0), ...rows.map(p => serial(p.registration_number)), 0);
+  if (previous !== undefined || (complete && rows.length && rows.every(p => serial(p.registration_number)))) store.metaSet(KEY, maximum);
+}
+function allocate(store, row) {
+  const existing = store.cacheGetRow('patients', row.id);
+  if (existing?.registration_number) return { ...row, registration_number: existing.registration_number };
+  const last = store.metaGet(KEY);
+  if (last === undefined) return { ...row, registration_number: null }; // Saving remains available before migration.
+  observe(store, store.cacheGetAll('patients'));
+  const n = Number(store.metaGet(KEY)) + 1;
+  store.metaSet(KEY, n);
+  return { ...row, registration_number: format(n) };
+}
+return { KEY, serial, format, observe, allocate };
+})();
 
 let db = null;
 
@@ -115,6 +138,23 @@ function cacheReplaceTable(table, rows, idField) {
   const del = getDb().prepare(`DELETE FROM table_cache WHERE table_name = ?`);
   const runAll = getDb().transaction(() => {
     const previous = cacheGetAll(table);
+    if (table === 'patients') {
+      registration.observe(module.exports, rows, true);
+      // Import only the authoritative registration field into pending edits.
+      const byId = new Map(rows.map(r => [String(r.id).replace(/^local_/, ''), r]));
+      for (const old of previous) {
+        const server = byId.get(String(old.id).replace(/^local_/, ''));
+        if (server?.registration_number && !old.registration_number) old.registration_number = server.registration_number;
+      }
+      // Patients saved before initialization can now receive numbers atomically.
+      for (const m of queueGetAll().filter(m => m.table === 'patients' && m.op === 'insert')) {
+        const old = previous.find(p => p.id === m.tempId);
+        if (!old) continue;
+        const numbered = old.registration_number ? old : registration.allocate(module.exports, old);
+        Object.assign(old, numbered);
+        queueUpdate(m.id, { payload: { ...m.payload, registration_number: old.registration_number } });
+      }
+    }
     rows = rows.map(row => { const old = previous.find(r => r[idField] === row[idField]); return old?._localFileUrl ? { ...row, _localFileUrl: old._localFileUrl } : row; });
     const pending = previous.filter(row => row._pendingSync);
     const pendingIds = new Set(pending.flatMap(row => [String(row[idField]), String(row[idField]).replace(/^local_/, '')]));
@@ -139,6 +179,7 @@ function cacheMergeServer(table, row, idField = 'id') {
 
 function cacheUpsertRow(table, row, idField) {
   const rowId = row[idField];
+  if (table === 'patients') registration.observe(module.exports, [row]);
   getDb().prepare(
     `INSERT INTO table_cache (_key, table_name, data) VALUES (?, ?, ?)
      ON CONFLICT(_key) DO UPDATE SET data = excluded.data`
@@ -341,6 +382,15 @@ function commitMutation(mutation, row, idField = 'id') {
         for (const receipt of saved.payment_history) if (typeof receipt.id === 'string' && !prior.has(receipt.id) && Number(receipt.amount) > 0 && !receipt.legacy && !receipt.id.startsWith('reclass:'))
           metaSet('outreach:receipt-origin:' + String(saved.id).replace(/^local_/, '') + ':' + receipt.id, true);
       }
+    }
+    if (mutation.table === 'patients' && mutation.op === 'insert') {
+      saved = registration.allocate(module.exports, saved);
+      mutation = { ...mutation, payload: { ...mutation.payload, registration_number: saved.registration_number } };
+    }
+    if (mutation.table === 'patients' && mutation.op === 'update') {
+      const existing = cacheGetRow('patients', mutation.rowId);
+      if (Object.hasOwn(row, 'registration_number') && row.registration_number !== existing.registration_number)
+        throw new Error('Registration number cannot be edited');
     }
     if (mutation.op === 'delete') cascadeLocalDelete(mutation.table, mutation.rowId);
     else cacheUpsertRow(mutation.table, saved, idField);

@@ -13,7 +13,7 @@ export const letterpadFieldInfo = {
   age: { label: "Age", width: 20, size: 12, labelWidth: 10 },
   gender: { label: "Sex", width: 25, size: 12, labelWidth: 10 },
   date: { label: "Date", width: 30, size: 12, labelWidth: 12 },
-  registration: { label: "Reg. No.", width: 165, size: 8, labelWidth: 21 },
+  registration: { label: "Reg. No.", width: 165, size: 12, labelWidth: 21 },
 };
 const number = (value: unknown, fallback: number, min: number, max: number) => {
   const n = Number(value);
@@ -37,7 +37,7 @@ export function buildLetterpadHtml(values: Record<LetterpadField, string>, input
     const label = layout.labels ? `<span class="label" style="left:${x - info.labelWidth}mm;top:${y}mm;width:${info.labelWidth}mm">${info.label}:</span>` : "";
     const registration = field === "registration";
     const text = String(values[field] ?? "");
-    const fontSize = registration ? Math.max(5, Math.min(8, Math.floor((fieldWidth * 2.25) / Math.max(text.length, 1)))) : info.size;
+    const fontSize = registration ? Math.max(5, Math.min(12, Math.floor((fieldWidth * 2.25) / Math.max(text.length, 1)))) : info.size;
     return `${label}<span class="value${registration ? " registration" : ""}" data-field="${field}" style="left:${x}mm;top:${y}mm;width:${fieldWidth}mm;font-size:${fontSize}pt">${escapeHtml(text)}</span>`;
   }).join("");
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title></title><style>
@@ -45,6 +45,6 @@ export function buildLetterpadHtml(values: Record<LetterpadField, string>, input
     * { box-sizing: border-box; }
     html,body { margin:0; padding:0; width:210mm; height:297mm; background:white; color:black; font-family:Arial,"Nirmala UI",sans-serif; }
     .value,.label { position:absolute; height:12mm; display:flex; align-items:center; line-height:1.15; overflow-wrap:anywhere; overflow:hidden; }
-    .value { font-weight:700; } .registration { height:6mm; white-space:nowrap; overflow-wrap:normal; word-break:normal; letter-spacing:-0.1pt; } .label { font-size:10pt; font-weight:400; }
+    .value { font-weight:700; } .registration { height:12mm; white-space:nowrap; overflow-wrap:normal; word-break:normal; letter-spacing:-0.1pt; } .label { font-size:10pt; font-weight:400; }
   </style></head><body>${fields}</body></html>`;
 }

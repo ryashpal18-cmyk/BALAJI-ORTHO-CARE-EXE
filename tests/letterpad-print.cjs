@@ -12,7 +12,7 @@ const code = ts.transpileModule(fs.readFileSync('src/lib/letterpadPrint.ts', 'ut
 const mod = { exports: {} };
 vm.runInNewContext(code, { exports: mod.exports, require: () => safe.exports });
 const { buildLetterpadHtml, normalizeLetterpadLayout, defaultLetterpadLayout, letterpadFields, letterpadFieldInfo } = mod.exports;
-const values = { name: '<img src=x onerror=alert(1)> मरीज', age: '0 Y', gender: 'Female', date: '25/10/2026', registration: '00123' };
+const values = { name: '<img src=x onerror=alert(1)> मरीज', age: '0 Y', gender: 'Female', date: '25/10/2026', registration: 'BAOR1108' };
 const html = buildLetterpadHtml(values, defaultLetterpadLayout);
 assert.equal((html.match(/data-field=/g) || []).length, 5);
 assert.ok(html.includes('&lt;img'));
@@ -23,7 +23,7 @@ assert.ok(html.includes('font-size:14pt'));
 assert.equal((html.match(/font-size:12pt/g) || []).length, 4);
 assert.ok(html.includes('height:12mm'));
 assert.ok(html.includes('0 Y'));
-assert.ok(html.includes('00123'));
+assert.ok(html.includes('BAOR1108'));
 const labeled = buildLetterpadHtml(values, { ...defaultLetterpadLayout, labels: true });
 assert.equal((labeled.match(/class="label"/g) || []).length, 5);
 const normalized = normalizeLetterpadLayout({ offsetX: 'malicious', offsetY: 999, positions: { name: { x: -999, y: 999 }, age: { x: 'bad', y: null } } });
@@ -60,20 +60,9 @@ const printHandler = vm.runInNewContext(`(${handler})`, { BrowserWindow: FakeWin
  assert.equal(printed.printBackground, true); assert.equal(printed.pageSize, undefined);
  console.log('PASS native letterpad uses A4 portrait/100%/zero margins and preserves other print jobs');
 })().catch(error => { console.error(error); process.exitCode = 1; });
-const invoiceModule = { exports: {} };
-vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/lib/invoiceNumber.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: invoiceModule.exports });
-const { invoiceNumber, letterpadPatientInvoices } = invoiceModule.exports;
-const bills = [
- { id: 'local_old', patient_id: 'local_patient', created_at: '2026-10-01T10:00:00Z' },
- { id: 'other', patient_id: 'someone-else', created_at: '2026-10-25T10:00:00Z' },
- { id: 'local_latest', patient_id: 'patient', created_at: '2026-10-25T09:00:00Z' },
-];
-const matched = letterpadPatientInvoices(bills, 'local_patient');
-assert.equal(matched.length, 2); assert.equal(matched[0].id, 'local_latest');
-assert.equal(bills[0].id, 'local_old');
-assert.equal(invoiceNumber(matched[0].id), invoiceNumber('latest'));
-assert.equal(letterpadPatientInvoices(bills, 'new-patient').length, 0);
-assert.equal(letterpadPatientInvoices(bills, '').length, 0);
-const invoiceHtml = buildLetterpadHtml({ ...values, registration: invoiceNumber(matched[0].id) }, defaultLetterpadLayout);
-assert.ok(invoiceHtml.includes('INV-LATEST'));
-console.log('PASS patient-only invoices newest first, offline/synced IDs match, original bills unchanged and real invoice number prints');
+// Registration printing is independent of billing and invoice identifiers.
+const component=fs.readFileSync('src/components/LetterpadPatientPrint.tsx','utf8');
+assert.ok(!component.includes('invoiceNumber'));
+assert.ok(component.includes('registration_number'));
+assert.ok(!component.includes('readBranchTable("billing"'));
+console.log('PASS BAOR registration prints without loading or requiring a bill');

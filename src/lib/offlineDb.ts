@@ -163,7 +163,7 @@ export async function cacheReplaceTable(table: string, rows: any[], idField = "i
       }
       await cacheSetRows(table, finalRows, idField);
     } else {
-      assertSuccess(await bridge.cacheReplaceTable(table, finalRows, idField));
+      assertSuccess(await bridge.cacheReplaceTable(table, rows, idField));
     }
     cLog.info("sqlite", `${table} cache replace — ${rows.length} rows save ho gayi${pendingIds.size ? ` (${pendingIds.size} pending local rows preserved)` : ""}`);
   } catch (err) {

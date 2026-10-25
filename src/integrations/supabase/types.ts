@@ -868,7 +868,7 @@ type CashEntry = { id: string; entry_date: string; entry_type: string; amount: n
 type CashDay = { id: string; entry_date: string; physical_cash: number | null; calculated_closing: number | null; difference: number | null; remarks: string | null; status: 'open' | 'closed'; closed_by: string | null; closed_at: string | null; reopened_by: string | null; reopened_at: string | null; reopen_reason: string | null; reopen_count: number; created_at: string; updated_at: string };
 export type Database = Omit<GeneratedDatabase, 'public'> & {
  public: Omit<GeneratedDatabase['public'], 'Tables'> & { Tables: Omit<BaseTables, 'patients' | 'appointments' | 'billing' | 'physiotherapy_sessions' | 'medicines'> & {
-  patients: ExtendTable<BaseTables['patients'], {branch_id: string | null}>;
+  patients: ExtendTable<BaseTables['patients'], {branch_id: string | null; registration_number: string | null}>;
   appointments: ExtendTable<BaseTables['appointments'], {branch_id: string | null}>;
   billing: ExtendTable<BaseTables['billing'], {branch_id: string | null; discount: number; payment_history: Json | null}>;
   medicines: ExtendTable<BaseTables['medicines'], {stock_quantity: number; low_stock_threshold: number; unit: string}>;

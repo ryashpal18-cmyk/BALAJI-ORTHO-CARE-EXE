@@ -317,7 +317,7 @@ export function useSearchPatients(search: string) {
     queryFn: async () => {
       const rows = await readBranchTable("patients", selectedBranchId);
       const term = search.toLowerCase().trim();
-      return rows.filter(p => (p.name || "").toLowerCase().includes(term) || (p.mobile || "").includes(term)).slice(0,20);
+      return rows.filter(p => (p.name || "").toLowerCase().includes(term) || (p.mobile || "").includes(term) || (p.registration_number || "").toLowerCase().includes(term)).slice(0,20);
     } });
 }
 

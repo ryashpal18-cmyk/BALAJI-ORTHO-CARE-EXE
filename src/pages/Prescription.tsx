@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 interface Patient {
+  registration_number?: string | null;
   id: string;
   name: string;
   mobile: string | null;
@@ -231,6 +232,7 @@ export default function Prescription() {
               <div className="flex items-center justify-between border-b pb-3">
                 <div>
                   <p className="font-semibold">{patient.name}</p>
+                  <p className="text-sm font-mono">Reg. No.: {patient.registration_number || "नंबर sync के बाद मिलेगा"}</p>
                   <p className="text-xs text-muted-foreground">
                     {patient.mobile || "No mobile"}{patient.age ? ` • ${patient.age} yrs` : ""}{patient.gender ? ` • ${patient.gender}` : ""}
                   </p>

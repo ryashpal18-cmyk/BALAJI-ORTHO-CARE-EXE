@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useBranchContext } from "@/lib/branchContext";
 import { readBranchTable } from "@/lib/branchData";
-import { invoiceNumber, letterpadPatientInvoices } from "@/lib/invoiceNumber";
 import { recordId } from "@/lib/patientRecords";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +11,7 @@ import { businessDate } from "@/lib/businessDate";
 import { writeReportDocument } from "@/lib/safeReportHtml";
 import { buildLetterpadHtml, defaultLetterpadLayout, letterpadFields, letterpadFieldInfo, LETTERPAD_SETTINGS_KEY, normalizeLetterpadLayout } from "@/lib/letterpadPrint";
 
-interface Props { patient: { id: string; name: string; age: number | null; gender: string | null } | null }
+interface Props { patient: { id: string; name: string; age: number | null; gender: string | null; registration_number?: string | null } | null }
 export default function LetterpadPatientPrint({ patient }: Props) {
   const [layout, setLayout] = useState(() => {
     try { return normalizeLetterpadLayout(JSON.parse(localStorage.getItem(LETTERPAD_SETTINGS_KEY) || "null")); }
@@ -20,14 +19,12 @@ export default function LetterpadPatientPrint({ patient }: Props) {
   });
   const [date, setDate] = useState(businessDate());
   const { selectedBranchId } = useBranchContext();
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
-  const { data: bills = [], isLoading: invoicesLoading, isError: invoicesError, refetch } = useQuery({
-    queryKey: ["letterpad-bills", selectedBranchId, patient?.id],
+  const { data: registeredPatient, isLoading: registrationLoading, refetch } = useQuery({
+    queryKey: ["patient-registration", selectedBranchId, patient?.id],
     enabled: !!patient,
-    queryFn: async () => letterpadPatientInvoices(await readBranchTable("billing", selectedBranchId), patient!.id),
+    queryFn: async () => (await readBranchTable("patients", selectedBranchId)).find(p => recordId(p.id) === recordId(patient!.id)) || null,
   });
-  const selectedBill = bills.find(bill => recordId(bill.id) === recordId(selectedInvoiceId)) || bills[0];
-  const registration = selectedBill ? invoiceNumber(selectedBill.id) : "";
+  const registration = registeredPatient?.registration_number || patient?.registration_number || "";
   const [printing, setPrinting] = useState(false);
   const formattedDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.split("-").reverse().join("/") : "";
   const values = { name: patient?.name || "", age: patient?.age != null ? `${patient.age} Y` : "", gender: patient?.gender || "", date: formattedDate, registration: registration.trim() };
@@ -54,18 +51,15 @@ export default function LetterpadPatientPrint({ patient }: Props) {
   };
   return <section className="border rounded-xl p-5 space-y-4 bg-card no-print">
     <h2 className="font-semibold text-lg">पहले से छपे A4 लेटरपैड पर मरीज की जानकारी</h2>
-    <p className="text-sm text-muted-foreground">केवल नाम, उम्र, लिंग, तारीख और मरीज के बिल का invoice नंबर रजिस्ट्रेशन की जगह छपेगा। कागज का बाकी हिस्सा खाली रहेगा।</p>
+    <p className="text-sm text-muted-foreground">केवल नाम, उम्र, लिंग, तारीख और मरीज का स्थायी BAOR रजिस्ट्रेशन नंबर छपेगा। कागज का बाकी हिस्सा खाली रहेगा।</p>
     {patient ? <p className="font-semibold">{patient.name} · {patient.age ?? "—"} वर्ष · {patient.gender || "—"}</p> : <p>ऊपर से मरीज चुनें।</p>}
     <div className="grid sm:grid-cols-2 gap-3">
       <div><Label htmlFor="letterpad-date">प्रिंट की तारीख</Label><Input id="letterpad-date" type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
-      <div><Label htmlFor="letterpad-reg">रजिस्ट्रेशन नंबर = Invoice नंबर</Label>
-        <select id="letterpad-reg" className="w-full border rounded-md bg-background px-3 py-2 text-sm" disabled={!bills.length || invoicesLoading} value={selectedBill?.id || ""} onChange={e => setSelectedInvoiceId(e.target.value)}>
-          {!bills.length && <option value="">{invoicesLoading ? "बिल लोड हो रहे हैं…" : "इस मरीज का बिल नहीं मिला"}</option>}
-          {bills.map(bill => <option key={bill.id} value={bill.id}>{invoiceNumber(bill.id)} · {businessDate(bill.created_at)}</option>)}
-        </select>
-        <p className="text-xs text-muted-foreground">नवीनतम बिल अपने आप चुना जाएगा। पुराने बिल के लिए सूची से चुनें। {patient && !invoicesLoading && !bills.length && "पहले मरीज का बिल सेव करें।"}</p>
-        {invoicesError && <p className="text-sm text-destructive">बिल लोड नहीं हुए।</p>}
-        <Button size="sm" variant="ghost" disabled={!patient || invoicesLoading} onClick={() => void refetch()}>बिल फिर लोड करें</Button>
+      <div><Label htmlFor="letterpad-reg">मरीज का रजिस्ट्रेशन नंबर</Label>
+        <Input id="letterpad-reg" readOnly value={registration} placeholder={registrationLoading ? "लोड हो रहा है…" : "रजिस्ट्रेशन नंबर अभी उपलब्ध नहीं है"} />
+        <p className="text-xs text-muted-foreground">यह मरीज का स्थायी नंबर है। बिल बनाए बिना भी प्रिंट कर सकते हैं।</p>
+        {patient && !registrationLoading && !registration && <p className="text-sm text-destructive">मरीज सेव है। पुराने मरीजों की numbering और cloud sync पूरा होने पर नंबर यहाँ दिखेगा।</p>}
+        <Button size="sm" variant="ghost" disabled={!patient || registrationLoading} onClick={() => void refetch()}>नंबर फिर लोड करें</Button>
       </div>
     </div>
     <details className="border rounded-lg p-3">
@@ -78,6 +72,6 @@ export default function LetterpadPatientPrint({ patient }: Props) {
     </details>
     {patient && <details><summary className="cursor-pointer text-sm">केवल छपने वाली जानकारी का पूर्वावलोकन</summary><div className="overflow-auto border mt-2"><iframe title="Patient information print preview" sandbox="" srcDoc={html} style={{ width: "210mm", height: "95mm", border: 0 }} /></div></details>}
     <p className="text-sm">Printer: A4 Portrait · Scale 100% / Actual size · Margins None · Headers / Footers बंद। नाम 14 pt, बाकी 12 pt Bold; हर फील्ड की ऊँचाई 12 mm।</p>
-    <Button disabled={!patient || !registration || !formattedDate || invoicesLoading || printing} onClick={print}>{printing ? "प्रिंट खुल रहा है…" : "केवल मरीज की जानकारी प्रिंट करें"}</Button>
+    <Button disabled={!patient || !registration || !formattedDate || registrationLoading || printing} onClick={print}>{printing ? "प्रिंट खुल रहा है…" : "केवल मरीज की जानकारी प्रिंट करें"}</Button>
   </section>;
 }

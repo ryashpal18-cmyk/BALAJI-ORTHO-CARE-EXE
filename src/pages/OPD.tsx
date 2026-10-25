@@ -124,7 +124,6 @@ export default function OPD() {
 
   const mobileRequest = useRef(0);
   const registering = useRef(false);
-  const printAfterRegister = useRef(false);
   // Local lookup is immediate; late cloud results never replace a newer input.
   const handleMobileChange = async (mobile: string) => {
     const request = ++mobileRequest.current;
@@ -192,8 +191,7 @@ export default function OPD() {
     if (!/^(?:91)?[6-9]\d{9}$/.test(digits) || !regForm.name.trim()) {
       toast({ title: 'सही नाम और 10 अंकों का मोबाइल भरें', variant: 'destructive' }); return;
     }
-    const goToPrint = printAfterRegister.current;
-    printAfterRegister.current = false;
+    const goToPrint = (e.nativeEvent as SubmitEvent | undefined)?.submitter?.getAttribute("data-print-patient") === "true";
     registering.current = true; ++mobileRequest.current;
     try {
       let patientId = existingPatient?.id;
@@ -218,13 +216,13 @@ export default function OPD() {
           address: regForm.address || null,
         });
         patientId = result.id;
-        toast({ title: "🆕 New Patient Registered", description: `${regForm.name} successfully registered!` });
+        toast({ title: "🆕 New Patient Registered", description: `${regForm.name} · ${result.registration_number || "नंबर sync के बाद मिलेगा"}` });
       }
 
       // Print action opens the existing A4 patient-letterpad screen after the patient is saved.
-      // Registration on that screen remains the original invoice number (available after billing).
+      // A patient registration is independent of billing.
       if (goToPrint) {
-        toast({ title: "मरीज सेव हो गया", description: "लेटरपैड प्रिंट स्क्रीन खुल रही है। Invoice नंबर के लिए पहले बिल सेव होना चाहिए।" });
+        toast({ title: "मरीज सेव हो गया", description: "लेटरपैड प्रिंट स्क्रीन खुल रही है। मरीज का BAOR नंबर प्रिंट होगा।" });
         navigate(`/prescription?patientId=${encodeURIComponent(String(patientId))}`);
       } else {
         toast({ title: "✅ Redirecting to Billing", description: "Patient saved — opening billing page..." });
@@ -540,10 +538,12 @@ export default function OPD() {
                       )}
                     </div>
                   </div>
-                  <div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {existingPatient && <span className="text-sm font-mono">Reg. No.: {existingPatient.registration_number || "नंबर sync के बाद मिलेगा"}</span>}
                     <Button data-diagnostic-action="save-patient" type="submit" disabled={addPatient.isPending || mobileSearchStatus === "searching"} className="w-full sm:w-auto">
                       {addPatient.isPending ? "Saving..." : mobileSearchStatus === "searching" ? "Checking..." : existingPatient ? "✅ Update & Continue" : "🆕 Register New Patient"}
                     </Button>
+                    <Button type="submit" variant="outline" disabled={addPatient.isPending || mobileSearchStatus === "searching"} data-print-patient="true"><Printer className="h-4 w-4 mr-2" />Save & Prescription Print</Button>
                   </div>
                 </form>
               </CardContent>
@@ -566,7 +566,7 @@ export default function OPD() {
                       <div key={p.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/30">
                         <div>
                           <p className="font-medium text-sm">{p.name}</p>
-                          <p className="text-xs text-muted-foreground">{p.mobile} · {p.age}y · {p.gender}</p>
+                          <p className="text-xs text-muted-foreground">{p.registration_number || "नंबर pending"} · {p.mobile} · {p.age}y · {p.gender}</p>
                         </div>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline" className="text-xs">{p.address}</Badge>

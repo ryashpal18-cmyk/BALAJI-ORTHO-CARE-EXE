@@ -47,6 +47,7 @@ jobs:
           node tests/clinic-updates.cjs
           node tests/module-regressions.cjs
           node tests/letterpad-print.cjs
+          node tests/patient-registration.cjs
           node tests/due-collection-date.cjs
           node tests/message-and-estimate.cjs
           node tests/outreach.cjs
