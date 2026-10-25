@@ -1,3 +1,10 @@
+import {useQuery} from "@tanstack/react-query";
+import {recordId} from "@/lib/patientRecords";
+import {businessDate} from "@/lib/businessDate";
+import {buildPrescriptionHtml,PRESCRIPTION_DOCTOR_NAME,PRESCRIPTION_DOCTOR_QUALIFICATION} from "@/lib/prescriptionPrint";
+import {printPatientLetterpad} from "@/lib/patientPrint";
+import A4PrintPreview from "@/components/A4PrintPreview";
+import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogFooter} from "@/components/ui/dialog";
 import { readBranchTable } from "@/lib/branchData";
 import { useBranchContext } from "@/lib/branchContext";
 import { offlineInsert } from "@/lib/offlineQuery";
@@ -30,8 +37,8 @@ interface MedRow {
   duration: string;
 }
 
-const DOCTOR_NAME = "Dr. S. S. Rathore";
-const DOCTOR_QUALIFICATION = "M.S. Orthopaedics";
+const DOCTOR_NAME = PRESCRIPTION_DOCTOR_NAME;
+const DOCTOR_QUALIFICATION = PRESCRIPTION_DOCTOR_QUALIFICATION;
 
 export default function Prescription() {
   const navigate = useNavigate();
@@ -53,17 +60,26 @@ export default function Prescription() {
   const [followupDate, setFollowupDate] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [previewHtml,setPreviewHtml]=useState("");
+  const [printing,setPrinting]=useState(false);
+  const [printError,setPrintError]=useState("");
+  const {data:registeredPatient}=useQuery({
+    queryKey:["patient-registration",selectedBranchId,patient?.id],
+    enabled:!!patient&&printMode==="full",
+    queryFn:async()=>(await readBranchTable("patients",selectedBranchId)).find(p=>recordId(p.id)===recordId(patient!.id))||null,
+  });
+  const registration=registeredPatient?.registration_number||patient?.registration_number||"";
 
   const resetDraft = () => {
     setDiagnosis(''); setMedicines([{ name: '', dose: '', duration: '' }]);
-    setAdvice(''); setFollowupDate(''); setSavedId(null);
+    setAdvice(''); setFollowupDate(''); setSavedId(null);setPreviewHtml('');setPrintError('');
   };
 
   useEffect(() => {
     let active = true;
     setPatient(null); resetDraft();
     if (presetPatientId) void readBranchTable("patients", selectedBranchId).then(rows => {
-      if (active) setPatient(rows.find(p => p.id === presetPatientId) || null);
+      if (active) setPatient(rows.find(p => recordId(p.id) === recordId(presetPatientId)) || null);
     }).catch(() => {});
     return () => { active = false; };
   }, [presetPatientId, selectedBranchId]);
@@ -123,7 +139,18 @@ export default function Prescription() {
 
   };
 
-  const handlePrint = () => window.print();
+  const handlePreview = () => {
+    if(!patient||!registration)return;
+    setPrintError("");
+    setPreviewHtml(buildPrescriptionHtml({patient:{...patient,registration_number:registration},diagnosis,medicines,advice,followupDate,date:businessDate()}));
+  };
+  const handlePrint = async () => {
+    if(!previewHtml||printing)return;
+    setPrinting(true);setPrintError("");
+    try{await printPatientLetterpad(previewHtml);}
+    catch(error:any){setPrintError(error.message||"Print dialog नहीं खुला।");}
+    finally{setPrinting(false);}
+  };
 
   const handleWhatsApp = () => {
     if (!patient) return;
@@ -153,13 +180,13 @@ export default function Prescription() {
     <DashboardLayout>
       <div className="max-w-3xl mx-auto space-y-6 p-4">
         {/* Header — no-print */}
-        <div className="flex items-center justify-between no-print">
+        <div className="flex flex-wrap items-center justify-between gap-2 no-print">
           <Button variant="ghost" onClick={() => navigate(-1)} className="gap-2 -ml-2">
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
-          {printMode === "full" && <div className="flex gap-2">
-            <Button disabled={!patient} variant="outline" size="sm" onClick={handlePrint} className="gap-1.5">
-              <Printer className="h-3.5 w-3.5" /> Print / PDF
+          {printMode === "full" && <div className="flex flex-wrap gap-2">
+            <Button disabled={!patient||!registration} variant="outline" size="sm" onClick={handlePreview} className="gap-1.5">
+              <Printer className="h-3.5 w-3.5" /> Print Preview / PDF
             </Button>
             <Button
               size="sm"
@@ -229,17 +256,17 @@ export default function Prescription() {
           <div className="p-5 space-y-5">
             {/* Patient strip */}
             {patient ? (
-              <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
                 <div>
-                  <p className="font-semibold">{patient.name}</p>
-                  <p className="text-sm font-mono">Reg. No.: {patient.registration_number || "नंबर उपलब्ध नहीं—लेटरपैड विकल्प में जाँचें"}</p>
+                  <p className="font-semibold break-words">{patient.name}</p>
+                  <p className="text-sm font-mono">Reg. No.: {registration || "नंबर उपलब्ध नहीं—लेटरपैड विकल्प में जाँचें"}</p>
                   <p className="text-xs text-muted-foreground">
                     {patient.mobile || "No mobile"}{patient.age ? ` • ${patient.age} yrs` : ""}{patient.gender ? ` • ${patient.gender}` : ""}
                   </p>
                 </div>
                 <Button
                   variant="ghost" size="sm"
-                  className="no-print"
+                  className="no-print shrink-0"
                   disabled={saving} onClick={() => { setPatient(null); resetDraft(); }}
                 >
                   Change
@@ -275,18 +302,24 @@ export default function Prescription() {
               </div>
               <div className="space-y-2">
                 {medicines.map((m, idx) => (
-                  <div key={idx} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
+                  <div key={idx} className="grid grid-cols-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 items-center rounded-lg border p-3 sm:border-0 sm:p-0">
                     <Input
+                      aria-label={`Medicine ${idx+1} name`}
+                      className="min-w-0"
                       placeholder="Medicine name"
                       value={m.name}
                       onChange={(e) => updateMedRow(idx, "name", e.target.value)}
                     />
                     <Input
+                      aria-label={`Medicine ${idx+1} dose`}
+                      className="min-w-0"
                       placeholder="Dose (e.g. 1-0-1)"
                       value={m.dose}
                       onChange={(e) => updateMedRow(idx, "dose", e.target.value)}
                     />
                     <Input
+                      aria-label={`Medicine ${idx+1} duration`}
+                      className="min-w-0"
                       placeholder="Duration (e.g. 5 days)"
                       value={m.duration}
                       onChange={(e) => updateMedRow(idx, "duration", e.target.value)}
@@ -294,6 +327,7 @@ export default function Prescription() {
                     {medicines.length > 1 && (
                       <Button
                         variant="ghost" size="icon"
+                        aria-label={`Remove medicine ${idx+1}`}
                         className="no-print text-destructive shrink-0"
                         onClick={() => removeMedRow(idx)}
                       >
@@ -338,17 +372,14 @@ export default function Prescription() {
         </>}
       </div>
 
-      {/* Print styles scoped to this page */}
-      <style>{`
-        @media print {
-          ${printMode === "letterpad" ? "body { display: none !important; }" : ""}
-          .no-print { display: none !important; }
-          .print-only { display: block !important; }
-          body * { visibility: hidden; }
-          #prescription-print, #prescription-print * { visibility: visible; }
-          #prescription-print { position: absolute; top: 0; left: 0; width: 100%; }
-        }
-      `}</style>
+      <Dialog open={!!previewHtml} onOpenChange={open=>{if(!open&&!printing)setPreviewHtml("");}}>
+        <DialogContent className="max-w-5xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>पूरा Prescription — A4 Print Preview</DialogTitle><DialogDescription>Diagnosis, दवाइयाँ, सलाह और follow-up सहित यही document प्रिंट होगा। Print dialog में Save as PDF भी चुन सकते हैं।</DialogDescription></DialogHeader>
+          {previewHtml&&<A4PrintPreview html={previewHtml} title="Full prescription print preview"/>}
+          {printError&&<p role="alert" className="text-sm text-destructive break-words">{printError}</p>}
+          <DialogFooter><Button variant="outline" disabled={printing} onClick={()=>setPreviewHtml("")}>वापस जाएँ</Button><Button disabled={printing} onClick={()=>void handlePrint()}>{printing?"प्रिंट खुल रहा है…":"प्रिंट करें / PDF"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

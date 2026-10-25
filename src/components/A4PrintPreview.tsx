@@ -4,7 +4,7 @@ const PAGE_WIDTH = 210 * 96 / 25.4;
 const PAGE_HEIGHT = 297 * 96 / 25.4;
 
 /** Scale only the on-screen sheet; the print document keeps its exact mm geometry. */
-export default function A4PrintPreview({ html }: { html: string }) {
+export default function A4PrintPreview({ html, title = "Patient information print preview" }: { html: string; title?: string }) {
   const container = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.5);
   useEffect(() => {
@@ -19,7 +19,7 @@ export default function A4PrintPreview({ html }: { html: string }) {
   }, []);
   return <div ref={container} className="w-full overflow-auto rounded-lg bg-slate-200 p-3" data-a4-preview>
     <div className="relative mx-auto overflow-hidden bg-white shadow-md" style={{ width: PAGE_WIDTH * scale, height: PAGE_HEIGHT * scale }}>
-      <iframe title="Patient information print preview" sandbox="" srcDoc={html} style={{ display: "block", width: PAGE_WIDTH, height: PAGE_HEIGHT, border: 0, transform: `scale(${scale})`, transformOrigin: "top left", background: "white" }} />
+      <iframe title={title} sandbox="" srcDoc={html} style={{ display: "block", width: PAGE_WIDTH, height: PAGE_HEIGHT, border: 0, transform: `scale(${scale})`, transformOrigin: "top left", background: "white" }} />
     </div>
   </div>;
 }
