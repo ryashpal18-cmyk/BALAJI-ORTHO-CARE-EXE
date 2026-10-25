@@ -197,6 +197,9 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     // ✅ FIX: Local-only fields Supabase ko mat bhejo — schema mein nahi hain
     delete payload._pendingSync;
     delete payload._localOnly;
+    // Old databases can keep syncing patient/bill records before registration SQL is installed.
+    // Omitting a missing number also lets the upgraded database trigger assign it centrally.
+    if (table === "patients" && payload.registration_number == null) delete payload.registration_number;
     // ✅ upsert use karo (insert nahi) — agar retry ho (network drop mid-sync
     // ke baad), to same id pe dobara likhega, duplicate row nahi banega.
     const { data, error } = table === "cash_book_days"
