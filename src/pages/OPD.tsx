@@ -124,6 +124,7 @@ export default function OPD() {
 
   const mobileRequest = useRef(0);
   const registering = useRef(false);
+  const printAfterRegister = useRef(false);
   // Local lookup is immediate; late cloud results never replace a newer input.
   const handleMobileChange = async (mobile: string) => {
     const request = ++mobileRequest.current;
@@ -191,6 +192,8 @@ export default function OPD() {
     if (!/^(?:91)?[6-9]\d{9}$/.test(digits) || !regForm.name.trim()) {
       toast({ title: 'सही नाम और 10 अंकों का मोबाइल भरें', variant: 'destructive' }); return;
     }
+    const goToPrint = printAfterRegister.current;
+    printAfterRegister.current = false;
     registering.current = true; ++mobileRequest.current;
     try {
       let patientId = existingPatient?.id;
@@ -218,11 +221,15 @@ export default function OPD() {
         toast({ title: "🆕 New Patient Registered", description: `${regForm.name} successfully registered!` });
       }
 
-      // Navigate to billing page directly after registration
-      toast({ title: "✅ Redirecting to Billing", description: "Patient saved — opening billing page..." });
-      setTimeout(() => {
-        navigate("/billing", { state: { patientId: patientId, patientName: regForm.name } });
-      }, 500);
+      // Print action opens the existing A4 patient-letterpad screen after the patient is saved.
+      // Registration on that screen remains the original invoice number (available after billing).
+      if (goToPrint) {
+        toast({ title: "मरीज सेव हो गया", description: "लेटरपैड प्रिंट स्क्रीन खुल रही है। Invoice नंबर के लिए पहले बिल सेव होना चाहिए।" });
+        navigate(`/prescription?patientId=${encodeURIComponent(String(patientId))}`);
+      } else {
+        toast({ title: "✅ Redirecting to Billing", description: "Patient saved — opening billing page..." });
+        setTimeout(() => navigate("/billing", { state: { patientId, patientName: regForm.name } }), 500);
+      }
 
       setRegForm({ name: "", mobile: "", age: "", gender: "", address: "" });
       setExistingPatient(null);
