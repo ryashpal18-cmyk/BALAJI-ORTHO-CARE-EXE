@@ -3,7 +3,14 @@
 -- Billing IDs, demographics, dates and all other tables are unchanged.
 BEGIN;
 SET LOCAL lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
 LOCK TABLE public.patients IN ACCESS EXCLUSIVE MODE;
+-- Use the same lock as live EXE/APK number reservations; never reseed over a running reservation.
+SELECT pg_advisory_xact_lock(821734, 1);
+CREATE TEMP TABLE registration_patient_snapshot ON COMMIT DROP AS
+  SELECT id, to_jsonb(p) - 'registration_number' AS original_fields,
+         to_jsonb(p) ->> 'registration_number' AS original_registration
+  FROM public.patients p;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS registration_number text;
 
 -- SNAPSHOT_GUARD
@@ -11,7 +18,7 @@ ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS registration_number text;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM public.patients WHERE registration_number IS NOT NULL
-    AND registration_number !~ '^BAOR[0-9]{4,}$') THEN
+    AND (registration_number !~ '^BAOR[0-9]{4,}$' OR registration_number ~ '^BAOR0{4,}$')) THEN
     RAISE EXCEPTION 'Unexpected existing registration numbers: review before proceeding';
   END IF;
   IF EXISTS (SELECT registration_number FROM public.patients WHERE registration_number IS NOT NULL
@@ -33,8 +40,10 @@ DO $$ DECLARE t record; BEGIN
 END $$;
 
 -- BACKFILL
+CREATE SEQUENCE IF NOT EXISTS public.patient_registration_seq AS bigint;
 WITH last_number AS (
-  SELECT coalesce(max(substring(registration_number FROM 5)::bigint), 0) AS n
+  SELECT greatest(coalesce(max(substring(registration_number FROM 5)::bigint), 0),
+    (SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM public.patient_registration_seq)) AS n
   FROM public.patients WHERE registration_number IS NOT NULL
 ), numbered AS (
   SELECT id, (SELECT n FROM last_number) + row_number() OVER (ORDER BY created_at ASC NULLS LAST, id ASC) AS n
@@ -138,6 +147,20 @@ END $$;
 REVOKE ALL ON FUNCTION public.reserve_patient_registration_numbers(uuid,uuid,integer,bigint) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.reserve_patient_registration_numbers(uuid,uuid,integer,bigint) TO authenticated;
 
+-- Refuse to commit if any old patient field or assigned number changed unexpectedly.
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.patients) <> (SELECT count(*) FROM registration_patient_snapshot)
+     OR EXISTS (
+       SELECT 1 FROM registration_patient_snapshot snapshot
+       LEFT JOIN public.patients p ON p.id = snapshot.id
+       WHERE p.id IS NULL
+          OR (to_jsonb(p) - 'registration_number') IS DISTINCT FROM snapshot.original_fields
+          OR (snapshot.original_registration IS NOT NULL AND p.registration_number IS DISTINCT FROM snapshot.original_registration)
+     ) THEN
+    RAISE EXCEPTION 'Patient safety check failed: original fields or registration changed. No table changes committed';
+  END IF;
+END $$;
 NOTIFY pgrst, 'reload schema';
 COMMIT;
 SELECT count(*) AS total_patients, count(registration_number) AS registered_patients,
