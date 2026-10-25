@@ -34,6 +34,7 @@ jobs:
           node tests/offline-login.cjs
           node tests/local-session.cjs
           node tests/cloud-sync.cjs
+          node tests/cloud-schema-recovery.cjs
           node tests/auth-01.cjs
       - name: Check offline data integrity
         run: |

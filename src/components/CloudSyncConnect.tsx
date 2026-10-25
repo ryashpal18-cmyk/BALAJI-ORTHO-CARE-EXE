@@ -34,7 +34,7 @@ export function CloudSyncConnect() {
       await bridge.adoptSyncSession(data.session);
       resetCloudConnection();
       if (!(await ensureCloudSession())) throw new Error('Cloud verification पूरा नहीं हुआ।');
-      const result = await runSync();
+      const result = await runSync({retrySchema:true});
       void downloadAllDataToCache().catch(() => {});
       setMessage(`${result.synced} records sync हुए; ${result.pending} pending हैं। बाकी background में retry होंगे।`);
     } catch (error: any) {
@@ -50,7 +50,7 @@ export function CloudSyncConnect() {
       resetCloudConnection();
       const connected = await ensureCloudSession();
       if (!connected) { await refresh(); return; }
-      const r = await runSync();
+      const r = await runSync({retrySchema:true});
       setMessage(`${r.synced} records sync हुए; ${r.pending} pending हैं।`);
     } catch { setMessage('Sync अभी पूरा नहीं हुआ। Pending data सुरक्षित रखा गया है।'); }
     finally { setBusy(false); }

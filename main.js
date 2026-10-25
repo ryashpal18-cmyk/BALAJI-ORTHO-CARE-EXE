@@ -427,7 +427,7 @@ function supabaseInsert(supabaseUrl, supabaseKey, table, rows) {
 // (565 patients, 610 bills — jo diagnostic report mein dikha) maujood hai.
 // Isliye main process ab seedha Supabase se periodically fetch karke
 // yahi JSON files bhar deta hai — koi browser storage beech mein nahi aata.
-function supabaseFetchAll(supabaseUrl, supabaseKey, table) {
+function supabaseFetchPage(supabaseUrl, supabaseKey, table, token, offset) {
   return new Promise((resolve) => {
     if (!supabaseUrl || !supabaseKey) return resolve({ ok: false, rows: [] });
     const urlObj  = new URL(`${supabaseUrl}/rest/v1/${table}?select=*`);
@@ -437,9 +437,9 @@ function supabaseFetchAll(supabaseUrl, supabaseKey, table) {
       method:   'GET',
       headers: {
         'apikey':        supabaseKey,
-        ...(supabaseKey.startsWith('sb_publishable_') ? {} : { Authorization: `Bearer ${supabaseKey}` }),
+        Authorization: `Bearer ${token}`,
         'Range-Unit':    'items',
-        'Range':         '0-9999',   // ek baar mein 10,000 tak rows — clinic scale ke liye kaafi
+        'Range':         `${offset}-${offset+99}`,
       },
     };
     const req = https.request(options, (res) => {
@@ -460,9 +460,23 @@ function supabaseFetchAll(supabaseUrl, supabaseKey, table) {
   });
 }
 
+async function supabaseFetchAll(url,key,table,token,authorized=()=>true){
+  if(!token)return {ok:false,reason:'Verified cloud session required',rows:[]};
+  const rows=[];
+  for(let offset=0;;){
+    if(!authorized())return {ok:false,reason:'Cloud session changed',rows:[]};
+    const page=await supabaseFetchPage(url,key,table,token,offset);
+    if(!page.ok)return page;
+    if(!Array.isArray(page.rows))return {ok:false,reason:'Invalid cloud page',rows:[]};
+    if(!page.rows.length)return {ok:true,rows};
+    rows.push(...page.rows);offset+=page.rows.length;
+  }
+}
 let isCloudBackingUp = false;
 async function runDirectCloudBackup() {
-  if (isCloudBackingUp) return;
+  if (isCloudBackingUp || !verifiedCloudToken || access.getPrincipal()?.role!=='admin') return;
+  const generation=authGeneration,token=verifiedCloudToken;
+  const authorized=()=>generation===authGeneration&&token===verifiedCloudToken&&access.getPrincipal()?.role==='admin';
   const settings = { ...readJSON(SETTINGS_FILE, {}), supabaseUrl: authPublicConfig.url, supabaseKey: authPublicConfig.key };
   if (!settings.supabaseUrl || !settings.supabaseKey) return;
 
@@ -479,7 +493,9 @@ async function runDirectCloudBackup() {
     ];
     let totalWritten = 0;
     for (const [table, file] of tableFilePairs) {
-      const result = await supabaseFetchAll(settings.supabaseUrl, settings.supabaseKey, table);
+      if(!authorized())return;
+      const result = await supabaseFetchAll(settings.supabaseUrl, settings.supabaseKey, table,token,authorized);
+      if(!authorized())return;
       if (result.ok && Array.isArray(result.rows)) {
         const res = writeJSONSafe(file, result.rows, `cloud-backup:${table}`);
         totalWritten += res.count;
@@ -1147,7 +1163,7 @@ function getDiagnostics() {
       // No token refresh, login, mutation, enrollment, gateway call or patient body is performed here.
       if (!verifiedCloudToken) return [{code:'CLOUD-002',status:'skipped',title:'Authenticated cloud read check',evidence:'No current verified cloud session; local login is independent.'}];
       const epoch=authGeneration,token=verifiedCloudToken;
-      return Promise.all(['patients','billing','sms_logs'].map(async table => {
+      return Promise.all(['patients','billing','sms_logs','cash_book_days','report_payments','patient_medicines','fracture_cases'].map(async table => {
         try {
           const response = await boundedDiagnostic(net.fetch(authPublicConfig.url+'/rest/v1/'+table+'?select=id&limit=0', {
             method:'GET',headers:{apikey:authPublicConfig.key,Authorization:'Bearer '+token},signal:AbortSignal.timeout(6000)
@@ -1347,13 +1363,14 @@ app.on('before-quit', () => {
 
 app.on('web-contents-created', (_e, contents) => {
   contents.on('new-window', (e) => e.preventDefault());
+  const clinicContents=()=>mainWindow&&!mainWindow.isDestroyed()&&contents===mainWindow.webContents;
   contents.on('console-message', (_event,level,message) => {
-    if(level===3&&!rendererMonitorReady.has(contents))logger.record({level:'error',source:'ui-bootstrap',code:'UI-007',message});
+    if(clinicContents()&&level===3&&!rendererMonitorReady.has(contents))logger.record({level:'error',source:'ui-bootstrap',code:'UI-007',message});
   });
   contents.on('did-fail-load', (_event,code,_description,_url,isMainFrame) => {
-    if(isMainFrame&&code!==-3)logger.record({level:'error',source:'renderer-load',code:'UI-005',message:'Main screen failed to load',detail:{nativeCode:code}});
+    if(clinicContents()&&isMainFrame&&code!==-3)logger.record({level:'error',source:'renderer-load',code:'UI-005',message:'Main screen failed to load',detail:{nativeCode:code}});
   });
-  contents.on('unresponsive',()=>logger.record({level:'error',source:'renderer-health',code:'UI-006',message:'Renderer became unresponsive'}));
+  contents.on('unresponsive',()=>clinicContents()&&logger.record({level:'error',source:'renderer-health',code:'UI-006',message:'Renderer became unresponsive'}));
 });
 
 // Renderer crash ya hang ho jaaye (e.g. out-of-memory, GPU crash) to bhi

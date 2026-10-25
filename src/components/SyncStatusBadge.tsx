@@ -25,7 +25,7 @@ export function SyncStatusBadge() {
   const data = rows.filter(r => r.op !== "sms");
   const review = rows.filter(r => r.op === "sms" && r.payload?.deliveryState === "unconfirmed");
   const sms = rows.filter(r => r.op === "sms" && r.payload?.deliveryState !== "unconfirmed");
-  const retry = async () => { setSyncing(true); try { await runSync(); } catch (e: any) { setError(e.message); } finally { setSyncing(false); await refresh(); } };
+  const retry = async () => { setSyncing(true); try { await runSync({retrySchema:true}); } catch (e: any) { setError(e.message); } finally { setSyncing(false); await refresh(); } };
   return <>
     <Button type="button" size="sm" variant="outline" className="max-w-[230px] text-xs" onClick={() => setOpen(true)}>
       {syncing ? "Sync चल रहा है…" : online ? "Sync स्थिति" : "Offline"} · {data.length} डेटा · {sms.length} SMS{review.length ? ` · ${review.length} जाँचें` : ""}{error ? " ⚠" : ""}
@@ -40,7 +40,7 @@ export function SyncStatusBadge() {
       {rows.map(r => <div key={r.id} className="rounded border p-3 text-sm">
         <p className="font-medium">{r.table} · {r.op} · {r.payload?.patientName || r.payload?.name || r.rowId || r.tempId || r.id}</p>
         <p>प्रयास: {r.retries} · {new Date(r.createdAt).toLocaleString("en-IN")}</p>
-        {r.lastError && <p className="break-words text-destructive">{r.lastError}</p>}
+        {r.lastError && <p className="break-words text-destructive">{r.lastError}</p>}{/schema cache|could not find the function/i.test(r.lastError||"")&&<p className="text-xs">Cloud SQL setup / schema cache ठीक करना बाकी है। रिकॉर्ड सुरक्षित है। SQL के बाद “अभी sync करें” दबाएँ।</p>}
         {r.op === "sms" && r.payload?.deliveryState === "unconfirmed" && <p>परिणाम अनिश्चित है। SMS Logs में gateway जाँचकर निर्णय लें। अपने आप दोबारा नहीं भेजा जाएगा।</p>}
       </div>)}
       {!rows.length && <p>डिवाइस की queue में कोई काम बाकी नहीं है।</p>}

@@ -53,6 +53,7 @@ export function useAppointmentReminders() {
     structuralSharing: false,
     refetchInterval: 5 * 60 * 1000, // har 5 minute check karo
     queryFn: async () => {
+      if((window as any).electron?.checkAuth&&!(await (window as any).electron.checkAuth()).valid)return [];
       const today = businessDate();
       const rows = await readBranchTable('appointments', null, '*, patients(name, mobile)');
       return rows.filter(a => a.date === today && (!a.status || a.status === 'Scheduled'));
