@@ -6,7 +6,7 @@ export type LetterpadField = typeof letterpadFields[number];
 export type LetterpadLayout = { offsetX: number; offsetY: number; labels: boolean; positions: Record<LetterpadField, { x: number; y: number }> };
 export const defaultLetterpadLayout: LetterpadLayout = {
   offsetX: 0, offsetY: 0, labels: false,
-  positions: { name: { x: 26, y: 58 }, age: { x: 96, y: 58 }, gender: { x: 126, y: 58 }, date: { x: 163, y: 58 }, registration: { x: 29, y: 70 } },
+  positions: { name: { x: 35, y: 57 }, age: { x: 118, y: 57 }, gender: { x: 149, y: 57 }, date: { x: 176, y: 57 }, registration: { x: 27, y: 65 } },
 };
 export const letterpadFieldInfo = {
   name: { label: "Name", width: 60, size: 14, labelWidth: 18 },
