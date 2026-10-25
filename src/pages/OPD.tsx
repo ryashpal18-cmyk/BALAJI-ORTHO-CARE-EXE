@@ -216,7 +216,7 @@ export default function OPD() {
           address: regForm.address || null,
         });
         patientId = result.id;
-        toast({ title: "🆕 New Patient Registered", description: `${regForm.name} · ${result.registration_number || "नंबर sync के बाद मिलेगा"}` });
+        toast({ title: "🆕 New Patient Registered", description: `${regForm.name} · ${result.registration_number || "नंबर उपलब्ध नहीं—प्रिंट स्क्रीन में जाँचें"}` });
       }
 
       // Print action opens the existing A4 patient-letterpad screen after the patient is saved.
@@ -539,7 +539,7 @@ export default function OPD() {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2 items-center">
-                    {existingPatient && <span className="text-sm font-mono">Reg. No.: {existingPatient.registration_number || "नंबर sync के बाद मिलेगा"}</span>}
+                    {existingPatient && <span className="text-sm font-mono">Reg. No.: {existingPatient.registration_number || "नंबर उपलब्ध नहीं—प्रिंट स्क्रीन में जाँचें"}</span>}
                     <Button data-diagnostic-action="save-patient" type="submit" disabled={addPatient.isPending || mobileSearchStatus === "searching"} className="w-full sm:w-auto">
                       {addPatient.isPending ? "Saving..." : mobileSearchStatus === "searching" ? "Checking..." : existingPatient ? "✅ Update & Continue" : "🆕 Register New Patient"}
                     </Button>
@@ -566,7 +566,7 @@ export default function OPD() {
                       <div key={p.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/30">
                         <div>
                           <p className="font-medium text-sm">{p.name}</p>
-                          <p className="text-xs text-muted-foreground">{p.registration_number || "नंबर pending"} · {p.mobile} · {p.age}y · {p.gender}</p>
+                          <p className="text-xs text-muted-foreground">{p.registration_number || "नंबर उपलब्ध नहीं"} · {p.mobile} · {p.age}y · {p.gender}</p>
                         </div>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline" className="text-xs">{p.address}</Badge>

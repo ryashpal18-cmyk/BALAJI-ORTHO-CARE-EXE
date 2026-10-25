@@ -1,3 +1,4 @@
+import { warmRegistrationNumbers } from "./patientRegistration";
 import { normalizeBill } from "./paymentLedger";
 import { fetchCompleteTable, OPERATIONAL_TABLES } from "./completeFetch";
 import { ensureCloudSession } from "./localSession";
@@ -82,6 +83,7 @@ export async function downloadAllDataToCache(): Promise<void> {
   // ensureCloudSession accepts the verified local owner API mode too.
   downloadInProgress = true;
   try {
+    await warmRegistrationNumbers().catch(error => cLog.warn("registration", error.message));
     for (const table of OPERATIONAL_TABLES) {
       try {
         const select = ["billing", "appointments", "prescriptions", "physiotherapy_sessions", "xray_reports", "fracture_cases", "insurance_claims", "beds"].includes(table) ? "*, patients(*)" : "*";
@@ -205,11 +207,17 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
           return supabase.from(table).select('*').eq('id', payload.id).single();
         })();
     if (error) { console.error(`Insert failed — table: ${table}`); throw error; }
+    if (table === "patients" && m.payload?.registration_number && (data as any)?.registration_number && m.payload.registration_number !== (data as any).registration_number)
+      throw new Error("इस मरीज का local और cloud Registration Number अलग है। रिकॉर्ड सुरक्षित है; numbering की जाँच जरूरी है।");
     if (m.tempId && data) {
       const remaining = (await queueGetAll()).filter(q => q.id !== m.id && q.table === table && (q.rowId === m.tempId || q.rowId === (data as any).id));
       const local = (await cacheGetAll(table)).find(r => r.id === m.tempId);
       if (remaining.some(q => q.op === "delete")) { await cacheDeleteRow(table, m.tempId); await cacheDeleteRow(table, (data as any).id); }
-      else await cacheReplaceRowKey(table, m.tempId, remaining.length && local ? { ...(data as any), ...local, id: (data as any).id, _pendingSync: true } : data, "id");
+      else {
+        const merged = remaining.length && local ? { ...(data as any), ...local, id: (data as any).id, _pendingSync: true } : data;
+        if (table === "patients" && (data as any).registration_number) (merged as any).registration_number = (data as any).registration_number;
+        await cacheReplaceRowKey(table, m.tempId, merged, "id");
+      }
       // ✅ Isi row par pehle se pending koi update/delete mutation ho to
       // uska rowId bhi purane temp id se naye asli id par shift kar do —
       // warna wo mutation hamesha "PENDING_PARENT_INSERT" bol ke atka rahega.

@@ -90,6 +90,54 @@ CREATE TRIGGER assign_patient_registration BEFORE INSERT OR UPDATE OF registrati
 FOR EACH ROW EXECUTE FUNCTION public.assign_patient_registration();
 ALTER TABLE public.patients ALTER COLUMN registration_number SET NOT NULL;
 COMMENT ON COLUMN public.patients.registration_number IS 'Permanent patient registration, independent of billing invoice ID';
+-- Shared unique offline pools for EXE and APK. Existing patient numbers are unchanged.
+CREATE TABLE IF NOT EXISTS public.patient_registration_leases (
+  request_id uuid PRIMARY KEY,
+  user_id uuid NOT NULL DEFAULT auth.uid(),
+  device_id uuid NOT NULL,
+  numbers jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.patient_registration_leases ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.patient_registration_leases FROM anon, authenticated;
+GRANT SELECT, INSERT ON TABLE public.patient_registration_leases TO authenticated;
+DROP POLICY IF EXISTS registration_lease_owner_read ON public.patient_registration_leases;
+CREATE POLICY registration_lease_owner_read ON public.patient_registration_leases FOR SELECT TO authenticated
+  USING (user_id = (SELECT auth.uid()) AND public.has_role((SELECT auth.uid()), 'admin'));
+DROP POLICY IF EXISTS registration_lease_owner_insert ON public.patient_registration_leases;
+CREATE POLICY registration_lease_owner_insert ON public.patient_registration_leases FOR INSERT TO authenticated
+  WITH CHECK (user_id = (SELECT auth.uid()) AND public.has_role((SELECT auth.uid()), 'admin'));
+
+CREATE OR REPLACE FUNCTION public.reserve_patient_registration_numbers(p_request uuid, p_device uuid, p_count integer DEFAULT 32, p_floor bigint DEFAULT 0)
+RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
+DECLARE reserved jsonb; existing_device uuid; i integer; n bigint;
+BEGIN
+  IF auth.uid() IS NULL OR NOT public.has_role(auth.uid(), 'admin') THEN RAISE EXCEPTION 'Clinic administrator required'; END IF;
+  IF p_request IS NULL OR p_device IS NULL OR p_count NOT BETWEEN 1 AND 100 OR p_floor NOT BETWEEN 0 AND 9007199254740000 THEN
+    RAISE EXCEPTION 'Invalid registration reservation';
+  END IF;
+  PERFORM pg_advisory_xact_lock(821734, 1);
+  SELECT numbers, device_id INTO reserved, existing_device FROM public.patient_registration_leases
+    WHERE request_id = p_request AND user_id = auth.uid();
+  IF reserved IS NOT NULL THEN
+    IF existing_device <> p_device THEN RAISE EXCEPTION 'Reservation belongs to another device'; END IF;
+    RETURN jsonb_build_object('request_id', p_request, 'numbers', reserved);
+  END IF;
+  IF p_floor > (SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM public.patient_registration_seq) THEN
+    PERFORM setval('public.patient_registration_seq', p_floor, true);
+  END IF;
+  reserved := '[]'::jsonb;
+  FOR i IN 1..p_count LOOP
+    n := nextval('public.patient_registration_seq');
+    reserved := reserved || jsonb_build_array('BAOR' || lpad(n::text, greatest(4, length(n::text)), '0'));
+  END LOOP;
+  INSERT INTO public.patient_registration_leases(request_id, user_id, device_id, numbers)
+    VALUES (p_request, auth.uid(), p_device, reserved);
+  RETURN jsonb_build_object('request_id', p_request, 'numbers', reserved);
+END $$;
+REVOKE ALL ON FUNCTION public.reserve_patient_registration_numbers(uuid,uuid,integer,bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.reserve_patient_registration_numbers(uuid,uuid,integer,bigint) TO authenticated;
+
 NOTIFY pgrst, 'reload schema';
 COMMIT;
 SELECT count(*) AS total_patients, count(registration_number) AS registered_patients,

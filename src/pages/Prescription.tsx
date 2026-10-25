@@ -173,7 +173,7 @@ export default function Prescription() {
         </div>
 
         <div className="flex flex-wrap gap-2 no-print">
-          <Button variant={printMode === "letterpad" ? "default" : "outline"} onClick={() => setPrintMode("letterpad")}>लेटरपैड: केवल मरीज की जानकारी</Button>
+          <Button variant={printMode === "letterpad" ? "default" : "outline"} onClick={() => setPrintMode("letterpad")}>लेटरपैड के दो Print विकल्प</Button>
           <Button variant={printMode === "full" ? "default" : "outline"} onClick={() => setPrintMode("full")}>पूरा Prescription</Button>
           {patient && <Button variant="ghost" disabled={saving} onClick={() => { setPatient(null); resetDraft(); }}>मरीज बदलें</Button>}
         </div>
@@ -232,7 +232,7 @@ export default function Prescription() {
               <div className="flex items-center justify-between border-b pb-3">
                 <div>
                   <p className="font-semibold">{patient.name}</p>
-                  <p className="text-sm font-mono">Reg. No.: {patient.registration_number || "नंबर sync के बाद मिलेगा"}</p>
+                  <p className="text-sm font-mono">Reg. No.: {patient.registration_number || "नंबर उपलब्ध नहीं—लेटरपैड विकल्प में जाँचें"}</p>
                   <p className="text-xs text-muted-foreground">
                     {patient.mobile || "No mobile"}{patient.age ? ` • ${patient.age} yrs` : ""}{patient.gender ? ` • ${patient.gender}` : ""}
                   </p>

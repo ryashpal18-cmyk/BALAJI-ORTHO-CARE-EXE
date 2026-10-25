@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => {
   },
   build: {
     outDir: "dist",
+    assetsInlineLimit: 300000, // Bundle the final letterpad as data for offline/native printing.
     emptyOutDir: true,
     assetsDir: "assets",
     rollupOptions: {

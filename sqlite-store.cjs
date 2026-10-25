@@ -33,12 +33,19 @@ function observe(store, rows, complete = false) {
 function allocate(store, row) {
   const existing = store.cacheGetRow('patients', row.id);
   if (existing?.registration_number) return { ...row, registration_number: existing.registration_number };
-  const last = store.metaGet(KEY);
-  if (last === undefined) return { ...row, registration_number: null }; // Saving remains available before migration.
-  observe(store, store.cacheGetAll('patients'));
-  const n = Number(store.metaGet(KEY)) + 1;
-  store.metaSet(KEY, n);
-  return { ...row, registration_number: format(n) };
+  const scope = store.metaGet('patient-registration:scope');
+  const leases = store.metaGet('patient-registration:leases') || [];
+  for (const lease of leases.filter(l => l.scope === scope)) {
+    const key = 'patient-registration:used:' + lease.requestId;
+    const used = Number(store.metaGet(key) || 0);
+    for (let i = used; i < lease.numbers.length; i++) {
+      const candidate = lease.numbers[i];
+      store.metaSet(key, i + 1);
+      if (!serial(candidate) || store.cacheGetAll('patients').some(p => p.registration_number === candidate)) continue;
+      return { ...row, registration_number: candidate };
+    }
+  }
+  return { ...row, registration_number: null }; // No invented max+1 number on another device.
 }
 return { KEY, serial, format, observe, allocate };
 })();
@@ -150,9 +157,7 @@ function cacheReplaceTable(table, rows, idField) {
       for (const m of queueGetAll().filter(m => m.table === 'patients' && m.op === 'insert')) {
         const old = previous.find(p => p.id === m.tempId);
         if (!old) continue;
-        const numbered = old.registration_number ? old : registration.allocate(module.exports, old);
-        Object.assign(old, numbered);
-        queueUpdate(m.id, { payload: { ...m.payload, registration_number: old.registration_number } });
+        if (old.registration_number) queueUpdate(m.id, { payload: { ...m.payload, registration_number: old.registration_number } });
       }
     }
     rows = rows.map(row => { const old = previous.find(r => r[idField] === row[idField]); return old?._localFileUrl ? { ...row, _localFileUrl: old._localFileUrl } : row; });
@@ -170,6 +175,10 @@ function cacheMergeServer(table, row, idField = 'id') {
   return getDb().transaction(() => {
     const id = String(row[idField] ?? '').replace(/^local_/, '');
     if (!id) throw new Error('Server row missing ID');
+    if (table === 'patients' && row.registration_number) {
+      const old = cacheGetRow(table, row[idField]) || cacheGetRow(table, 'local_' + id);
+      if (old && !old.registration_number) cacheUpsertRow(table, { ...old, registration_number: row.registration_number }, idField);
+    }
     if (queueGetAll().some(m => m.table === table && [m.rowId,m.tempId].some(v => v && v.replace(/^local_/, '') === id))) return;
     const existing = cacheGetRow(table, row[idField]) || cacheGetRow(table, 'local_' + id);
     if (existing?._pendingSync) return;
@@ -414,6 +423,8 @@ function restoreSnapshot(dump) {
     for (const [table, rows] of Object.entries(dump.cache)) cacheSetRows(table, rows, 'id');
     for (const m of dump.queue) { const id = queueAdd(m); queueUpdate(id, { ...m, id }); }
     for (const m of dump.meta || []) getDb().prepare('INSERT OR REPLACE INTO meta VALUES (?, ?)').run(m.key,m.value);
+    // Restoring an old backup must not reuse a number consumed after that backup.
+    getDb().prepare("DELETE FROM meta WHERE key LIKE 'patient-registration:%'").run();
     metaSet("_legacy_migrated", true);
     return true;
   })();

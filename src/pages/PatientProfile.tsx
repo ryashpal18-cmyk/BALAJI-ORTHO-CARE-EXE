@@ -161,7 +161,7 @@ export default function PatientProfile() {
               </div>
               <div className="flex-1 min-w-0">
                 <h1 className="text-2xl font-bold">{patient.name}</h1>
-                <p className="text-sm font-mono">Reg. No.: {patient.registration_number || "नंबर sync के बाद मिलेगा"}</p>
+                <p className="text-sm font-mono">Reg. No.: {patient.registration_number || "नंबर उपलब्ध नहीं—प्रिंट स्क्रीन में जाँचें"}</p>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-muted-foreground">
                   {patient.mobile   && <span className="flex items-center gap-1"><Phone   className="h-3.5 w-3.5" />{patient.mobile}</span>}
                   {patient.age      && <span className="flex items-center gap-1"><User    className="h-3.5 w-3.5" />{patient.age} yrs</span>}

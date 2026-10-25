@@ -1,20 +1,23 @@
-# Patient registration independent of invoices
+# Final A4 letterpad and shared patient registration
 
-Each patient has a permanent `registration_number` such as BAOR0001. Billing IDs and invoice formatting are unchanged. Registration, patient search/profile and the A4 letterpad show the patient number; no bill is needed to print. Registration includes a Save & Prescription Print action.
+Both EXE and APK provide two modes: print only the five patient values on preprinted stock, or print the supplied final letterpad plus those values on blank A4. The original user-supplied image is bundled unchanged as a JPEG data URL, so native print documents have no remote or relative image dependencies. The same document is used for preview and print; preview scaling never changes print dimensions.
 
-## Install
+The final design has all five fields in one row. A new layout settings key avoids importing positions for the old template. Per-field widths prevent name/registration overlaps; long text fits inside its own field. Printer position offsets remain available. A plain-paper calibration at actual size is still needed for each physical printer.
 
-1. Back up the database and the clinic PC's offline backup.
-2. Run `PATIENT_REGISTRATION_SETUP.sql` in the correct Supabase project's SQL Editor as owner. It fills missing numbers in ascending created_at/id order, preserving existing numbers. For a reviewed CSV mapping, use the separately supplied private SQL file instead. Do not commit patient mappings to this public repository.
-3. Install the updated EXE and allow one complete patient download. Numbers are saved to SQLite and its snapshot backups. Only the registration field is merged into pending patient edits; demographic changes remain pending.
-4. Verify the first/last numbers and print on plain A4 paper at 100% before using the letterpad.
+Android uses a local Capacitor ClinicPrint plugin installed by scripts/install-android-print.cjs after cap sync. It loads inert, bundled HTML, waits for document completion and hands an A4 portrait/no-margin job to Android PrintManager. Android's system dialog offers printing or Save as PDF. A job retains its WebView until the print adapter finishes. No printer/cloud data are sent through a remote service.
 
-Before the first numbered cloud download, offline patient saves remain available and show a pending registration. Once initialization finishes, pending new patients and subsequent new patients receive increasing BAOR numbers in a SQLite transaction with their save and sync queue. Restart, deletion and queue-write failure do not reuse a confirmed number.
+## Database setup
 
-## Scope and limits
+Back up the correct clinic database, then run PATIENT_REGISTRATION_SETUP.sql in its SQL Editor as project owner. It preserves existing valid numbers, backfills missing numbers in created_at/id order, prevents changes to assigned numbers, and adds admin-only, owner-scoped number reservations. Historic patient timestamps and other tables are unchanged. Run once for the shared EXE/APK database, not separately per device. The 1,108-row private mapping SQL remains outside the public repository.
 
-Offline sequential allocation assumes a single primary registration PC. Independently registering patients on another PC/APK while the primary is offline can collide with its unuploaded numbers. The server unique index rejects a collision and preserves the pending local patient; it never silently overwrites another patient or renumbers a printed number. Multiple independent offline registration devices need server-reserved number ranges before enabling this workflow on those devices.
+The connected Supabase management account did not have permission for the actual configured clinic project during implementation. No live SQL was applied. The apps now diagnose a missing column, missing backfill, missing reservation function, disconnected account and unavailable patient explicitly; a blank value is no longer presented as evidence of an active sync.
 
-SQL takes an exclusive patient-table lock during the update. Existing user UPDATE triggers are temporarily suspended and restored to their original modes in the same transaction so timestamps and audit side effects do not change historic records. Existing RLS policies are unchanged. Number assignment is SECURITY INVOKER, not SECURITY DEFINER, and its sequence is granted only to authenticated/service roles. Unauthenticated patient writes are not enabled.
+## Offline numbers on multiple devices
 
-Validation: TypeScript, Vite production build, `tests/letterpad-print.cjs`, `tests/patient-registration.cjs`, offline/billing regression suite. The separately generated 1,108-row CSV SQL was executed against a disposable PostgreSQL-compatible test database with synthetic patient fields; exact mappings, untouched dates, rerun behavior, next BAOR1109, immutable numbers and mismatch rollback were verified. This is not proof of installation on a live database or Windows printer alignment.
+An online verified administrator reserves 32 unique numbers per device from one server sequence. Each local save consumes a reserved number and writes patient/cache/queue/cursor atomically. EXE and APK cannot independently calculate max+1. Pools may leave gaps between numbers; numbering is unique, not gapless across devices. A failed network response retries the same reservation request ID. A failed local save rolls back consumption. Deleting a patient never returns a number to the pool.
+
+Without an initial reservation or when a pool is exhausted offline, patient saving remains available; an unassigned number stays clearly marked until server sync supplies it. Existing patient numbers remain usable offline. Restoring a backup discards its unused pools/request identities so numbers consumed after the backup cannot be reused. Previously printed conflicting legacy numbers are surfaced for review rather than silently changed.
+
+Cloud refreshes may import a registration number into a pending demographic edit without overwriting the edit. Insert acknowledgements preserve the authoritative number even if a later edit is queued. Billing, invoices, payments, due calculations and SMS logic are unchanged.
+
+Validation covers TypeScript and production builds for both apps, existing desktop/mobile regression suites, real SQLite/IndexedDB allocation/rollback/restore tests, browser preview/print checks at desktop and phone sizes, and disposable PostgreSQL execution of exact mapping and reservation/RLS tests. Physical Android printing and printer alignment require device verification.
