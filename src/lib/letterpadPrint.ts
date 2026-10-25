@@ -13,7 +13,7 @@ export const letterpadFieldInfo = {
   age: { label: "Age", width: 20, size: 12, labelWidth: 10 },
   gender: { label: "Sex", width: 25, size: 12, labelWidth: 10 },
   date: { label: "Date", width: 30, size: 12, labelWidth: 12 },
-  registration: { label: "Reg. No.", width: 40, size: 12, labelWidth: 21 },
+  registration: { label: "Reg. No.", width: 60, size: 12, labelWidth: 21 },
 };
 const number = (value: unknown, fallback: number, min: number, max: number) => {
   const n = Number(value);

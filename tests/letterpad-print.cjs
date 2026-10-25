@@ -60,3 +60,20 @@ const printHandler = vm.runInNewContext(`(${handler})`, { BrowserWindow: FakeWin
  assert.equal(printed.printBackground, true); assert.equal(printed.pageSize, undefined);
  console.log('PASS native letterpad uses A4 portrait/100%/zero margins and preserves other print jobs');
 })().catch(error => { console.error(error); process.exitCode = 1; });
+const invoiceModule = { exports: {} };
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/lib/invoiceNumber.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: invoiceModule.exports });
+const { invoiceNumber, letterpadPatientInvoices } = invoiceModule.exports;
+const bills = [
+ { id: 'local_old', patient_id: 'local_patient', created_at: '2026-10-01T10:00:00Z' },
+ { id: 'other', patient_id: 'someone-else', created_at: '2026-10-25T10:00:00Z' },
+ { id: 'local_latest', patient_id: 'patient', created_at: '2026-10-25T09:00:00Z' },
+];
+const matched = letterpadPatientInvoices(bills, 'local_patient');
+assert.equal(matched.length, 2); assert.equal(matched[0].id, 'local_latest');
+assert.equal(bills[0].id, 'local_old');
+assert.equal(invoiceNumber(matched[0].id), invoiceNumber('latest'));
+assert.equal(letterpadPatientInvoices(bills, 'new-patient').length, 0);
+assert.equal(letterpadPatientInvoices(bills, '').length, 0);
+const invoiceHtml = buildLetterpadHtml({ ...values, registration: invoiceNumber(matched[0].id) }, defaultLetterpadLayout);
+assert.ok(invoiceHtml.includes('INV-LATEST'));
+console.log('PASS patient-only invoices newest first, offline/synced IDs match, original bills unchanged and real invoice number prints');
