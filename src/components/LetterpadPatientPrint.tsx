@@ -1,4 +1,6 @@
 import { useState } from "react";
+import A4PrintPreview from "@/components/A4PrintPreview";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useQuery } from "@tanstack/react-query";
 import { useBranchContext } from "@/lib/branchContext";
 import { readBranchTable } from "@/lib/branchData";
@@ -26,6 +28,7 @@ export default function LetterpadPatientPrint({ patient }: Props) {
   });
   const registration = registeredPatient?.registration_number || patient?.registration_number || "";
   const [printing, setPrinting] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const formattedDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.split("-").reverse().join("/") : "";
   const values = { name: patient?.name || "", age: patient?.age != null ? `${patient.age} Y` : "", gender: patient?.gender || "", date: formattedDate, registration: registration.trim() };
   const html = buildLetterpadHtml(values, layout);
@@ -70,8 +73,22 @@ export default function LetterpadPatientPrint({ patient }: Props) {
       <div className="overflow-auto"><table className="text-sm w-full"><thead><tr><th className="text-left">फील्ड</th><th>X mm</th><th>Y mm</th><th>फॉन्ट</th></tr></thead><tbody>{letterpadFields.map(field => <tr key={field}><td>{letterpadFieldInfo[field].label}</td>{(["x", "y"] as const).map(axis => <td key={axis} className="p-1"><Input aria-label={`${field} ${axis} mm`} type="number" step="0.5" min={axis === "x" ? letterpadFieldInfo[field].labelWidth : 0} max={axis === "x" ? 210 - letterpadFieldInfo[field].width : 285} value={layout.positions[field][axis]} onChange={e => setLayout({ ...layout, positions: { ...layout.positions, [field]: { ...layout.positions[field], [axis]: Number(e.target.value) } } })} /></td>)}<td className="whitespace-nowrap">{letterpadFieldInfo[field].size} pt Bold</td></tr>)}</tbody></table></div>
       <div className="flex flex-wrap gap-2 mt-3"><Button onClick={saveSettings} variant="outline">पोजिशन सेव करें</Button><Button variant="ghost" onClick={() => setLayout(normalizeLetterpadLayout(defaultLetterpadLayout))}>डिफ़ॉल्ट पोजिशन</Button></div>
     </details>
-    {patient && <details><summary className="cursor-pointer text-sm">केवल छपने वाली जानकारी का पूर्वावलोकन</summary><div className="overflow-auto border mt-2"><iframe title="Patient information print preview" sandbox="" srcDoc={html} style={{ width: "210mm", height: "95mm", border: 0 }} /></div></details>}
+
     <p className="text-sm">Printer: A4 Portrait · Scale 100% / Actual size · Margins None · Headers / Footers बंद। नाम 14 pt, बाकी 12 pt Bold; हर फील्ड की ऊँचाई 12 mm।</p>
-    <Button disabled={!patient || !registration || !formattedDate || registrationLoading || printing} onClick={print}>{printing ? "प्रिंट खुल रहा है…" : "केवल मरीज की जानकारी प्रिंट करें"}</Button>
+    <Button disabled={!patient} onClick={() => setPreviewOpen(true)}>प्रिंट प्रीव्यू देखें / Print Preview</Button>
+    <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+      <DialogContent className="patient-print-preview max-w-4xl w-[calc(100%_-_2rem)] no-print">
+        <DialogHeader>
+          <DialogTitle>Prescription Print Preview · A4</DialogTitle>
+          <DialogDescription>पूरी 210 × 297 mm शीट का पूर्वावलोकन। प्रिंट में यही मरीज की जानकारी और पोजिशन जाएगी।</DialogDescription>
+        </DialogHeader>
+        <A4PrintPreview html={html} />
+        {!registration && <p role="status" className="text-sm text-destructive">रजिस्ट्रेशन नंबर अभी उपलब्ध नहीं है। नंबर sync होने पर प्रिंट कर सकेंगे।</p>}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setPreviewOpen(false)}>वापस जाएँ</Button>
+          <Button disabled={!patient || !registration || !formattedDate || registrationLoading || printing} onClick={print}>{printing ? "प्रिंट खुल रहा है…" : "प्रिंट करें / Print"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </section>;
 }

@@ -597,3 +597,9 @@ textarea:focus {
   border: 1.5px solid rgba(30,87,176,0.14) !important;
   border-radius: 16px !important;
 }
+
+/* The global dialog scale animation replaces the horizontal centering transform. */
+[role="dialog"].patient-print-preview {
+  animation: none !important;
+  transform: translateX(-50%);
+}
