@@ -103,7 +103,13 @@ function load(file) {
  console.log('PASS offline SMS review rows expose stable actions and accepted logs are not duplicated');
  const config=load('src/lib/appConfig.ts');config.upsertServiceProduct('X-Ray','300');assert.equal(config.getServiceCatalog()[0].rate,300);
  config.learnServiceItems([{name:'x ray',amount:250}]);assert.equal(config.getServiceCatalog()[0].rate,300);
- assert.match(load('src/lib/billSmsMessage.ts').buildBillSmsMessage({patientName:'TEST',invoice:'TEST',date:'TEST',service:'PU Cast:1000',total:1000,discount:100,paid:900,due:0}),/कुल राशि: ₹1000/);
- console.log('PASS shared preset prices stay stable and Hindi bill SMS includes gross total');
+ const welcome=load('src/lib/billSmsMessage.ts');
+ const billMessage=welcome.buildBillSmsMessage({patientName:'TEST',invoice:'INVOICE-SECRET',date:'2026-10-26',service:'PU Cast:1000',total:1000,discount:100,paid:900,due:0});
+ assert.match(billMessage,/नमस्कार TEST जी/);assert.match(billMessage,/हार्दिक स्वागत है/);assert.match(billMessage,/80057 07783/);
+ assert.doesNotMatch(billMessage,/₹|1000|900|INVOICE-SECRET|2026-10-26|PU Cast|PDF/);
+ assert.equal(welcome.buildBillWelcomeMessage('TEST'),billMessage);
+ assert.match(welcome.buildBillWelcomeMessage('TEST',true),/साथ दी गई PDF में है/);
+ assert.match(welcome.buildBillWelcomeMessage('  '),/नमस्कार मरीज जी/);
+ console.log('PASS shared preset prices stay stable and Hindi bill SMS uses the approved welcome');
  console.log('8 clinic update checks passed ('+(mobile?'Android IndexedDB':'Windows SQLite')+')');
 })().then(close,e=>{console.error(e);close();process.exitCode=1});

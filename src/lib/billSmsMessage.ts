@@ -24,36 +24,27 @@ export function billCareCategory(service: unknown): 'cast' | 'slab' | 'removal' 
   return 'general';
 }
 
+// No invoice figures or service details belong in the welcome text.
+// Mention the PDF only when this text accompanies an attachment or a fresh PDF link.
+export function buildBillWelcomeMessage(patientName?: string, withPdf = false): string {
+  const name = (patientName || '').replace(/[\r\n]+/g, ' ').trim() || 'मरीज';
+  return [
+    `नमस्कार ${name} जी,`,
+    'BALAJI DIGITAL X-RAY & ORTHO CARE CENTER में आपका हार्दिक स्वागत है।',
+    '',
+    'अपनी सेहत की देखभाल के लिए हम पर भरोसा करने का धन्यवाद।' +
+      (withPdf ? ' आपके बिल का विवरण साथ दी गई PDF में है।' : ''),
+    '',
+    'हम आपके शीघ्र स्वस्थ होने की कामना करते हैं।',
+    '',
+    'डॉ. एस. एस. राठौड़',
+    'संपर्क: 80057 07783',
+  ].join('\n');
+}
+
 export function buildBillSmsMessage(args: {
   patientName?: string; invoice: string; date: string; service: unknown;
   total: number; discount?: number; paid: number; due: number; followupDate?: string | null;
 }): string {
-  const name = (args.patientName || 'मरीज').trim();
-  const names = billServiceNames(args.service);
-  const category = billCareCategory(args.service);
-  const heading = 'बालाजी डिजिटल एक्स-रे एवं ऑर्थो केयर सेंटर';
-  const lines = [
-    `नमस्ते ${name} जी,`, heading,
-    `बिल संख्या: ${args.invoice}`,
-    `दिनांक: ${args.date}`,
-    ...(names.length ? [`सेवा: ${names.join(', ')}`] : []),
-    `कुल राशि: ₹${args.total}`,
-    ...(args.discount ? [`छूट: ₹${args.discount}`, `देय राशि: ₹${Math.max(args.total - args.discount, 0)}`] : []),
-    `जमा राशि: ₹${args.paid}`,
-    `बकाया राशि: ₹${args.due}`,
-  ];
-  if (category === 'cast' || category === 'slab') {
-    lines.push('', category === 'slab' ? 'स्लैब की देखभाल:' : 'प्लास्टर की देखभाल:',
-      'इसे सूखा रखें। डॉक्टर की सलाह के बिना प्रभावित अंग पर वजन न डालें।',
-      'तेज दर्द, सुन्नपन या उँगलियों का रंग बदलने पर तुरंत चिकित्सा सहायता लें।');
-  }
-  if (names.some(isCastRemoval)) {
-    lines.push('', 'प्लास्टर/कास्ट हटाने की सेवा:',
-      'आज आपके प्लास्टर/कास्ट हटाने की सेवा का बिल दर्ज हुआ है।',
-      'आगे की देखभाल के लिए अपने डॉक्टर के निर्देशों का पालन करें।');
-  }
-  // Only an explicitly provided, clinically confirmed follow-up date is included.
-  if (args.followupDate?.trim()) lines.push(`डॉक्टर द्वारा निर्धारित फॉलोअप: ${args.followupDate.trim()}`);
-  lines.push('', 'आपके शीघ्र स्वस्थ होने की कामना करते हैं।', 'बालाजी ऑर्थो केयर टीम');
-  return lines.join('\n');
+  return buildBillWelcomeMessage(args.patientName);
 }

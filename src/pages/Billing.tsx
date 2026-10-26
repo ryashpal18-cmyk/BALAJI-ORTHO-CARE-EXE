@@ -1,4 +1,4 @@
-import { billCareCategory } from "@/lib/billSmsMessage";
+import { billCareCategory, buildBillWelcomeMessage } from "@/lib/billSmsMessage";
 import { cashTallyForPeriod } from "@/lib/collectionReport";
 import QRCode from "qrcode";
 import { invoiceNumber } from "@/lib/invoiceNumber";
@@ -114,34 +114,8 @@ function getWhatsAppBillMessage(
   date: string,
   pdfUrl?: string | null,
 ) {
-  const due = Math.max(amount - paid, 0);
-  const appUrl = "https://balaji-health-hub.lovable.app/reports";
-  const pdfLine = pdfUrl ? `\n📄 बिल PDF Download करें:\n${pdfUrl}\n` : "";
-  return `नमस्ते ${patient} जी 🙏
-
-Balaji Ortho Care Center में आपका 
-स्वागत है।
-
-📋 आपका बिल तैयार है:
-🔢 बिल नंबर: ${billNo}
-📅 दिनांक: ${date}
-💰 कुल राशि: ₹${amount}
-✅ जमा: ₹${paid}
-❗ बकाया: ₹${due}${pdfLine}
-━━━━━━━━━━━━━━
-🌐 हमारी वेबसाइट:
-https://balaji-health-hub.lovable.app
-━━━━━━━━━━━━━━
-🩻 X-Ray रिपोर्ट समझ नहीं आई?
-
-घर बैठे AI से देखें - सिर्फ ₹50 में!
-तुरंत आसान भाषा में रिपोर्ट
-
-👇 Click करें:
-${appUrl}
-
-धन्यवाद 🙏
-Balaji Ortho Care Center`;
+  const message = buildBillWelcomeMessage(patient, !!pdfUrl);
+  return pdfUrl ? `${message}\n\n${pdfUrl}` : message;
 }
 
 function getWhatsAppReminderMessage(patient: string, total: number, paid: number, due: number) {

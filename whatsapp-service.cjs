@@ -177,7 +177,13 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
         patch(job.id,{state:'sending',pdfPath,mobile:familyNumber(fresh.patient.mobile),patientName:fresh.patient.name,fingerprint:fresh.fingerprint,attempts:(job.attempts||0)+1,error:''});
         failureStage='WhatsApp को PDF भेजना';
         handedOff=true;
-        const sent=await bounded(activeClient.sendMessage(chatId,media,{sendSeen:false,sendMediaAsDocument:true,caption:`नमस्ते ${fresh.patient.name} जी, Balaji Digital X-Ray & Ortho Care Center का आपका ${job.kind==='monthly'?'मासिक हिसाब '+job.month:job.kind==='statement'?'पूरा account statement':'bill'} PDF संलग्न है।`,waitUntilMsgSent:true}),timeoutMs);
+        const sent=await bounded(activeClient.sendMessage(chatId,media,{sendSeen:false,sendMediaAsDocument:true,caption:job.kind==='monthly'||job.kind==='statement'?`नमस्ते ${fresh.patient.name} जी, Balaji Digital X-Ray & Ortho Care Center का आपका ${job.kind==='monthly'?'मासिक हिसाब '+job.month:'पूरा account statement'} PDF संलग्न है।`:[
+          `नमस्कार ${String(fresh.patient.name||'मरीज').replace(/[\r\n]+/g,' ').trim()||'मरीज'} जी,`,
+          'BALAJI DIGITAL X-RAY & ORTHO CARE CENTER में आपका हार्दिक स्वागत है।',
+          '', 'अपनी सेहत की देखभाल के लिए हम पर भरोसा करने का धन्यवाद। आपके बिल का विवरण साथ दी गई PDF में है।',
+          '', 'हम आपके शीघ्र स्वस्थ होने की कामना करते हैं।',
+          '', 'डॉ. एस. एस. राठौड़', 'संपर्क: 80057 07783',
+        ].join('\n'),waitUntilMsgSent:true}),timeoutMs);
         const messageId=serializedId(sent?.id);
         if(!messageId)throw Error('WhatsApp acknowledgment नहीं मिला');
         patch(job.id,{state:'sent',messageId,sentAt:new Date(now()).toISOString(),error:'',errorDetail:'',failureStage:''});

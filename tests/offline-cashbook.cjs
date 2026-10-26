@@ -57,8 +57,8 @@ const source=fs.readFileSync(root+'/src/lib/paymentLedger.ts','utf8').replaceAll
  assert.doesNotThrow(()=>ac.authorize('offline:queueAdd',[{table:'sms_logs',op:'sms',payload:{mobile:'919123456780',message:'test'}}],store));
  assert.throws(()=>ac.authorize('offline:queueAdd',[{table:'sms_logs',op:'sms',payload:{mobile:'919876543210',message:'test'}}],store),/Branch/);
  console.log('PASS N05 own-branch SMS queued; other-branch denied');
- const billing=fs.readFileSync(root+'/src/pages/Billing.tsx','utf8');const start=billing.indexOf('function getWhatsAppBillMessage('),end=billing.indexOf('\nfunction ',start+1);const c={window:{location:{origin:'file://'}}};vm.createContext(c);vm.runInContext(ts.transpile(billing.slice(start,end),{target:ts.ScriptTarget.ES2022}),c);
- const message=c.getWhatsAppBillMessage('TEST',800,500,'TEST','2026-10-06',null);assert.ok(message.includes('500'));assert.ok(message.includes('300'));assert.ok(billing.includes('const due = Math.max(totalAmount - discountNum - paidNum, 0);'));
- console.log('PASS N06 discounted SMS/WhatsApp balance 300');
- assert.ok(message.includes('https://balaji-health-hub.lovable.app/reports'));assert.ok(!message.includes('file:///reports'));console.log('PASS N07 public report link in desktop message');
+ const billing=fs.readFileSync(root+'/src/pages/Billing.tsx','utf8');const start=billing.indexOf('function getWhatsAppBillMessage('),end=billing.indexOf('\nfunction ',start+1);const c={window:{location:{origin:'file://'}}};vm.runInNewContext(ts.transpile(fs.readFileSync(root+'/src/lib/billSmsMessage.ts','utf8').replaceAll('export ',''),{target:ts.ScriptTarget.ES2022}),c);vm.createContext(c);vm.runInContext(ts.transpile(billing.slice(start,end),{target:ts.ScriptTarget.ES2022}),c);
+ const message=c.getWhatsAppBillMessage('TEST',800,500,'TEST','2026-10-06',null);assert.match(message,/हार्दिक स्वागत है/);assert.doesNotMatch(message,/500|300|₹|PDF/);assert.ok(billing.includes('const due = Math.max(totalAmount - discountNum - paidNum, 0);'));
+ console.log('PASS N06 welcome omits bill figures without changing bill calculations');
+ const linked=c.getWhatsAppBillMessage('TEST',800,500,'TEST','2026-10-06','https://synthetic.invalid/invoice.pdf');assert.match(linked,/साथ दी गई PDF में है/);assert.match(linked,/https:\/\/synthetic.invalid\/invoice.pdf/);console.log('PASS N07 PDF mentioned only with a PDF link');
 })().catch(e=>{console.error(e);process.exit(1)});

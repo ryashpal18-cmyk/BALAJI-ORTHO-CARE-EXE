@@ -41,21 +41,21 @@ function evaluate(code,ctx){return vm.runInNewContext(ts.transpile('const result
  const patient={id:'local_00000000-0000-4000-8000-000000000111',name:'Test Patient',mobile:'9123456780',branch_id:'branch-test'};store.cacheUpsertRow('patients',patient,'id');
  const input={patient_id:patient.id,amount:1000,discount:200,amount_paid:300,service:'Consultation:1000'};
  failQueueAt=2;await assert.rejects(()=>save(input),/disk/);assert.equal(store.cacheGetAll('billing').length,0);assert.equal(store.cacheGetAll('sms_logs').length,0);assert.equal(store.queueGetAll().length,0);
- failQueueAt=0;const saved=await save(input);assert.equal(saved.smsQueued,true);assert.equal(store.queueGetAll().length,2);assert.match(store.queueGetAll().find(q=>q.op==='sms').payload.message,/बकाया राशि: ₹500/);assert.equal(saved.payment_history[0].amount,300);
- store.close();store.init(testDir);assert.equal(store.cacheGetAll('billing').length,1);assert.equal(store.queueGetAll().length,2);console.log('PASS atomic bill/SMS rollback on second write failure, correct due/message and payment history survive restart');
+ failQueueAt=0;const saved=await save(input);assert.equal(saved.smsQueued,true);assert.equal(store.queueGetAll().length,2);assert.match(store.queueGetAll().find(q=>q.op==='sms').payload.message,/हार्दिक स्वागत है/);assert.equal(saved.payment_history[0].amount,300);
+ store.close();store.init(testDir);assert.equal(store.cacheGetAll('billing').length,1);assert.equal(store.queueGetAll().length,2);console.log('PASS atomic bill/SMS rollback on second write failure, welcome message and payment history survive restart');
  // Bill pending cloud upload must not block its SMS lane.
  let sent=0;windowMock.electron.sendSMS=async()=>{sent++;return {ok:true}};
  const sync=load('src/lib/offlineSync.ts',['runSync'],{...db,ensureCloudSession:async()=>false,isValidMobile:()=>true,navigator:{onLine:true}});await sync.runSync();assert.equal(sent,1);assert.equal(store.queueGetAll().filter(q=>q.table==='billing').length,1);console.log('PASS pending cloud bill does not block atomic SMS outbox');
  const file='src/pages/DueAmount.tsx';let e=expression(file,'dueBills');const due=evaluate(e.node.arguments[0].getText(e.ast),{bills:[{...input,id:'bill',created_at:'2026-10-08'}]})();assert.equal(due[0]._due,500);assert.equal(due[0]._total,800);
- // The requested 660/600/60 case must retain gross total in SMS and disappear from dues.
+ // Welcome text omits finances; the actual 660/600/60 bill still disappears from dues.
  const discounted=await save({...input,amount:660,discount:60,amount_paid:600,service:'X-Ray:300|Consultation:360'});
  const text=store.queueGetAll().find(q=>q.op==='sms' && q.payload.billing_id===discounted.id).payload.message;
- assert.match(text,/कुल राशि: ₹660/);assert.match(text,/छूट: ₹60/);assert.match(text,/देय राशि: ₹600/);assert.match(text,/जमा राशि: ₹600/);assert.match(text,/बकाया राशि: ₹0/);
+ assert.match(text,/हार्दिक स्वागत है/);assert.doesNotMatch(text,/₹|660|600|बकाया|छूट|X-Ray/);assert.equal(discounted.amount,660);assert.equal(discounted.discount,60);assert.equal(discounted.amount_paid,600);
  const unpaid=await save({...input,amount:660,discount:0,amount_paid:600,service:'X-Ray:660'});
  e=expression(file,'dueBills');const remaining=evaluate(e.node.arguments[0].getText(e.ast),{bills:[discounted,unpaid]})();
  assert.equal(remaining.length,1);assert.equal(remaining[0].id,unpaid.id);assert.equal(remaining[0]._due,60);
  assert.equal(discounted.status,'Paid');assert.equal(unpaid.status,'Partial');
- console.log('PASS gross SMS total, discount, payment, and automatic Due-page inclusion');
+ console.log('PASS welcome SMS with unchanged bill total, discount, payment and Due-page inclusion');
  let patch; e=expression(file,'handleMarkFullyPaid');await evaluate(e.node.getText(e.ast),{updateBill:{mutateAsync:async x=>patch=x},toast:()=>{}})(due[0]);assert.equal(patch.amount,1000);assert.equal(patch.amount_paid,800);assert.equal(normalizeBill(patch,{...input,id:'bill'}).status,'Paid');
  const notices=[];e=expression(file,'handleSendSMS');await evaluate(e.node.getText(e.ast),{setSendingId:()=>{},sendSMS:async()=>({ok:false,queued:false,error:'disk full'}),getDueMessage:()=>'',toast:x=>notices.push(x)})({...due[0],patients:patient});assert.equal(notices[0].title,'SMS bhejne me dikkat hui');console.log('PASS discounted due and full-payment amount; no false SMS success');
  e=expression('src/pages/Ortho.tsx','handleSave');let caseRow;const notices2=[];await evaluate(e.node.getText(e.ast),{name:'Test Patient',mobile:'+919123456780',bodySelection:{body_part:'Arm'},fractureType:'Test',selPt:null,savingCase:{current:false},cacheGetAll:async()=>[patient],addPatient:{mutateAsync:async()=>{throw Error('Duplicate patient')}},addCase:{mutateAsync:async r=>caseRow=r},age:'',cause:'',plasterType:'POP',plasterDate:'2026-10-08',followupDays:'7',nextFU:'2026-10-15',notes:'',toast:{success:x=>notices2.push(x),error:x=>{throw Error(x)}},sendSMS:async()=>({ok:true,queued:true}),tplReminder:()=>'',resetForm:()=>{},refetchCases:()=>{},refetchFollowups:()=>{}})();assert.equal(caseRow.patient_id,patient.id);console.log('PASS Ortho save reuses local patient without any network dependency');
