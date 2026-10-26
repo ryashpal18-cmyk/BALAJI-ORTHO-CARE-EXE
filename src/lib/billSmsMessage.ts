@@ -24,9 +24,9 @@ export function billCareCategory(service: unknown): 'cast' | 'slab' | 'removal' 
   return 'general';
 }
 
-// No invoice figures or service details belong in the welcome text.
+// WhatsApp uses the welcome alone; text SMS adds the invoice details below.
 // Mention the PDF only when this text accompanies an attachment or a fresh PDF link.
-export function buildBillWelcomeMessage(patientName?: string, withPdf = false): string {
+export function buildBillWelcomeMessage(patientName?: string, withPdf = false, invoiceDetails: string[] = []): string {
   const name = (patientName || '').replace(/[\r\n]+/g, ' ').trim() || 'मरीज';
   return [
     `नमस्कार ${name} जी,`,
@@ -35,6 +35,7 @@ export function buildBillWelcomeMessage(patientName?: string, withPdf = false): 
     'अपनी सेहत की देखभाल के लिए हम पर भरोसा करने का धन्यवाद।' +
       (withPdf ? ' आपके बिल का विवरण साथ दी गई PDF में है।' : ''),
     '',
+    ...(invoiceDetails.length ? [...invoiceDetails, ''] : []),
     'हम आपके शीघ्र स्वस्थ होने की कामना करते हैं।',
     '',
     'डॉ. एस. एस. राठौड़',
@@ -46,5 +47,17 @@ export function buildBillSmsMessage(args: {
   patientName?: string; invoice: string; date: string; service: unknown;
   total: number; discount?: number; paid: number; due: number; followupDate?: string | null;
 }): string {
-  return buildBillWelcomeMessage(args.patientName);
+  const services = billServiceNames(args.service);
+  const discount = args.discount || 0;
+  return buildBillWelcomeMessage(args.patientName, false, [
+    'आपके बिल का विवरण:',
+    `बिल नं.: ${args.invoice}`,
+    `दिनांक: ${args.date}`,
+    ...(services.length ? [`सेवा: ${services.join(', ')}`] : []),
+    `कुल बिल: ₹${args.total}`,
+    `छूट: ₹${discount}`,
+    `देय राशि: ₹${Math.max(args.total - discount, 0)}`,
+    `जमा: ₹${args.paid}`,
+    `बाकी: ₹${args.due}`,
+  ]);
 }

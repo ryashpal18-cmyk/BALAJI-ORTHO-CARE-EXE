@@ -106,10 +106,11 @@ function load(file) {
  const welcome=load('src/lib/billSmsMessage.ts');
  const billMessage=welcome.buildBillSmsMessage({patientName:'TEST',invoice:'INVOICE-SECRET',date:'2026-10-26',service:'PU Cast:1000',total:1000,discount:100,paid:900,due:0});
  assert.match(billMessage,/नमस्कार TEST जी/);assert.match(billMessage,/हार्दिक स्वागत है/);assert.match(billMessage,/80057 07783/);
- assert.doesNotMatch(billMessage,/₹|1000|900|INVOICE-SECRET|2026-10-26|PU Cast|PDF/);
- assert.equal(welcome.buildBillWelcomeMessage('TEST'),billMessage);
+ assert.match(billMessage,/बिल नं\.: INVOICE-SECRET/);assert.match(billMessage,/दिनांक: 2026-10-26/);assert.match(billMessage,/सेवा: PU Cast/);
+ assert.match(billMessage,/कुल बिल: ₹1000/);assert.match(billMessage,/छूट: ₹100/);assert.match(billMessage,/देय राशि: ₹900/);assert.match(billMessage,/जमा: ₹900/);assert.match(billMessage,/बाकी: ₹0/);assert.doesNotMatch(billMessage,/PDF/);
+ assert.doesNotMatch(welcome.buildBillWelcomeMessage('TEST',true),/₹|कुल बिल|बिल नं\./);
  assert.match(welcome.buildBillWelcomeMessage('TEST',true),/साथ दी गई PDF में है/);
  assert.match(welcome.buildBillWelcomeMessage('  '),/नमस्कार मरीज जी/);
- console.log('PASS shared preset prices stay stable and Hindi bill SMS uses the approved welcome');
+ console.log('PASS shared preset prices stay stable and Hindi SMS includes welcome and invoice figures; WhatsApp keeps its welcome');
  console.log('8 clinic update checks passed ('+(mobile?'Android IndexedDB':'Windows SQLite')+')');
 })().then(close,e=>{console.error(e);close();process.exitCode=1});

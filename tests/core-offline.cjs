@@ -47,10 +47,10 @@ function evaluate(code,ctx){return vm.runInNewContext(ts.transpile('const result
  let sent=0;windowMock.electron.sendSMS=async()=>{sent++;return {ok:true}};
  const sync=load('src/lib/offlineSync.ts',['runSync'],{...db,ensureCloudSession:async()=>false,isValidMobile:()=>true,navigator:{onLine:true}});await sync.runSync();assert.equal(sent,1);assert.equal(store.queueGetAll().filter(q=>q.table==='billing').length,1);console.log('PASS pending cloud bill does not block atomic SMS outbox');
  const file='src/pages/DueAmount.tsx';let e=expression(file,'dueBills');const due=evaluate(e.node.arguments[0].getText(e.ast),{bills:[{...input,id:'bill',created_at:'2026-10-08'}]})();assert.equal(due[0]._due,500);assert.equal(due[0]._total,800);
- // Welcome text omits finances; the actual 660/600/60 bill still disappears from dues.
+ // Text SMS includes gross, discount, net, paid and due without changing the bill.
  const discounted=await save({...input,amount:660,discount:60,amount_paid:600,service:'X-Ray:300|Consultation:360'});
  const text=store.queueGetAll().find(q=>q.op==='sms' && q.payload.billing_id===discounted.id).payload.message;
- assert.match(text,/हार्दिक स्वागत है/);assert.doesNotMatch(text,/₹|660|600|बकाया|छूट|X-Ray/);assert.equal(discounted.amount,660);assert.equal(discounted.discount,60);assert.equal(discounted.amount_paid,600);
+ assert.match(text,/हार्दिक स्वागत है/);assert.match(text,/कुल बिल: ₹660/);assert.match(text,/छूट: ₹60/);assert.match(text,/देय राशि: ₹600/);assert.match(text,/जमा: ₹600/);assert.match(text,/बाकी: ₹0/);assert.match(text,/सेवा: X-Ray, Consultation/);assert.equal(discounted.amount,660);assert.equal(discounted.discount,60);assert.equal(discounted.amount_paid,600);
  const unpaid=await save({...input,amount:660,discount:0,amount_paid:600,service:'X-Ray:660'});
  e=expression(file,'dueBills');const remaining=evaluate(e.node.arguments[0].getText(e.ast),{bills:[discounted,unpaid]})();
  assert.equal(remaining.length,1);assert.equal(remaining[0].id,unpaid.id);assert.equal(remaining[0]._due,60);
