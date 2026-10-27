@@ -1,3 +1,6 @@
+import { VillagePicker } from '@/components/VillagePicker';
+import { useVillageCatalog } from '@/lib/useVillageCatalog';
+import { resolveVillage } from '@/lib/villageNames';
 import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { normalizeIndianMobile } from "@/lib/mobile";
 import { businessDate } from "@/lib/businessDate";
@@ -117,10 +120,7 @@ export default function OPD() {
   const { data: searchResults } = useSearchPatients(searchQuery);
   const { data: allPatients } = usePatients();
   const addPrescription = useAddPrescription();
-  const villageOptions = Array.from(new Set((allPatients || []).map((p) => p.address?.trim()).filter(Boolean) as string[]));
-  const filteredVillages = regForm.address
-    ? villageOptions.filter((v) => v.toLowerCase().includes(regForm.address.toLowerCase())).slice(0, 8)
-    : villageOptions.slice(0, 8);
+  const { options: villageOptions, add: addVillage } = useVillageCatalog(allPatients || []);
 
   const mobileRequest = useRef(0);
   const registering = useRef(false);
@@ -186,6 +186,8 @@ export default function OPD() {
     if (!existingPatient && mobileMatches.some(p => (p.name || "").trim().toLocaleLowerCase() === regForm.name.trim().toLocaleLowerCase())) {
       toast({ title:"इस नाम और मोबाइल का मरीज पहले से है। सूची से चुनें।", variant:"destructive" }); return;
     }
+    const canonicalAddress = resolveVillage(regForm.address, villageOptions);
+    if (canonicalAddress === null) { toast({ title: 'गाँव सूची से चुनें या नया गाँव जोड़ें', variant: 'destructive' }); return; }
     if (registering.current) return;
     const digits = regForm.mobile.replace(/\D/g, '');
     if (!/^(?:91)?[6-9]\d{9}$/.test(digits) || !regForm.name.trim()) {
@@ -202,7 +204,7 @@ export default function OPD() {
             name: regForm.name,
             age: regForm.age ? parseInt(regForm.age) : null,
             gender: regForm.gender || null,
-            address: regForm.address || null,
+            address: canonicalAddress || null,
           });
 
         toast({ title: "✅ Patient Found", description: `${regForm.name} already registered — details updated` });
@@ -213,7 +215,7 @@ export default function OPD() {
           mobile: regForm.mobile.replace(/\D/g, ""),
           age: regForm.age ? parseInt(regForm.age) : null,
           gender: regForm.gender || null,
-          address: regForm.address || null,
+          address: canonicalAddress || null,
         });
         patientId = result.id;
         toast({ title: "🆕 New Patient Registered", description: `${regForm.name} · ${result.registration_number || "नंबर उपलब्ध नहीं—प्रिंट स्क्रीन में जाँचें"}` });
@@ -493,49 +495,8 @@ export default function OPD() {
                       </Select>
                     </div>
                     <div className="space-y-2 relative">
-                      <Label>Address</Label>
-                      <Input
-                        placeholder="Village / Address"
-                        value={regForm.address}
-                        onFocus={() => setShowVillageOptions(true)}
-                        onBlur={() => setTimeout(() => { setShowVillageOptions(false); setVillageHighlight(-1); }, 150)}
-                        onChange={e => { setRegForm(p => ({ ...p, address: e.target.value })); setShowVillageOptions(true); setVillageHighlight(-1); }}
-                        onKeyDown={e => {
-                          if (!showVillageOptions || filteredVillages.length === 0) return;
-                          if (e.key === "ArrowDown") {
-                            e.preventDefault();
-                            setVillageHighlight(i => (i + 1) % filteredVillages.length);
-                          } else if (e.key === "ArrowUp") {
-                            e.preventDefault();
-                            setVillageHighlight(i => (i <= 0 ? filteredVillages.length - 1 : i - 1));
-                          } else if (e.key === "Enter") {
-                            if (villageHighlight >= 0 && villageHighlight < filteredVillages.length) {
-                              e.preventDefault();
-                              setRegForm(p => ({ ...p, address: filteredVillages[villageHighlight] }));
-                              setShowVillageOptions(false);
-                              setVillageHighlight(-1);
-                            }
-                          } else if (e.key === "Escape") {
-                            setShowVillageOptions(false);
-                            setVillageHighlight(-1);
-                          }
-                        }}
-                      />
-                      {showVillageOptions && filteredVillages.length > 0 && (
-                        <div className="absolute z-20 w-full rounded-md border bg-card shadow-lg max-h-52 overflow-auto">
-                          {filteredVillages.map((village, idx) => (
-                            <button
-                              key={village}
-                              type="button"
-                              className={`w-full text-left px-3 py-2 text-sm hover:bg-muted ${idx === villageHighlight ? "bg-muted" : ""}`}
-                              onMouseEnter={() => setVillageHighlight(idx)}
-                              onMouseDown={() => { setRegForm(p => ({ ...p, address: village })); setVillageHighlight(-1); }}
-                            >
-                              {village}
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      <Label>गाँव / पता</Label>
+                      <VillagePicker value={regForm.address} onChange={address=>setRegForm(p=>({...p,address}))} options={villageOptions} allowNew={isAdmin} onAdd={addVillage}/>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2 items-center">

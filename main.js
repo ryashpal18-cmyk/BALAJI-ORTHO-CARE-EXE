@@ -1318,7 +1318,10 @@ app.whenReady().then(() => {
   // disk pe ek real SQLite file (offline_cache.db) mein rehta hai. Isse
   // Chromium ke corrupt-prone LevelDB storage ka dependency khatam ho gaya.
   try {
+    const villages=require('./village-names.cjs');
+    sqliteStore.setVillageNormalizer(villages.canonicalVillage,villages.VILLAGE_REVISION);
     sqliteStore.init(BACKUP_DIR);
+    sqliteStore.correctApprovedVillages();
   } catch (e) {
     logger.logError('app-lifecycle', `SQLite offline store init fail: ${e.message}`);
   }

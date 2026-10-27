@@ -44,6 +44,7 @@ jobs:
           node tests/audit-26.cjs
           node tests/sms-offline.cjs
           node tests/core-offline.cjs
+          node tests/village-normalization.cjs
           node tests/billing-catalog.cjs
           node tests/clinic-updates.cjs
           node tests/module-regressions.cjs
@@ -81,6 +82,8 @@ jobs:
         run: npx --no-install electron tests/messaging-ui-electron.cjs
       - name: Check Billing performance with 1501 synthetic bills
         run: npx --no-install electron tests/billing-performance-electron.cjs
+      - name: Check approved village picker UI
+        run: npx --no-install electron tests/village-picker-electron.cjs
       - name: Check native QR invoice PDF
         run: npx --no-install electron tests/invoice-pdf-smoke.cjs
       - name: Bump patch version

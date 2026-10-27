@@ -21,6 +21,9 @@ files:
   - messaging-log.cjs
   - family-profile.cjs
   - invoice-document.cjs
+  - invoice-template.cjs
+  - village-names.cjs
+  - src/assets/invoice-brand.jpg
   - patient-statement.cjs
   - monthly-report.cjs
   - festival-messaging.cjs

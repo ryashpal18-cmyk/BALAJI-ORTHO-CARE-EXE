@@ -5,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node build-invoice-template.cjs && vite build",
     "preview": "vite preview",
     "electron": "electron .",
     "postinstall": "node whatsapp-compat.cjs && electron-builder install-app-deps",

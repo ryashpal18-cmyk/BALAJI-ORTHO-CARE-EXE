@@ -1,3 +1,7 @@
+import { useIsAdmin } from '@/hooks/useIsAdmin';
+import { VillagePicker } from '@/components/VillagePicker';
+import { useVillageCatalog } from '@/lib/useVillageCatalog';
+import { resolveVillage } from '@/lib/villageNames';
 import { patientXrays } from "@/lib/patientRecords";
 import { refreshClinicalUrl } from "@/lib/clinicalFiles";
 import { PatientStatement } from "@/components/PatientStatement";
@@ -25,6 +29,7 @@ type Tab = "bills" | "physio" | "xray" | "medicine";
 
 export default function PatientProfile() {
   const { id } = useParams();
+  const {isAdmin}=useIsAdmin();
   const navigate = useNavigate();
 
   const loadEpoch = useRef(0);
@@ -43,6 +48,8 @@ export default function PatientProfile() {
   const [editAge,     setEditAge]     = useState("");
   const [editGender,  setEditGender]  = useState("");
   const [editAddress, setEditAddress] = useState("");
+  const [villagePatients,setVillagePatients]=useState<any[]>([]);
+  const {options:villageOptions,add:addVillage}=useVillageCatalog(villagePatients);
 
   // ── Data fetch — online + offline safe ─────────────────────────────────
   const fetchData = async () => {
@@ -63,6 +70,7 @@ export default function PatientProfile() {
       if(epoch!==loadEpoch.current)return;
       const pat = cachedPatients.find((p: any) => p.id.replace(/^local_/, "") === id.replace(/^local_/, "")) || null;
       setPatient(pat);
+      setVillagePatients(cachedPatients);
       setBills(cachedBills.filter((b: any) => b.patient_id?.replace(/^local_/, "") === id.replace(/^local_/, "")).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
       setPhysio(cachedPhysio.filter((s: any) => s.patient_id?.replace(/^local_/, "") === id.replace(/^local_/, "")).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
       setXrays(patientXrays(cachedXrays, cachedFractureXrays, id, cachedCases));
@@ -92,6 +100,8 @@ export default function PatientProfile() {
     if (!editName.trim()) {
       toast({ title: "Name required", variant: "destructive" }); return;
     }
+    const address=resolveVillage(editAddress,villageOptions);
+    if(address===null){toast({title:"गाँव सूची से चुनें या नया गाँव जोड़ें",variant:"destructive"});return;}
     setSaving(true);
     try {
       await offlineUpdate("patients", id!, {
@@ -99,7 +109,7 @@ export default function PatientProfile() {
         mobile:  editMobile.trim()  || null,
         age:     editAge ? parseInt(editAge) : null,
         gender:  editGender  || null,
-        address: editAddress.trim() || null,
+        address: address || null,
       });
       toast({ title: "✅ Patient update ho gaya!" });
       setEditing(false);
@@ -214,7 +224,7 @@ export default function PatientProfile() {
                 </div>
                 <div className="space-y-1 sm:col-span-2">
                   <Label>Address</Label>
-                  <Input value={editAddress} onChange={e => setEditAddress(e.target.value)} placeholder="Full address" />
+                  <VillagePicker value={editAddress} onChange={setEditAddress} options={villageOptions} allowNew={isAdmin} onAdd={addVillage} disabled={saving}/>
                 </div>
               </div>
               <div className="flex gap-2 justify-end pt-1">

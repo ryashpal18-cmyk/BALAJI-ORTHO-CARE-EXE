@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('fs'),path=require('path'),crypto=require('crypto');
 const {normId,familyNumber,familyLink}=require('./family-profile.cjs');
-const {invoiceDocument}=require('./invoice-document.cjs');
+const {invoiceDocument,INVOICE_TEMPLATE_VERSION}=require('./invoice-document.cjs');
 const {statementForPatient,statementDocument,statementSummary}=require('./patient-statement.cjs');
 const monthly=require('./monthly-report.cjs');
 const {createMessagingLog}=require('./messaging-log.cjs');
@@ -124,7 +124,7 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
     assertAllowed();
     if(!bytes||Buffer.from(bytes).subarray(0,5).toString()!=='%PDF-')throw Error('PDF नहीं बनी');
     const dir=path.join(root,'invoice-pdfs');fs.mkdirSync(dir,{recursive:true});
-    const file=path.join(dir,crypto.createHash('sha256').update(normId(bill.id)+fingerprint).digest('hex').slice(0,32)+'.pdf');
+    const file=path.join(dir,crypto.createHash('sha256').update(INVOICE_TEMPLATE_VERSION+normId(bill.id)+fingerprint).digest('hex').slice(0,32)+'.pdf');
     fs.writeFileSync(file+'.tmp',bytes);fs.renameSync(file+'.tmp',file);return file;
   }
   function status(){assertAllowed();return{state,ready,qr,error,auto:settings().auto!==false,paired:!!settings().paired,jobs:jobs().map(({pdfPath,...j})=>j).reverse()};}

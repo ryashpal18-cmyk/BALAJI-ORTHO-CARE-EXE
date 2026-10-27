@@ -15,6 +15,9 @@
 
 'use strict';
 
+let canonicalVillage=value=>value, VILLAGE_REVISION='disabled';
+function setVillageNormalizer(fn,revision){if(typeof fn!=='function')throw Error('Village normalizer required');canonicalVillage=fn;VILLAGE_REVISION=revision;}
+function villageRow(table,row){return table==='patients' && typeof row?.address==='string' ? {...row,address:canonicalVillage(row.address)} : row;}
 const path = require('path');
 const fs   = require('fs');
 const Database = require('better-sqlite3');
@@ -126,6 +129,7 @@ function cacheGetRow(table, rowId) {
 }
 
 function cacheSetRows(table, rows, idField) {
+  rows = rows?.map(row=>villageRow(table,row));
   if (!rows || !rows.length) return;
   const stmt = getDb().prepare(
     `INSERT INTO table_cache (_key, table_name, data) VALUES (@key, @table, @data)
@@ -187,6 +191,7 @@ function cacheMergeServer(table, row, idField = 'id') {
 }
 
 function cacheUpsertRow(table, row, idField) {
+  row = villageRow(table,row);
   const rowId = row[idField];
   if (table === 'patients') registration.observe(module.exports, [row]);
   getDb().prepare(
@@ -230,6 +235,7 @@ function cacheReplaceRowKey(table, oldId, newRow, idField) {
 // ─── Mutation Queue ───────────────────────────────────────────────────────
 
 function queueAdd(mutation) {
+  mutation={...mutation,payload:villageRow(mutation.table,mutation.payload)};
   const info = getDb().prepare(
     `INSERT INTO mutation_queue (table_name, op, payload, rowId, tempId, selectAfter, createdAt, retries, lastError, ownerUserId)
      VALUES (@table, @op, @payload, @rowId, @tempId, @selectAfter, @createdAt, 0, NULL, @ownerUserId)`
@@ -281,6 +287,7 @@ function queueUpdate(id, patch) {
   const existing = getDb().prepare(`SELECT * FROM mutation_queue WHERE id = ?`).get(id);
   if (!existing) return;
   const merged = { ...rowToMutation(existing), ...patch };
+  merged.payload=villageRow(merged.table,merged.payload);
   getDb().prepare(
     `UPDATE mutation_queue SET table_name=@table, op=@op, payload=@payload, rowId=@rowId,
      tempId=@tempId, selectAfter=@selectAfter, createdAt=@createdAt, retries=@retries, lastError=@lastError, lastAttemptAt=@lastAttemptAt
@@ -506,7 +513,28 @@ function diagnosticSnapshot({ deep = false } = {}) {
       journalMode: db.prepare('PRAGMA journal_mode').get(), meta, smsJournal };
   })();
 }
+/** Address-only local correction; no queue item, receipt or patient ID is removed. */
+function correctApprovedVillages(){
+ return getDb().transaction(()=>{
+  const before=[];
+  const update=getDb().prepare('UPDATE table_cache SET data=? WHERE _key=?');
+  for(const row of cacheGetAll('patients')){
+   if(typeof row.address!=='string')continue;
+   const address=canonicalVillage(row.address);if(address===row.address)continue;
+   before.push({id:row.id,address:row.address});
+   update.run(JSON.stringify({...row,address}),'patients::'+row.id);
+  }
+  let queued=0;
+  for(const m of queueGetAll())if(m.table==='patients'&&typeof m.payload?.address==='string'){
+   const address=canonicalVillage(m.payload.address);if(address!==m.payload.address){queueUpdate(m.id,{payload:{...m.payload,address}});queued++;}
+  }
+  if(before.length||queued)metaSet('villages:'+VILLAGE_REVISION,{at:new Date().toISOString(),before,queued});
+  return {patients:before.length,queuePayloads:queued};
+ })();
+}
+
 module.exports = {
+  correctApprovedVillages, setVillageNormalizer,
   patientDirectoryRows,
   monthlyAccountRows, patientStatementRows, diagnosticSnapshot, authorizedBatch, commitBatch, commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
   init, close,

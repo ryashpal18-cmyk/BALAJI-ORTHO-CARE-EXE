@@ -1,3 +1,5 @@
+import invoiceBrand from '@/assets/invoice-brand.jpg';
+import { invoiceTemplate } from '@/lib/invoiceTemplate';
 import { billCareCategory, buildBillWelcomeMessage } from "@/lib/billSmsMessage";
 import { cashTallyForPeriod } from "@/lib/collectionReport";
 import QRCode from "qrcode";
@@ -334,18 +336,11 @@ async function printInvoice(bill: any) {
 }
 
 async function previewInvoice(bill: any) {
-  const logoUrl = window.location.origin + "/images/logo.png";
-  const win = window.open("", "_blank", "width=700,height=900");
-  if (!win) return;
-  try { bill = {...bill, familyQr:await QRCode.toDataURL("balajiclinic://family/"+String(bill.patient_id).replace(/^local_/,""),{width:180,margin:4})}; } catch {win.close();toast({title:"QR नहीं बना; दोबारा कोशिश करें",variant:"destructive"});return;}
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Preview – ${(bill.patients as any)?.name || "Patient"}</title>
-    <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: 'Inter', sans-serif; background: #f1f5f9; display:flex; justify-content:center; padding:20px; }
-    </style></head><body>${buildInvoiceHTML(bill, logoUrl)}</body></html>`;
-  writeReportDocument(win, html);
-  win.document.close();
+  const win=window.open('', '_blank', 'width=900,height=900');if(!win)return;
+  try {
+    const qr=await QRCode.toDataURL('balajiclinic://family/'+String(bill.patient_id).replace(/^local_/,''),{width:256,margin:4});
+    writeReportDocument(win,invoiceTemplate(bill,bill.patients || {},{brandImage:invoiceBrand,qr}));win.document.close();
+  }catch{win.close();toast({title:'PDF preview नहीं बना; फिर कोशिश करें',variant:'destructive'});}
 }
 
 async function getBase64Image(url: string): Promise<string> {
