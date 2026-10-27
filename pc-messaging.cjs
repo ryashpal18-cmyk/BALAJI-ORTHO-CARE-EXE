@@ -1,5 +1,6 @@
 'use strict';
 const path=require('path'),fs=require('fs');
+const {loadPdfDocument}=require('./pdf-renderer.cjs');
 const {createMessagingLog}=require('./messaging-log.cjs');
 const {parseFamilyLink,familyGroups,familyRecords}=require('./family-profile.cjs');
 function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,access,sendSMS,logger}) {
@@ -16,7 +17,7 @@ function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,acces
     const win=new BrowserWindow({show:false,webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,partition:'invoice-pdf'}});
     let timer;
     try {
-      const task=(async()=>{await win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(html));return win.webContents.printToPDF({printBackground:true,pageSize:'A4',preferCSSPageSize:true});})();
+      const task=(async()=>{await loadPdfDocument(win,html,app.getPath('temp'));return win.webContents.printToPDF({printBackground:true,pageSize:'A4',preferCSSPageSize:true});})();
       return await Promise.race([task,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('PDF rendering timed out')),30000);})]);
     }finally{clearTimeout(timer);if(!win.isDestroyed())win.destroy();}
   }

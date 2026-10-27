@@ -17,6 +17,7 @@ files:
   - dist/**
   - main.js
   - pc-messaging.cjs
+  - pdf-renderer.cjs
   - whatsapp-service.cjs
   - messaging-log.cjs
   - family-profile.cjs
