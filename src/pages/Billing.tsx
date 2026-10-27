@@ -447,7 +447,7 @@ async function generateAndUploadPDF(bill: any): Promise<string | null> {
   }
 }
 
-export default function Billing() {
+function BillingContent() {
   const location = useLocation();
   const { data: bills, isLoading } = useBills();
   const { data: patients } = usePatients();
@@ -456,6 +456,8 @@ export default function Billing() {
   const addFractureCase = useAddFractureCase();
   const updateBill = useUpdateBill();
   const deleteBill = useDeleteBill();
+  const deleteBillAsync = deleteBill.mutateAsync;
+  const updateBillStatus = updateBill.mutate;
   const { isAdmin } = useIsAdmin();
   const [open, setOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -577,7 +579,7 @@ export default function Billing() {
       try {
         // Persist the delete locally first. Keep existing PDFs for audit/recovery;
         // network/storage cleanup must never precede the durable local commit.
-        await deleteBill.mutateAsync({ id: bill.id, logData: bill });
+        await deleteBillAsync({ id: bill.id, logData: bill });
 
         const { dismiss } = toast({
           title: "🗑️ Bill Deleted",
@@ -592,7 +594,7 @@ export default function Billing() {
         toast({ title: "Error", description: err.message, variant: "destructive" });
       }
     },
-    [deleteBill],
+    [deleteBillAsync],
   );
 
   const handleAdd = async (e: React.FormEvent) => {
@@ -701,7 +703,7 @@ export default function Billing() {
     }
   };
 
-  const handleResendWhatsApp = async (bill: any) => {
+  const handleResendWhatsApp = useCallback(async (bill: any) => {
     const desktop = (window as any).electron?.whatsapp;
     if (desktop) {
       try {await desktop.enqueue(bill.id);toast({title:"QR वाला bill PDF WhatsApp queue में सेव है",description:"WhatsApp page में QR scan करके जोड़ें।"});}
@@ -731,9 +733,9 @@ export default function Billing() {
       freshPdfUrl || null,
     );
     openWhatsAppWeb(mobile, msg);
-  };
+  }, []);
 
-  const handleEdit = (bill: any) => {
+  const handleEdit = useCallback((bill: any) => {
     setEditingBill(bill);
     const parsedServices = bill.service.split("|").map((s: string) => {
       const parts = s.trim().split(":");
@@ -745,7 +747,7 @@ export default function Billing() {
     setPaymentMode((bill as any).payment_mode || "");
     setDoctorChoice(bill.doctor_id ? normId(bill.doctor_id) : DEFAULT_DOCTOR_VALUE);
     setEditOpen(true);
-  };
+  }, []);
 
   const [editReason, setEditReason] = useState("");
   const handleEditSave = async (e: React.FormEvent) => {
@@ -893,13 +895,17 @@ export default function Billing() {
   const [activeSugIdx, setActiveSugIdx] = useState(-1);
   const [sugForRow, setSugForRow] = useState<number>(-1);
 
+  // The catalog only changes between bill dialogs, not on every keystroke.
+  const serviceCatalog = useMemo(() => (open || editOpen)
+    ? getServiceCatalog().map(item => ({ ...item, searchKey: serviceSearchKey(item.name) }))
+    : [], [open, editOpen]);
+
   const showSuggestions = (query: string, idx: number) => {
     if (!query.trim()) { setSuggestions([]); setSugForRow(-1); return; }
-    const catalog = getServiceCatalog();
     const q = serviceSearchKey(query);
-    const matched = catalog
-      .filter((c) => serviceSearchKey(c.name).includes(q))
-      .sort((a, b) => serviceSearchKey(a.name).indexOf(q) - serviceSearchKey(b.name).indexOf(q))
+    const matched = serviceCatalog
+      .filter((c) => c.searchKey.includes(q))
+      .sort((a, b) => a.searchKey.indexOf(q) - b.searchKey.indexOf(q))
       .slice(0, 6);
     setSuggestions(matched);
     setSugForRow(idx);
@@ -1136,8 +1142,165 @@ export default function Billing() {
     </div>
   );
 
+  // A draft edit must not rebuild every row's Select/Dialog/action controls.
+  const billRows = useMemo(() => {
+    return visibleBills.map((bill) => {
+                      const patient = bill.patients as any;
+                      const displayService = bill.service.includes("|")
+                        ? bill.service
+                            .split("|")
+                            .map((s: string) => s.split(":")[0].trim())
+                            .join(", ")
+                        : bill.service;
+                      const paid = Number((bill as any).amount_paid || 0);
+                      const due = Math.max(netBillAmount(bill) - paid, 0);
+                      return (
+                        <tr key={bill.id} className="border-b last:border-0 hover:bg-muted/30">
+                          <td className="py-3 font-medium">
+                            {patient?.name}
+                            {/* 🆕 FIX: list me bhi pata chale ki bill edit hua hai ya nahi — */}
+                            {(bill as any).updated_at && (bill as any).updated_at !== bill.created_at && (
+                              <span className="block text-[10px] font-normal text-muted-foreground">
+                                Edited: {safeDate((bill as any).updated_at)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 hidden sm:table-cell text-muted-foreground text-xs">
+                            {displayService}
+                          </td>
+                          <td className="py-3 text-right font-medium">
+                            ₹{Number(bill.amount).toLocaleString()}
+                          </td>
+                          <td className="py-3 text-right hidden sm:table-cell text-success font-medium">
+                            ₹{paid.toLocaleString()}
+                          </td>
+                          <td className="py-3 text-right hidden sm:table-cell text-destructive font-medium">
+                            {due > 0 ? `₹${due.toLocaleString()}` : "—"}
+                          </td>
+                          <td className="py-3 text-center">
+                            <Select
+                              value={bill.status}
+                              onValueChange={(v) =>
+                                updateBillStatus({ id: bill.id, status: v } as any)
+                              }
+                            >
+                              <SelectTrigger
+                                className={cn(
+                                  "h-7 w-20 text-[10px] border-0 mx-auto",
+                                  statusStyle[bill.status] || "",
+                                )}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Pending">Pending</SelectItem>
+                                <SelectItem value="Paid">Paid</SelectItem>
+                                <SelectItem value="Partial">Partial</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </td>
+                          <td className="py-3 text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => {const bridge=(window as any).electron?.whatsapp;if(bridge)void bridge.pdf(bill.id,false).catch((e:any)=>toast({title:e.message,variant:"destructive"}));else void previewInvoice(bill);}}
+                                title="Preview Invoice"
+                              >
+                                <Eye className="h-3 w-3" />
+                              </Button>
+                              {(window as any).electron?.whatsapp && <Button variant="ghost" size="icon" className="h-7 w-7" title="Download QR Bill PDF" onClick={() => void (window as any).electron.whatsapp.pdf(bill.id,true).catch((e:any)=>toast({title:e.message,variant:"destructive"}))}><Download className="h-3 w-3"/></Button>}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => handleEdit(bill)}
+                                title="Edit Bill"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => printInvoice(bill)}
+                                title="Print"
+                              >
+                                <Printer className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-success"
+                                onClick={() => handleResendWhatsApp(bill)}
+                                title="Resend WhatsApp"
+                              >
+                                <MessageCircle className="h-3 w-3" />
+                              </Button>
+                              {bill.status !== "Paid" && patient?.mobile && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-warning"
+                                  title="Payment Reminder"
+                                  onClick={() => {
+                                    const due = Math.max(netBillAmount(bill) - paid, 0);
+                                    const msg = getWhatsAppReminderMessage(
+                                      patient?.name || "",
+                                      netBillAmount(bill),
+                                      paid,
+                                      due,
+                                    );
+                                    openWhatsAppWeb(patient?.mobile || "", msg);
+                                  }}
+                                >
+                                  <Send className="h-3 w-3" />
+                                </Button>
+                              )}
+                              {isAdmin && (
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-destructive"
+                                      title="Delete Bill"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>
+                                        Are you sure you want to delete this invoice?
+                                      </AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        {patient?.name} का invoice (₹
+                                        {Number(bill.amount).toLocaleString()}) permanently delete
+                                        हो जाएगा। PDF file भी delete होगी।
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction
+                                        onClick={() => handleDeleteBill(bill)}
+                                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                      >
+                                        Delete Invoice
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    });
+  }, [visibleBills, isAdmin, updateBillStatus, handleEdit, handleDeleteBill, handleResendWhatsApp]);
+
   return (
-    <DashboardLayout>
       <div className="space-y-6 page-enter">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div style={{
@@ -1401,160 +1564,7 @@ export default function Billing() {
                         </td>
                       </tr>
                     )}
-                    {visibleBills.map((bill) => {
-                      const patient = bill.patients as any;
-                      const displayService = bill.service.includes("|")
-                        ? bill.service
-                            .split("|")
-                            .map((s: string) => s.split(":")[0].trim())
-                            .join(", ")
-                        : bill.service;
-                      const paid = Number((bill as any).amount_paid || 0);
-                      const due = Math.max(netBillAmount(bill) - paid, 0);
-                      return (
-                        <tr key={bill.id} className="border-b last:border-0 hover:bg-muted/30">
-                          <td className="py-3 font-medium">
-                            {patient?.name}
-                            {/* 🆕 FIX: list me bhi pata chale ki bill edit hua hai ya nahi — */}
-                            {(bill as any).updated_at && (bill as any).updated_at !== bill.created_at && (
-                              <span className="block text-[10px] font-normal text-muted-foreground">
-                                Edited: {safeDate((bill as any).updated_at)}
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3 hidden sm:table-cell text-muted-foreground text-xs">
-                            {displayService}
-                          </td>
-                          <td className="py-3 text-right font-medium">
-                            ₹{Number(bill.amount).toLocaleString()}
-                          </td>
-                          <td className="py-3 text-right hidden sm:table-cell text-success font-medium">
-                            ₹{paid.toLocaleString()}
-                          </td>
-                          <td className="py-3 text-right hidden sm:table-cell text-destructive font-medium">
-                            {due > 0 ? `₹${due.toLocaleString()}` : "—"}
-                          </td>
-                          <td className="py-3 text-center">
-                            <Select
-                              value={bill.status}
-                              onValueChange={(v) =>
-                                updateBill.mutate({ id: bill.id, status: v } as any)
-                              }
-                            >
-                              <SelectTrigger
-                                className={cn(
-                                  "h-7 w-20 text-[10px] border-0 mx-auto",
-                                  statusStyle[bill.status] || "",
-                                )}
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="Pending">Pending</SelectItem>
-                                <SelectItem value="Paid">Paid</SelectItem>
-                                <SelectItem value="Partial">Partial</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </td>
-                          <td className="py-3 text-right">
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={() => {const bridge=(window as any).electron?.whatsapp;if(bridge)void bridge.pdf(bill.id,false).catch((e:any)=>toast({title:e.message,variant:"destructive"}));else void previewInvoice(bill);}}
-                                title="Preview Invoice"
-                              >
-                                <Eye className="h-3 w-3" />
-                              </Button>
-                              {(window as any).electron?.whatsapp && <Button variant="ghost" size="icon" className="h-7 w-7" title="Download QR Bill PDF" onClick={() => void (window as any).electron.whatsapp.pdf(bill.id,true).catch((e:any)=>toast({title:e.message,variant:"destructive"}))}><Download className="h-3 w-3"/></Button>}
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={() => handleEdit(bill)}
-                                title="Edit Bill"
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={() => printInvoice(bill)}
-                                title="Print"
-                              >
-                                <Printer className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-success"
-                                onClick={() => handleResendWhatsApp(bill)}
-                                title="Resend WhatsApp"
-                              >
-                                <MessageCircle className="h-3 w-3" />
-                              </Button>
-                              {bill.status !== "Paid" && patient?.mobile && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 text-warning"
-                                  title="Payment Reminder"
-                                  onClick={() => {
-                                    const due = Math.max(netBillAmount(bill) - paid, 0);
-                                    const msg = getWhatsAppReminderMessage(
-                                      patient?.name || "",
-                                      netBillAmount(bill),
-                                      paid,
-                                      due,
-                                    );
-                                    openWhatsAppWeb(patient?.mobile || "", msg);
-                                  }}
-                                >
-                                  <Send className="h-3 w-3" />
-                                </Button>
-                              )}
-                              {isAdmin && (
-                                <AlertDialog>
-                                  <AlertDialogTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-7 w-7 text-destructive"
-                                      title="Delete Bill"
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                  </AlertDialogTrigger>
-                                  <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                      <AlertDialogTitle>
-                                        Are you sure you want to delete this invoice?
-                                      </AlertDialogTitle>
-                                      <AlertDialogDescription>
-                                        {patient?.name} का invoice (₹
-                                        {Number(bill.amount).toLocaleString()}) permanently delete
-                                        हो जाएगा। PDF file भी delete होगी।
-                                      </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                      <AlertDialogAction
-                                        onClick={() => handleDeleteBill(bill)}
-                                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                      >
-                                        Delete Invoice
-                                      </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                  </AlertDialogContent>
-                                </AlertDialog>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {billRows}
                   </tbody>
                 </table>
               </div>
@@ -1562,7 +1572,10 @@ export default function Billing() {
           </CardContent>
         </Card>
       </div>
-
-    </DashboardLayout>
   );
+}
+
+// Keep sidebar/navigation outside the draft's state updates.
+export default function Billing() {
+  return <DashboardLayout><BillingContent /></DashboardLayout>;
 }
