@@ -79,6 +79,8 @@ jobs:
         run: npx --no-install electron tests/due-collection-electron.cjs
       - name: Check native village and WhatsApp messaging UI
         run: npx --no-install electron tests/messaging-ui-electron.cjs
+      - name: Check Billing performance with 1501 synthetic bills
+        run: npx --no-install electron tests/billing-performance-electron.cjs
       - name: Check native QR invoice PDF
         run: npx --no-install electron tests/invoice-pdf-smoke.cjs
       - name: Bump patch version

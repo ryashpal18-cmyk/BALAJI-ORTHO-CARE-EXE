@@ -471,6 +471,8 @@ export default function Billing() {
   const [doctorChoice, setDoctorChoice] = useState(DEFAULT_DOCTOR_VALUE);
   const [isSending, setIsSending] = useState(false);
   const creatingBill = useRef(false);
+  const [billPage, setBillPage] = useState(1);
+  const BILLS_PER_PAGE = 50;
   const [rangeMode, setRangeMode] = useState("today");
   const [fromDate, setFromDate] = useState(toLocalDateInput(new Date()));
   const [toDate, setToDate] = useState(toLocalDateInput(new Date()));
@@ -510,63 +512,38 @@ export default function Billing() {
     }
   };
 
-  const filteredBills = (bills || []).filter((bill) => {
+  const filteredBills = useMemo(() => (bills || []).filter((bill) => {
     const date = billDate(bill.created_at);
     return date >= fromDate && date <= toDate;
   }).slice().sort((a, b) => {
     const ta = a.created_at && !isNaN(new Date(a.created_at).getTime()) ? new Date(a.created_at).getTime() : 0;
     const tb = b.created_at && !isNaN(new Date(b.created_at).getTime()) ? new Date(b.created_at).getTime() : 0;
     return tb - ta;
-  });
+  }), [bills, fromDate, toDate]);
 
-  const cashTally = cashTallyForPeriod(bills || [], fromDate, toDate);
+  const cashTally = useMemo(() => cashTallyForPeriod(bills || [], fromDate, toDate), [bills, fromDate, toDate]);
+  const pageCount = Math.max(1, Math.ceil(filteredBills.length / BILLS_PER_PAGE));
+  const currentPage = Math.min(billPage, pageCount);
+  const visibleBills = useMemo(() => filteredBills.slice((currentPage - 1) * BILLS_PER_PAGE, currentPage * BILLS_PER_PAGE), [filteredBills, currentPage]);
+  useEffect(() => { setBillPage(1); }, [fromDate, toDate]);
   
-// 🚀 PERF: ye filter+sort pehle HAR render par poore patients array (50k+ tak)
-// par dobara chalta tha — chahe patientSearch na badla ho (jaise amount/services
-// type karte waqt bhi, kyunki wo bhi isi component mein re-render trigger karte
-// hain). useMemo se ab ye sirf tab dobara chalega jab `patients` ya
-// `patientSearch` khud badlein — baaki fields (amount, services, etc.) type
-// karne par ye re-compute skip ho jaata hai. Filter/sort ka logic bilkul same hai.
-// 🚨 FIX: pehle neeche comparator ke andar, jab created_at missing hota tha,
-// har baar Date.now() call hota tha — matlab EK HI patient pair ke liye
-// alag-alag call mein result alag aa sakta tha. Sort function ko "consistent"
-// hona chahiye (same input = hamesha same result), warna JS engine ka sort
-// order unpredictable ho jaata hai — yahi wajah thi ki naam list mein
-// upar-niche "flicker" karte the. Ab ek hi "abhi" ka time ek baar snapshot
-// lekar sabke liye reuse karte hain — poora sort ek hi run mein stable rehta hai.
-const filteredPatients = useMemo(() => {
-  const now = Date.now();
-  return patients
-    ?.filter((p) => {
-      if (!patientSearch) return true;
-
-      const q = patientSearch.toLowerCase();
-      const searchDigits = patientSearch.replace(/\D/g, "");
-
-      const nameMatch = p.name?.toLowerCase().includes(q);
-      // 🚨 FIX: pehle "p.mobile?.includes(patientSearch.replace(/\D/g, ""))" tha —
-      // jab search text mein koi digit nahi hota (jaise sirf naam type kiya),
-      // replace(/\D/g,"") khaali string "" return karta tha, aur
-      // "anyString".includes("") hamesha true hota hai. Isse naam-search karte
-      // waqt mobile-check hamesha pass ho jaata tha aur saare patients (jinke
-      // paas mobile number hai) match ho jaate the — asli naam-match wala
-      // patient list mein kahin dab jaata tha, isliye "nahi milta" jaisa lagta tha.
-      const mobileMatch = searchDigits.length > 0 && p.mobile?.includes(searchDigits);
-
-      return nameMatch || mobileMatch;
-    })
-    .sort((a, b) => {
-      // _pendingSync wale (naye offline patients) hamesha upar
-      if (a._pendingSync && !b._pendingSync) return -1;
-      if (!a._pendingSync && b._pendingSync) return 1;
-      // created_at missing ho to naye maano (upar rakho) — `now` ek hi baar
-      // upar snapshot liya gaya hai, isliye ye value poore sort ke dauraan
-      // kisi bhi patient ke liye kabhi nahi badalti (stable sort).
-      const ta = a.created_at && !isNaN(new Date(a.created_at).getTime()) ? new Date(a.created_at).getTime() : now;
-      const tb = b.created_at && !isNaN(new Date(b.created_at).getTime()) ? new Date(b.created_at).getTime() : now;
-      return tb - ta;
-    });
-}, [patients, patientSearch]);
+  // Sort patient data once; searching or typing amounts must not repeatedly sort.
+  const sortedPatients = useMemo(() => {
+    const now = Date.now();
+    const timestamp = (p: any) => { const t = Date.parse(p.created_at || ''); return Number.isFinite(t) ? t : now; };
+    return [...(patients || [])].sort((a, b) => Number(!!b._pendingSync) - Number(!!a._pendingSync) || timestamp(b) - timestamp(a));
+  }, [patients]);
+  const filteredPatients = useMemo(() => {
+    const q = patientSearch.toLowerCase(), digits = patientSearch.replace(/\D/g, '');
+    return sortedPatients.filter(p => !patientSearch || p.name?.toLowerCase().includes(q) || (digits.length > 0 && p.mobile?.includes(digits)));
+  }, [sortedPatients, patientSearch]);
+  const patientOptions = useMemo(() => {
+    const visible = filteredPatients.slice(0, 50);
+    // Keep an OPD-selected / already-selected patient visible even outside this
+    // first page or while the user changes the search text.
+    const selected = sortedPatients.find(p => p.id === selectedPatient);
+    return selected && !visible.some(p => p.id === selected.id) ? [selected, ...visible] : visible;
+  }, [filteredPatients, sortedPatients, selectedPatient]);
 
   const addServiceRow = () => setServices((prev) => [...prev, { name: "", amount: "" }]);
   const removeServiceRow = (idx: number) => setServices((prev) => prev.filter((_, i) => i !== idx));
@@ -1235,7 +1212,7 @@ const filteredPatients = useMemo(() => {
                         <SelectValue placeholder="Select patient" />
                       </SelectTrigger>
                       <SelectContent>
-                        {filteredPatients?.map((p) => (
+                        {patientOptions.map((p) => (
                           <SelectItem key={p.id} value={p.id}>
                             {p.name} ({p.mobile || "No mobile"})
                           </SelectItem>
@@ -1247,6 +1224,7 @@ const filteredPatients = useMemo(() => {
                         )}
                       </SelectContent>
                     </Select>
+                    {filteredPatients.length > 50 && <p className="text-xs text-muted-foreground">{filteredPatients.length} मरीज मिले। पहले 50 दिख रहे हैं; सही मरीज के लिए नाम या मोबाइल लिखें।</p>}
                   </div>
                   {renderDoctorSelect()}
                   {renderServiceForm()}
@@ -1392,6 +1370,13 @@ const filteredPatients = useMemo(() => {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+              <p role="status" aria-label="Bill list page">कुल {filteredBills.length} बिल • पेज {currentPage} / {pageCount}</p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={currentPage <= 1} onClick={() => setBillPage(currentPage - 1)}>पिछला पेज</Button>
+                <Button variant="outline" size="sm" disabled={currentPage >= pageCount} onClick={() => setBillPage(currentPage + 1)}>अगला पेज</Button>
+              </div>
+            </div>
             {isLoading ? (
               <p className="text-muted-foreground text-sm">Loading...</p>
             ) : (
@@ -1416,7 +1401,7 @@ const filteredPatients = useMemo(() => {
                         </td>
                       </tr>
                     )}
-                    {filteredBills.map((bill) => {
+                    {visibleBills.map((bill) => {
                       const patient = bill.patients as any;
                       const displayService = bill.service.includes("|")
                         ? bill.service
