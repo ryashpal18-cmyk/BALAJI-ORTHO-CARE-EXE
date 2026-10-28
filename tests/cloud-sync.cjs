@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('fs'),path=require('path'),os=require('os'),crypto=require('crypto');
 const {createCloudSync}=require('../cloud-sync.cjs');
 const dirs=[];
-function fixture() {
+function fixture(configOverride = {}) {
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clinic-cloud-test-'));dirs.push(dir);
  const file=path.join(dir,'cloud.json'),key=crypto.randomBytes(32);
  let principal={localAdmin:true,role:'admin',userId:'local-owner',sessionKey:'local-session'},clock=Date.now(),token=null,role='admin',calls=[];
@@ -16,7 +16,7 @@ function fixture() {
   if(url.endsWith('/user')) return response({id:'cloud-admin',email:'cloud@example.test'});
   return response([{role}]);
  };
- const opts={file,safeStorage,access:{getPrincipal:()=>principal},config:{url:'https://clinic.test',key:'public-test'},
+ const opts={file,safeStorage,access:{getPrincipal:()=>principal},config:{url:'https://clinic.test',key:'public-test',...configOverride},
  fetchCloud:(...args)=>fetch(...args),onCloudToken:t=>{token=t},now:()=>clock};
  const api=createCloudSync(opts);
  return {api,file,session,safeStorage,read:()=>JSON.parse(safeStorage.decryptString(Buffer.from(JSON.parse(fs.readFileSync(file,'utf8')).data,'base64'))),
@@ -50,4 +50,17 @@ function fixture() {
  const before=count;assert.equal((await outage.api.connect()).success,false);assert.equal(count,before);
  assert.ok(fs.existsSync(outage.file));
  console.log('PASS rotated credential retained through outage; backoff preserves saved connection');
+ const migrated=fixture({url:'https://new-clinic.test',migratedFrom:['https://clinic.test']});
+ const saved={ownerId:'local-owner',userId:'cloud-admin',url:'https://clinic.test',session:migrated.session};
+ fs.writeFileSync(migrated.file,JSON.stringify({v:1,data:migrated.safeStorage.encryptString(JSON.stringify(saved)).toString('base64')}));
+ const original=fs.readFileSync(migrated.file,'utf8');
+ assert.equal(migrated.api.status().configured,false);assert.match(migrated.api.status().error,/BJ BACKUP/);
+ assert.equal((await migrated.api.connect()).success,false);assert.equal(migrated.calls.length,0);
+ assert.equal(fs.readFileSync(migrated.file,'utf8'),original);
+ assert.equal((await migrated.api.adopt(migrated.session)).success,true);
+ assert.equal(migrated.read().userId,'cloud-admin');assert.equal(migrated.read().ownerId,'local-owner');
+ assert.equal(migrated.read().url,'https://new-clinic.test');
+ assert.ok(migrated.calls.every(c=>c.url.startsWith('https://new-clinic.test/')));
+ console.log('PASS backend cutover keeps old encrypted session until explicit reconnect; no old token sent; owner IDs retained');
+
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>dirs.forEach(d=>fs.rmSync(d,{recursive:true,force:true})));

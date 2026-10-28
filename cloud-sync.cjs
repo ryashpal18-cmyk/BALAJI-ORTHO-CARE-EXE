@@ -14,7 +14,11 @@ function createCloudSync({ file, safeStorage, access, config, fetchCloud, onClou
     try {
       const data = JSON.parse(fs.readFileSync(file, 'utf8'));
       const record = JSON.parse(safeStorage.decryptString(Buffer.from(data.data, 'base64')));
-      if (record.url !== config.url || !record.ownerId || !record.session?.refresh_token) throw Error();
+      if (record.url !== config.url) {
+        if (config.migratedFrom?.includes(record.url)) { lastError = "BJ BACKUP जोड़ने के लिए Settings → Cloud Sync में अपना cloud email/password एक बार भरें। Pending data सुरक्षित है।"; return null; }
+        throw Error();
+      }
+      if (!record.ownerId || !record.session?.refresh_token) throw Error();
       return record;
     } catch { throw new Error('Saved cloud connection cannot be read; reconnect cloud without resetting patient data'); }
   }

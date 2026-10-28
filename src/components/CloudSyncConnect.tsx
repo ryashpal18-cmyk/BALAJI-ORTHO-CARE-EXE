@@ -56,10 +56,10 @@ export function CloudSyncConnect() {
     finally { setBusy(false); }
   };
   return <Card className="dash-card mb-6">
-    <CardHeader><CardTitle>Cloud Sync Connect</CardTitle></CardHeader>
+    <CardHeader><CardTitle>BJ BACKUP · Cloud Sync</CardTitle></CardHeader>
     <CardContent>
       <p className="mb-3 text-sm" role="status">{message}</p>
-      <p className="mb-4 text-sm text-muted-foreground">Working clinic database से connect करें। Cloud password save नहीं होगा; connection इस PC पर सुरक्षित रखा जाएगा।</p>
+      <p className="mb-4 text-sm text-muted-foreground">BJ BACKUP से connect करें। Cloud password save नहीं होगा; connection इस PC पर सुरक्षित रखा जाएगा।</p>
       <form onSubmit={connect} className="space-y-3">
         <Label htmlFor="cloud-sync-email">Cloud account email</Label>
         <Input id="cloud-sync-email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required disabled={busy} />

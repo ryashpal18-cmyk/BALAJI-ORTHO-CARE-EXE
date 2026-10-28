@@ -1,21 +1,26 @@
 import fs from "node:fs";
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), "");
-  const url = env.VITE_SUPABASE_URL;
-  const key = env.VITE_SUPABASE_PUBLISHABLE_KEY;
-  if (!url || !key) throw new Error("Supabase .env configuration missing");
+  const backend = JSON.parse(fs.readFileSync(path.resolve(__dirname, "auth-public-config.json"), "utf8"));
+  const {url,key} = backend;
+  if (!url || !key) throw new Error("Clinic backend configuration missing");
   if (!key.startsWith("sb_publishable_")) {
     let role;
     try { role = JSON.parse(Buffer.from(key.split(".")[1], "base64url").toString()).role; } catch {}
     if (role !== "anon") throw new Error("Only a public Supabase API key may be bundled");
   }
-  fs.writeFileSync(path.resolve(__dirname, "auth-public-config.json"), JSON.stringify({ url, key }, null, 2) + "\n");
+
   return {
   base: "./",
+  // The renderer and native process share one clinic backend, overriding stale build env.
+  define: {
+    "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(url),
+    "import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY": JSON.stringify(key),
+    "import.meta.env.VITE_SUPABASE_PROJECT_ID": JSON.stringify(new URL(url).hostname.split(".")[0]),
+  },
   plugins: [react()],
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
