@@ -353,61 +353,7 @@ export default function OPD() {
     setIsExporting(false);
   };
 
-  const handleWhatsApp = async () => {
-    if (!rxForm.patient_id || !rxForm.diagnosis) {
-      toast({ title: "Error", description: "Select patient and enter diagnosis first", variant: "destructive" });
-      return;
-    }
-    setIsExporting(true);
-    await savePrescription();
-
-    const patient = getSelectedPatient(allPatients, rxForm.patient_id);
-
-    try {
-      // Generate PDF and upload to storage
-      const blob = await generatePdfBlob();
-      if (!blob) throw new Error("PDF generation failed");
-
-      const fileName = `${String(patient.id).replace(/^local_/, "")}/${getFileName()}_${Date.now()}.pdf`;
-      const { error: uploadError } = await supabase.storage
-        .from("prescriptions")
-        .upload(fileName, blob, { contentType: "application/pdf", upsert: true });
-
-      if (uploadError) throw uploadError;
-
-      const { data: urlData, error: signError } = await supabase.storage
-        .from("prescriptions")
-        .createSignedUrl(fileName, 86400);
-      if (signError || !urlData?.signedUrl) throw signError || new Error("Cannot create PDF link");
-      const pdfLink = urlData.signedUrl;
-
-      // Build WhatsApp message with PDF link
-      const msg = [
-        `📋 *Prescription from ${CLINIC.name}*`,
-        `👨‍⚕️ ${CLINIC.doctor}`,
-        ``,
-        `👤 Patient: ${patient?.name || "N/A"}`,
-        `🩺 Diagnosis: ${rxForm.diagnosis}`,
-        rxForm.followup_date ? `📅 Next Visit: ${new Date(rxForm.followup_date).toLocaleDateString("en-IN")}` : "",
-        ``,
-        `📥 Download Prescription PDF:`,
-        pdfLink,
-        ``,
-        `📞 Contact: ${CLINIC.phone}`,
-        `📍 ${CLINIC.address}`,
-      ].filter(Boolean).join("\n");
-
-      const whatsappUrl = patient?.mobile
-        ? `https://wa.me/${normalizeIndianMobile(patient.mobile)}?text=${encodeURIComponent(msg)}`
-        : `https://wa.me/?text=${encodeURIComponent(msg)}`;
-
-      window.open(whatsappUrl, "_blank");
-      toast({ title: "Success", description: "WhatsApp share opened with PDF link!" });
-    } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
-    }
-    setIsExporting(false);
-  };
+  const handleWhatsApp = async () => { toast({ title: "PDF PC पर save करके WhatsApp में attach करें; cloud upload बंद है।" }); };
 
   return (
     <DashboardLayout>

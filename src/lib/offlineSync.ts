@@ -367,6 +367,7 @@ export async function runSync(options:{retrySchema?:boolean}={}): Promise<{ sync
     for (const snapshotItem of queue) {
       const m = (await queueGetAll()).find(q => q.id === snapshotItem.id);
       if (!m || (m.op === "sms") !== sms) continue;
+      if (m.op === "xray_upload") continue; // Preserve existing local files; cloud media transfer disabled.
       if (isParkedSms(m)) continue; // manual check pending — never auto-resend, never an error
       const key = `${m.table}::${(m.rowId || m.tempId || String(m.id)).replace(/^local_/, "")}`;
       if (blocked.has(key)) continue;

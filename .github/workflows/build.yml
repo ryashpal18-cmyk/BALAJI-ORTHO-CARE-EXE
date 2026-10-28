@@ -44,6 +44,7 @@ jobs:
           node tests/audit-26.cjs
           node tests/sms-offline.cjs
           node tests/messaging-recovery.cjs
+          node tests/media-policy.cjs
           node tests/core-offline.cjs
           node tests/village-normalization.cjs
           node tests/billing-catalog.cjs

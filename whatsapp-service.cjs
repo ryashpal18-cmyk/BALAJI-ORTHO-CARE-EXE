@@ -146,7 +146,7 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
     starting=Promise.resolve().then(async()=>{
     await cleanup;
     if(stopped||!allowed())return;
-    if(!clientFactory)await recoverBrowser({profile,executablePath});
+    if(!clientFactory)try{await recoverBrowser({profile,executablePath});}catch(e){report('WA-010','WhatsApp cleanup unavailable; attempting normal launch',e,{level:'warn'});}
     if(stopped||!allowed())return;
     const candidate=factory({});client=candidate;
     const on=(name,fn)=>candidate.on(name,(...args)=>{if(client===candidate)fn(...args);});

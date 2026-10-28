@@ -31,7 +31,7 @@ export function initErrorLogging() {
       const start=performance.now();
       try {
         const response=await original(input,init);
-        if (!response.ok) reportRuntimeIssue({level:response.status>=500?"error":"warn",source:"ui-network",code:"NET-001",message:`Request returned HTTP ${response.status}`,detail:{endpoint:endpoint(input),status:response.status,durationMs:Math.round(performance.now()-start)}});
+        if (!response.ok) reportRuntimeIssue({level:response.status>=500?"error":"warn",source:"ui-network",code:"NET-001",message:`Request returned HTTP ${response.status} — ${endpoint(input)}`,detail:{endpoint:endpoint(input),status:response.status,durationMs:Math.round(performance.now()-start)}});
         return response;
       } catch (error: any) {
         reportRuntimeIssue({level:error?.name==="AbortError"?"warn":"error",source:"ui-network",code:error?.name==="AbortError"?"NET-002":"NET-001",message:"Request did not complete",detail:{endpoint:endpoint(input),errorName:error?.name,durationMs:Math.round(performance.now()-start)}});

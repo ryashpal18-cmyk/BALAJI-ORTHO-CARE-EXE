@@ -185,9 +185,8 @@ export async function uploadClinicalFile(table: 'fracture_xrays' | 'xray_reports
   const uploadId = crypto.randomUUID();
   const localUrl = `data:${file.type};base64,${fileBase64}`;
   const row = { id: uploadId, patient_id: patientId, ...(caseId ? { fracture_case_id: caseId, image_date: businessDate() } : { report_type: reportType, uploaded_at: new Date().toISOString() }), created_at: new Date().toISOString(), file_url: localUrl, _localFileUrl: localUrl, _pendingSync: true };
-  await commitMutation({ table, op: 'xray_upload', tempId: uploadId, payload: { caseId, patientId, uploadId, fileName: file.name, fileBase64, mimeType: file.type, reportType, imageDate: caseId ? businessDate() : undefined, created_at: row.created_at } }, row);
-  void import('@/lib/offlineSync').then(m => m.runSync()).catch(() => {});
-  return { ok: true, queued: true, file_url: localUrl };
+  await cacheUpsertRow(table, { ...row, _localOnly: true });
+  return { ok: true, queued: false, file_url: localUrl };
 }
 export async function uploadFractureXray(caseId: string, patientId: string, file: File): Promise<XrayUploadResult> {
   return uploadClinicalFile('fracture_xrays', patientId, file, caseId);

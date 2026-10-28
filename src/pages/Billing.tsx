@@ -353,94 +353,7 @@ async function getBase64Image(url: string): Promise<string> {
   });
 }
 
-async function generateAndUploadPDF(bill: any): Promise<string | null> {
-  const logoUrl = await getBase64Image(window.location.origin + "/images/logo.png");
-  bill = {...bill, familyQr:await QRCode.toDataURL("balajiclinic://family/"+String(bill.patient_id).replace(/^local_/,""),{width:180,margin:4})};
-  const html = buildInvoiceHTML(bill, logoUrl);
-
-  // ✅ Container bilkul screen se bahar rakho — white screen nahi aayegi
-  const container = document.createElement("div");
-  container.innerHTML = safeReportHtml(html);
-  container.style.position = "absolute";
-  container.style.top = "-9999px";
-  container.style.left = "-9999px";
-  container.style.width = "210mm";
-  container.style.background = "#ffffff";
-  container.style.pointerEvents = "none";
-  container.style.visibility = "hidden";
-  document.body.appendChild(container);
-
-  // Wait for images to load
-  const images = container.querySelectorAll("img");
-  await Promise.all(
-    Array.from(images).map(
-      (img) =>
-        new Promise<void>((resolve) => {
-          if (img.complete) {
-            resolve();
-            return;
-          }
-          img.onload = () => resolve();
-          img.onerror = () => resolve();
-          setTimeout(resolve, 3000);
-        }),
-    ),
-  );
-
-  // Small delay for fonts and rendering
-  await new Promise((r) => setTimeout(r, 500));
-
-  try {
-    // Dynamic import — Electron mein top-level import crash karta tha
-    const { default: html2pdf } = await import("html2pdf.js");
-    const pdfBlob = await html2pdf()
-      .set({
-        margin: [2, 2, 2, 2],
-        filename: "invoice.pdf",
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: {
-          scale: 3,
-          useCORS: true,
-          allowTaint: true,
-          logging: false,
-          backgroundColor: "#ffffff",
-          width: container.scrollWidth,
-          height: container.scrollHeight,
-        },
-        jsPDF: { unit: "mm", format: [210, 148], orientation: "landscape" },
-      })
-      .from(container)
-      .outputPdf("blob");
-
-    const invoiceNo = invoiceNumber(bill.id);
-    const fileName = `${String(bill.patient_id).replace(/^local_/, "")}/${invoiceNo}-${Date.now()}.pdf`;
-
-    // PDF upload sirf online ho tab karo — offline ho to silently skip
-    const online = await isOnline();
-    if (!online) return null;
-
-    const { error: uploadError } = await supabase.storage
-      .from("invoices")
-      .upload(fileName, pdfBlob, { contentType: "application/pdf", upsert: true });
-
-    if (uploadError) return null; // upload fail — koi error nahi dikhana
-
-    const { data: urlData, error: signError } = await supabase.storage.from("invoices").createSignedUrl(fileName, 86400);
-    if (signError || !urlData?.signedUrl) throw signError || new Error("Cannot create invoice link");
-    try {
-      await supabase
-        .from("billing")
-        .update({ invoice_pdf_url: urlData.signedUrl } as any)
-        .eq("id", bill.id);
-    } catch { /* URL save fail hona koi badi baat nahi */ }
-
-    return urlData.signedUrl;
-  } catch (err) {
-    cLog.error("billing", "PDF generation fail", err); return null;
-  } finally {
-    document.body.removeChild(container);
-  }
-}
+async function generateAndUploadPDF(bill: any): Promise<string | null> { return null; /* PDFs remain on this PC. */ }
 
 function BillingContent() {
   const location = useLocation();
@@ -717,7 +630,7 @@ function BillingContent() {
       return;
     }
 
-    toast({ title: "Generating PDF...", description: "Please wait" });
+    toast({ title: "WhatsApp खोल रहे हैं", description: "PDF cloud पर upload नहीं होगी" });
     const freshPdfUrl = await generateAndUploadPDF(bill);
     const msg = getWhatsAppBillMessage(
       patientName,

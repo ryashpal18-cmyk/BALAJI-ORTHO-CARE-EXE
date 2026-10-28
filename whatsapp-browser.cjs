@@ -23,7 +23,7 @@ Write-Output $count
 `;
 function recoverWhatsAppBrowser({profile,executablePath,platform=process.platform,run=execFile}) {
   if(platform!=='win32')return Promise.resolve(0);
-  return new Promise((resolve,reject)=>run('powershell.exe',['-NoProfile','-NonInteractive','-Command',RECOVER_SCRIPT],
+  return new Promise((resolve,reject)=>run('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(RECOVER_SCRIPT,'utf16le').toString('base64')],
     {windowsHide:true,timeout:8000,env:{...process.env,BALAJI_WA_PROFILE:profile,BALAJI_WA_EXECUTABLE:executablePath}},
     (error,stdout)=>error?reject(error):resolve(Number(String(stdout).trim())||0)));
 }

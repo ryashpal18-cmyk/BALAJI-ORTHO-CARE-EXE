@@ -82,7 +82,7 @@ const offline=load('src/lib/offlineQuery.ts',['offlineInsert','offlineUpdate','o
  vm.runInNewContext(main.slice(a,b),{ipcMain:{on:(_,fn)=>externalHandler=fn},shell:{openExternal:async url=>opened.push(url)}});
  externalHandler(null,'file:///C:/test.exe');externalHandler(null,'custom-app:payload');externalHandler(null,'https://example.invalid');assert.deepEqual(opened,['https://example.invalid']);
  console.log('PASS external URL alias rejects file/custom protocols');
- const bounded=load('src/lib/boundedFetch.ts',['boundedFetch'],{AbortController,Request,fetch:(_input,init)=>new Promise((_,reject)=>init.signal.addEventListener('abort',()=>reject(init.signal.reason))),setTimeout:fn=>setTimeout(fn,10)});
+ const bounded=load('src/lib/boundedFetch.ts',['boundedFetch'],{AbortController,Request,URL,Headers,fetch:(_input,init)=>new Promise((_,reject)=>init.signal.addEventListener('abort',()=>reject(init.signal.reason))),setTimeout:fn=>setTimeout(fn,10)});
  await assert.rejects(()=>bounded.boundedFetch('https://example.invalid'),/timed out/);
  console.log('PASS stalled request aborts without discarding local data');
  store.close();fs.rmSync(testDir,{recursive:true,force:true});

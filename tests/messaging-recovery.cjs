@@ -60,7 +60,7 @@ function load(file,mocks,globals={}){
  assert.equal(options.env.BALAJI_WA_PROFILE,'C:\\Clinic Space\\session');assert.ok(!argv.join(' ').includes('Clinic Space'));assert.ok(!argv.join(' ').includes('taskkill'));
  // On the Windows build runner, execute the real selector with mocked OS data.
  if(process.platform==='win32'){
-  const script=argv.at(-1);
+  const script=Buffer.from(argv.at(-1),'base64').toString('utf16le');
   const fixture=`function Get-CimInstance { @(
    [pscustomobject]@{ExecutablePath='C:\\Edge\\msedge.exe';CommandLine='edge --user-data-dir="C:\\Clinic Space\\session"';ProcessId=111},
    [pscustomobject]@{ExecutablePath='C:\\Edge\\msedge.exe';CommandLine='edge --user-data-dir="C:\\Clinic Space\\session-other"';ProcessId=222},
