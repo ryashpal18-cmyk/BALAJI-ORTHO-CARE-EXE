@@ -304,7 +304,7 @@ export async function queueUpdate(id: number, patch: Partial<QueuedMutation>) {
   try {
     assertSuccess(await bridge.queueUpdate(id, patch));
     if (patch.lastError) {
-      cLog.warn("queue", `Retry ${patch.retries}/${8} — id: ${id}, error: ${patch.lastError}`);
+      cLog.warn("queue", `Retry ${patch.retries ?? "pending"} (backoff) — id: ${id}, error: ${patch.lastError}`);
     }
   } catch (err) {
     cLog.error("queue", `queueUpdate fail — id: ${id}`, err);

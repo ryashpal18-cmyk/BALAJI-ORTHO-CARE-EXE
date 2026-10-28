@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { cacheGetAll, cacheGetRow, commitMutation, queueGetAll, queueRemove, queueUpdate, onQueueChange } from "@/lib/offlineDb";
 import { runSync } from "@/lib/offlineSync";
 import { smsLogRows } from "@/lib/smsLogRows";
+import { saveSmsReview, withSmsReviews } from "@/lib/smsReview";
 
 type SmsLog = {
   id: string;
@@ -35,9 +36,10 @@ export default function SmsLogs() {
   const recordReview = async (entry: any, status: string) => {
     const id = entry.payload?.messageId;
     if (!id) throw new Error("SMS identity missing");
+    await saveSmsReview(id, status);
     const existing = await cacheGetRow("sms_logs", id);
     const row = { ...existing, id, patient_name:entry.payload.patientName || "", mobile:entry.payload.mobile,
-      message:entry.payload.message, sms_type:entry.payload.smsType, sent_at:entry.createdAt, status };
+      message:entry.payload.message, sms_type:entry.payload.smsType, sent_at:entry.createdAt, status: "pending" };
     await commitMutation({table:"sms_logs", op:"insert", tempId:id, payload:row}, row);
   };
   // Unconfirmed SMS: staff gateway check karne ke baad khud faisla leta hai (auto-resend kabhi nahi).
@@ -67,7 +69,8 @@ export default function SmsLogs() {
     const refresh = async () => {
       try {
         const [cached, pending] = await Promise.all([cacheGetAll("sms_logs"), queueGetAll()]);
-        if (live) { setLogs(smsLogRows(cached, pending)); setLoadError(""); }
+        const rows = await withSmsReviews(smsLogRows(cached, pending));
+        if (live) { setLogs(rows); setLoadError(""); }
       } catch { if (live) setLoadError("SMS records load nahi hue. Pending data clear na karein."); }
       finally { if (live) setLoading(false); }
     };

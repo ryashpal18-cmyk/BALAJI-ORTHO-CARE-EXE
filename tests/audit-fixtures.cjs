@@ -12,3 +12,11 @@ function queryMock(value) {
   }});
 }
 module.exports={normalizeBill:m.exports.normalizeBill,queryMock};
+
+// Load the real SMS review boundary with each test's durable metadata adapter.
+module.exports.smsReview = db => {
+ const mod={exports:{}};
+ const code=ts.transpileModule(fs.readFileSync(path.join(__dirname,'../src/lib/smsReview.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;
+ vm.runInNewContext(code,{module:mod,exports:mod.exports,require:()=>db});
+ return mod.exports;
+};

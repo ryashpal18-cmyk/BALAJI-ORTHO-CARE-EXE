@@ -14,10 +14,18 @@ function findBrowser() {
   const paths=[process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA].filter(Boolean).flatMap(root=>[path.join(root,'Microsoft','Edge','Application','msedge.exe'),path.join(root,'Google','Chrome','Application','chrome.exe')]);
   return paths.find(file=>fs.existsSync(file));
 }
-function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,mediaFactory,now=Date.now,timeoutMs=60000,browserPath=findBrowser,logger}) {
+function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,mediaFactory,now=Date.now,timeoutMs=60000,browserPath=findBrowser,logger,recoverBrowser=require('./whatsapp-browser.cjs').recoverWhatsAppBrowser}) {
   const jobsKey='whatsapp:invoice-jobs',settingsKey='whatsapp:settings';
   const report=createMessagingLog(logger,'whatsapp',now);
   let client=null,ready=false,qr=null,state='disconnected',error='',busy=false,stopped=false,nextConnect=0;
+  let cleanup=Promise.resolve(),starting=null,connectionFailures=0;
+  const profile=path.join(root,'whatsapp-auth','session-balaji-clinic');
+  function dispose(candidate){
+    cleanup=cleanup.catch(()=>{}).then(async()=>{
+      try{await bounded(Promise.resolve().then(()=>candidate.destroy()),2000);}catch{}
+    });
+    return cleanup;
+  }
   const jobs=()=>store.metaGet(jobsKey)||[];
   const save=list=>store.metaSet(jobsKey,list);
   const settings=()=>store.metaGet(settingsKey)||{auto:true,paired:false};
@@ -129,20 +137,30 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
   }
   function status(){assertAllowed();return{state,ready,qr,error,auto:settings().auto!==false,paired:!!settings().paired,jobs:jobs().map(({pdfPath,...j})=>j).reverse()};}
   async function connect(){
-    assertAllowed();if(client)return status();
+    assertAllowed();if(client||starting)return status();
     const executablePath=browserPath();if(!executablePath)throw Error('PC में Microsoft Edge या Google Chrome install करें।');
     stopped=false;state='connecting';error='';qr=null;
     const factory=clientFactory||((options)=>{const{Client,LocalAuth}=require('whatsapp-web.js');return new Client({authStrategy:new LocalAuth({clientId:'balaji-clinic',dataPath:path.join(root,'whatsapp-auth')}),webVersionCache:{type:'none'},puppeteer:{executablePath,headless:true,timeout:45000},...options});});
+    // Reserve the launch before awaiting old cleanup/recovery. Repeated clicks
+    // and the background timer cannot launch a second browser for this profile.
+    starting=Promise.resolve().then(async()=>{
+    await cleanup;
+    if(stopped||!allowed())return;
+    if(!clientFactory)await recoverBrowser({profile,executablePath});
+    if(stopped||!allowed())return;
     const candidate=factory({});client=candidate;
     const on=(name,fn)=>candidate.on(name,(...args)=>{if(client===candidate)fn(...args);});
     on('qr',value=>{qr=value;state='scan';ready=false;});
-    on('ready',()=>{ready=true;state='connected';qr=null;error='';store.metaSet(settingsKey,{...settings(),paired:true});void tick().catch(e=>report('WA-013','WhatsApp ready worker',e));});
+    on('ready',()=>{connectionFailures=0;ready=true;state='connected';qr=null;error='';store.metaSet(settingsKey,{...settings(),paired:true});void tick().catch(e=>report('WA-013','WhatsApp ready worker',e));});
     on('auth_failure',()=>{report('WA-010','WhatsApp login',Error('Linked-device authentication failed'));error='WhatsApp login नहीं हुआ; दोबारा जोड़ें।';state='error';ready=false;});
-    on('disconnected',reason=>{report('WA-010','WhatsApp disconnected',reason||'Connection closed',{level:'warn'});ready=false;qr=null;state='disconnected';client=null;nextConnect=now()+60000;void candidate.destroy().catch(()=>{});});
-    Promise.resolve().then(()=>candidate.initialize()).catch(e=>{if(client===candidate){report('WA-010','WhatsApp initialize',e);error='WhatsApp Web connection नहीं बना। इंटरनेट जाँचकर दोबारा जोड़ें।';state='error';ready=false;client=null;nextConnect=now()+60000;void candidate.destroy().catch(()=>{});}});
+    on('disconnected',reason=>{report('WA-010','WhatsApp disconnected',reason||'Connection closed',{level:'warn'});ready=false;qr=null;state='disconnected';client=null;nextConnect=now()+60000;void dispose(candidate);});
+    try{await candidate.initialize();}
+    catch(e){if(client===candidate){report('WA-010','WhatsApp initialize',e);error=/already running|userDataDir/i.test(String(e.message))?'WhatsApp browser session व्यस्त है। Balaji बंद करके PC restart करें; session delete न करें।':'WhatsApp Web connection नहीं बना। इंटरनेट जाँचकर दोबारा जोड़ें।';state='error';ready=false;client=null;nextConnect=now()+Math.min(60000*2**Math.min(connectionFailures++,4),900000);await dispose(candidate);}}
+    finally{if(stopped||client!==candidate)await dispose(candidate);}
+    }).catch(e=>{report('WA-010','WhatsApp browser recovery',e);state='error';error='WhatsApp browser शुरू नहीं हुआ; PC restart करके फिर जोड़ें।';nextConnect=now()+300000;}).finally(()=>{starting=null;});
     return status();
   }
-  async function disconnect(){assertAllowed();store.metaSet(settingsKey,{...settings(),paired:false});stopped=true;const old=client;client=null;ready=false;qr=null;state='disconnected';if(old){await old.logout().catch(()=>{});await old.destroy().catch(()=>{});}return status();}
+  async function disconnect(){assertAllowed();store.metaSet(settingsKey,{...settings(),paired:false});stopped=true;const old=client;client=null;ready=false;qr=null;state='disconnected';if(old){try{await bounded(Promise.resolve().then(()=>old.logout()),2000);}catch{}await dispose(old);}return status();}
   const bounded=(promise,ms)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Request timed out')),ms);})]).finally(()=>clearTimeout(timer));};
   async function tick(){
     if(stopped||busy||!allowed())return;
@@ -153,7 +171,7 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
         const since=store.metaGet('whatsapp:started-at');
         for(const bill of store.cacheGetAll('billing'))if(Date.parse(bill.created_at)>=since&&!jobs().some(j=>normId(j.billId)===normId(bill.id)))try{enqueue(bill.id);}catch(e){report('WA-013','Automatic bill queue',e,{jobId:bill.id,kind:'bill',level:'warn'});}
       }
-      if(!client&&settings().paired&&now()>=nextConnect){nextConnect=now()+60000;await connect();}
+      if(!client&&!starting&&settings().paired&&now()>=nextConnect){nextConnect=now()+60000;await connect();}
       if(!ready||!client)return;
       const job=jobs().find(j=>j.state==='queued'&&(!j.retryAt||j.retryAt<=now()));if(!job)return;
       let handedOff=false,failureStage='PDF बनाना';
@@ -219,7 +237,7 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
   }
   function setAuto(value){assertAllowed();if(typeof value!=='boolean')throw Error('Invalid setting');store.metaSet(settingsKey,{...settings(),auto:value});return status();}
   function review(id,action){assertAllowed();const job=jobs().find(j=>j.id===id);if(!job||!['unconfirmed','failed','queued'].includes(job.state))throw Error('Job review उपलब्ध नहीं');if(!['sent','retry','cancel'].includes(action))throw Error('Invalid review');patch(id,{state:action==='retry'?'queued':action==='cancel'?'cancelled':'sent',retryAt:0,error:'',errorDetail:'',failureStage:'',reviewedAt:new Date(now()).toISOString(),reviewAction:action});return status();}
-  function stop(){stopped=true;ready=false;const old=client;client=null;if(old)void old.destroy().catch(()=>{});}
+  async function stop(){stopped=true;ready=false;qr=null;state='disconnected';const old=client;client=null;if(old)await dispose(old);if(!clientFactory){const executablePath=browserPath();if(executablePath)try{await recoverBrowser({profile,executablePath});}catch(e){report('WA-010','WhatsApp browser shutdown',e);}}}
   return{sendText,connect,disconnect,status,setAuto,enqueue,createPdf,previewStatement,enqueueStatement,createStatementPdf,getMonthlySettings,saveMonthlySettings,previewMonthly,enqueueMonthly,createMonthlyPdf,tick,review,stop};
 }
 module.exports={createWhatsAppService,findBrowser,serializedId};

@@ -93,7 +93,7 @@ if (!gotSingleInstanceLock) {
   process.exit(0);
 } else {
   app.on('second-instance', () => {
-    logger.logWarn('app-lifecycle', 'Doosra instance launch hua — maujooda window front pe laa rahe hain.');
+    logger.logInfo('app-lifecycle', 'Doosra instance launch hua — maujooda window front pe laa rahe hain.');
     // 🚨 FIX: Agar main window band ho chuki hai (lekin process background mein
     // zinda tha), to pehle nayi window banao — warna user ko kuch dikhta hi nahi.
     if (!mainWindow || mainWindow.isDestroyed()) {
@@ -1356,8 +1356,8 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 app.on('before-quit', () => {
   isQuitting = true;
   // Failsafe: agar kisi wajah se quit atak jaaye (hung handler, file lock) to
-  // 3 second baad process zabardasti khatam — taaki background mein zinda na rahe.
-  setTimeout(() => { try { app.exit(0); } catch (_) { process.exit(0); } }, 3000).unref();
+  // Allow the WhatsApp browser close/recovery to release its profile first.
+  setTimeout(() => { try { app.exit(0); } catch (_) { process.exit(0); } }, 12000).unref();
   if (whatsappWindow && !whatsappWindow.isDestroyed()) {
     whatsappWindow.removeAllListeners('close');
     whatsappWindow.close();

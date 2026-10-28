@@ -1,5 +1,6 @@
 import { warmRegistrationNumbers } from "./patientRegistration";
 import { normalizeBill } from "./paymentLedger";
+import { smsCloudRow, SMS_REVIEW_STATUSES } from "./smsReview";
 import { fetchCompleteTable, OPERATIONAL_TABLES, resetCloudSchemaBackoff } from "./completeFetch";
 import { ensureCloudSession } from "./localSession";
 // ─────────────────────────────────────────────────────────────────────────
@@ -194,6 +195,11 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     }
     payload = stripLocalPrefixes(payload);
     payload = stripEmbeddedRelations(payload);
+    if (table === "sms_logs") {
+      payload = await smsCloudRow(payload);
+      if (payload.status !== m.payload.status && m.id !== undefined)
+        await queueUpdate(m.id, { payload: { ...m.payload, status: payload.status } });
+    }
     // ✅ FIX: Local-only fields Supabase ko mat bhejo — schema mein nahi hain
     delete payload._pendingSync;
     delete payload._localOnly;
@@ -236,6 +242,11 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     const cachedBill = table === "billing" ? (await cacheGetAll(table)).find(r => r.id === m.rowId) : null;
     let updatePayload = stripLocalPrefixes(table === "billing" ? normalizeBill(m.payload, cachedBill || {}) : { ...m.payload });
     updatePayload = stripEmbeddedRelations(updatePayload);
+    if (table === "sms_logs") {
+      updatePayload = await smsCloudRow({ ...updatePayload, id: m.rowId });
+      if (updatePayload.status !== m.payload.status && m.id !== undefined)
+        await queueUpdate(m.id, { payload: { ...m.payload, status: updatePayload.status } });
+    }
     delete updatePayload.id; // The mutation rowId owns identity; stale local IDs must not update the PK.
     delete updatePayload._pendingSync;
     delete updatePayload._localOnly;
@@ -361,9 +372,10 @@ export async function runSync(options:{retrySchema?:boolean}={}): Promise<{ sync
       if (blocked.has(key)) continue;
       // Never abandon durable work after a fixed number of failed requests.
       // Backoff is persisted, so restarting the app doesn't hammer the server.
-      const schemaBlocked=/schema cache|could not find the function|relation .*does not exist/i.test(m.lastError||"");
+      const schemaBlocked=/schema cache|could not find the function|relation .*does not exist|violates check constraint/i.test(m.lastError||"");
+      const repairableSms = m.table === "sms_logs" && ["insert", "update"].includes(m.op) && SMS_REVIEW_STATUSES.includes(m.payload?.status);
       const retryDelay = schemaBlocked?30*60*1000:Math.min(30000 * 2 ** Math.min(Math.max((m.retries || 0) - 1, 0), 4), 300000);
-      if (!(options.retrySchema&&schemaBlocked) && m.lastAttemptAt && Date.now() - m.lastAttemptAt < retryDelay) { blocked.add(key); continue; }
+      if (!repairableSms && !(options.retrySchema&&schemaBlocked) && m.lastAttemptAt && Date.now() - m.lastAttemptAt < retryDelay) { blocked.add(key); continue; }
 
       try {
         await applyMutation(m);

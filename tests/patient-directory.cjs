@@ -23,9 +23,9 @@ try {
  assert.equal(H.filterPatients(rows,'','khin',null).length,2);assert.equal(H.filterPatients(rows,'ram','','khinwara').length,1);assert.equal(H.filterPatients(rows,'','','').length,1);assert.equal(H.filterPatients(rows,'','khinwara','खिंवाड़ा').length,0);pass('combined village/name filters; no invented Hindi-English spelling match');
  const selected=H.filterPatients(rows,'','','khinwara');assert.deepEqual(H.uniqueSmsNumbers(selected),['9876543210']);assert.deepEqual(H.uniqueSmsNumbers(rows).sort(),['9123456780','9876543210']);pass('unique valid SMS numbers, invalid/dummy excluded, families not duplicated');
  assert.equal(H.filterPatients(rows.filter(p=>p.branch_id==='a'),'','',null).length,2);pass('branch selection applied before search and village counts');
- const handlers={}, {EventEmitter}=require('events'),app=new EventEmitter();app.getPath=()=>dir;app.setAsDefaultProtocolClient=()=>{};let authorized=false;
+ const handlers={}, {EventEmitter}=require('events'),app=new EventEmitter();app.quit=()=>{};app.getPath=()=>dir;app.setAsDefaultProtocolClient=()=>{};let authorized=false;
  const timer=global.setInterval;global.setInterval=()=>0;
- try{require('../pc-messaging.cjs').registerPcMessaging({app,BrowserWindow:function(){},ipcMain:{handle:(n,f)=>handlers[n]=f},dialog:{},shell:{},store,access:{getPrincipal:()=>authorized?{role:'admin'}:{role:'staff'}}});assert.throws(()=>handlers['patients:directory'](),/Administrator/);authorized=true;assert.equal(handlers['patients:directory']().length,4);}finally{global.setInterval=timer;app.emit('before-quit');}
+ try{require('../pc-messaging.cjs').registerPcMessaging({app,BrowserWindow:function(){},ipcMain:{handle:(n,f)=>handlers[n]=f},dialog:{},shell:{},store,access:{getPrincipal:()=>authorized?{role:'admin'}:{role:'staff'}}});assert.throws(()=>handlers['patients:directory'](),/Administrator/);authorized=true;assert.equal(handlers['patients:directory']().length,4);}finally{global.setInterval=timer;app.emit('before-quit',{preventDefault(){}});}
  pass('main-process patient directory rejects non-admin and returns local data for admin');
  console.log(passes+' patient directory checks passed');
 }finally{store.close();fs.rmSync(dir,{recursive:true,force:true});}

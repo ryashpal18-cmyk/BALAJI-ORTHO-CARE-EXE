@@ -19,6 +19,7 @@ files:
   - pc-messaging.cjs
   - pdf-renderer.cjs
   - whatsapp-service.cjs
+  - whatsapp-browser.cjs
   - messaging-log.cjs
   - family-profile.cjs
   - invoice-document.cjs

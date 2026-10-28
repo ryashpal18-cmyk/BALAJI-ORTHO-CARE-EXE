@@ -77,7 +77,16 @@ function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,acces
   const festivalTimer=setInterval(worker('festival',()=>festival.tick()),5000);
   app.on('before-quit',()=>clearInterval(festivalTimer));
   const timer=setInterval(worker('whatsapp',()=>service.tick()),15000);
-  app.on('before-quit',()=>{clearInterval(timer);service.stop();});
+  let shutdownStarted=false,shutdownDone=false;
+  app.on('before-quit',event=>{
+    clearInterval(timer);
+    if(shutdownDone)return;
+    event.preventDefault();
+    if(shutdownStarted)return;
+    shutdownStarted=true;
+    Promise.resolve().then(()=>service.stop()).catch(e=>report('WA-010','WhatsApp shutdown',e))
+      .finally(()=>{shutdownDone=true;app.quit();});
+  });
   return service;
 }
 module.exports={registerPcMessaging};
