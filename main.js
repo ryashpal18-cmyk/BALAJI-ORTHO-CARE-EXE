@@ -101,6 +101,7 @@ if (!gotSingleInstanceLock) {
       return;
     }
     if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.maximize();
     mainWindow.show();
     mainWindow.focus();
   });
@@ -579,6 +580,7 @@ async function runAutoSync() {
 // ─── CREATE WINDOW ────────────────────────────────────────────────────────────
 function createWindow() {
   mainWindow = new BrowserWindow({
+    show: false,
     width: 1400,
     height: 900,
     minWidth: 1100,
@@ -591,6 +593,12 @@ function createWindow() {
       nodeIntegration:  false,
       webSecurity:      true
     }
+  });
+
+  // Maximize before showing so startup uses the monitor's work area without flashing a small window.
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.maximize();
+    mainWindow.show();
   });
 
   Menu.setApplicationMenu(null);
