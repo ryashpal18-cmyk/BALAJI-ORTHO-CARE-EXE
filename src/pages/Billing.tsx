@@ -387,6 +387,7 @@ function BillingContent() {
   const [isSending, setIsSending] = useState(false);
   const creatingBill = useRef(false);
   const [billPage, setBillPage] = useState(1);
+  const [collectTarget,setCollectTarget]=useState<any>(null);
   const BILLS_PER_PAGE = 50;
   const [rangeMode, setRangeMode] = useState("today");
   const [fromDate, setFromDate] = useState(toLocalDateInput(new Date()));
@@ -1103,7 +1104,7 @@ function BillingContent() {
                           </td>
                           <td className="py-3 text-center">
                             <span className={cn("rounded px-2 py-1 text-xs",statusStyle[bill.status]||"")}>{bill.status}</span>
-                            {due>0 && <CollectPayment bill={bill}/>}
+                            {due>0 && <Button type="button" size="sm" variant="outline" onClick={()=>setCollectTarget(bill)}>भुगतान जमा</Button>}
 
                           </td>
                           <td className="py-3 text-right">
@@ -1208,6 +1209,7 @@ function BillingContent() {
 
   return (
       <div className="space-y-6 page-enter">
+        {collectTarget && <CollectPayment bill={collectTarget} initiallyOpen onClose={()=>setCollectTarget(null)}/>}
         {availableDraft && <div role="status" className="rounded border p-3">अधूरा बिल उपलब्ध है। <Button variant="outline" onClick={restoreDraft}>पिछला बिल खोलें</Button> <Button variant="ghost" onClick={()=>{clearBillDraft();setAvailableDraft(null);}}>Draft हटाएँ</Button></div>}{draftError && <p role="alert">{draftError}</p>}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div style={{

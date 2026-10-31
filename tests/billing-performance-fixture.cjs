@@ -10,6 +10,7 @@ async function buildFixture(root){
   '@/hooks/useIsAdmin':`export const useIsAdmin=()=>({isAdmin:true});`,
   '@/hooks/use-toast':`export const toast=()=>{};`,
   '@/integrations/supabase/client':`export const supabase={};`,
+  '@/lib/offlineQuery':`export const offlineUpdate=async()=>{window.fixture.writes++;return{}};`,
   '@/lib/offlineSync':`export const isOnline=async()=>false;`,
   '@/lib/clientLogger':`export const cLog={error(){},warn(){},info(){}};`,
   '@/pages/WhatsApp':`export const openWhatsAppWeb=()=>{window.fixture.writes++};`,
