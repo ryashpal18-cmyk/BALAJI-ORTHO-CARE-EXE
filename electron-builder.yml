@@ -20,6 +20,7 @@ files:
   - clinic-finance.cjs
   - patient-merge.cjs
   - backup-verify.cjs
+  - backup-shape.cjs
   - pdf-renderer.cjs
   - whatsapp-service.cjs
   - whatsapp-browser.cjs

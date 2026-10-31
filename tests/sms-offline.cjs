@@ -121,5 +121,14 @@ const config={apiUrl:'https://gateway.example.test/send',apiKey:'test-only',devi
  assert.equal(reviewRows.find(r=>r.id==='u').queue_id,7);assert.equal(reviewRows.find(r=>r.id==='u').unconfirmed,true);assert.equal(reviewRows.find(r=>r.id==='p').unconfirmed,false);
  console.log('PASS SMS Logs rows expose queue id and unconfirmed flag for the action buttons');
  for(const q of store.queueGetAll())store.queueRemove(q.id);
+
+ for(const q of store.queueGetAll())store.queueRemove(q.id);
+ store.cacheUpsertRow('patients',{id:'safe-patient',mobile:'919876543210'},'id');store.cacheUpsertRow('billing',{id:'safe-bill',patient_id:'safe-patient',amount:100,amount_paid:0,status:'Cancelled'},'id');
+ let obsoleteCalls=0;windowMock.electron.sendSMS=async()=>{obsoleteCalls++;return{ok:true}};
+ store.queueAdd({table:'sms_logs',op:'sms',payload:{messageId:'obsolete-sms',billing_id:'safe-bill',mobile:'919123456780',message:'Synthetic obsolete bill',smsType:'bill_saved'}});
+ const safeSync=load('src/lib/offlineSync.ts',['runSync'],{...db,ensureCloudSession:async()=>false,isValidMobile:()=>true,navigator:{onLine:true}});await safeSync.runSync();assert.equal(obsoleteCalls,0);assert.equal(store.cacheGetRow('sms_logs','obsolete-sms').status,'failed');
+ store.cacheUpsertRow('billing',{...store.cacheGetRow('billing','safe-bill'),status:'Pending'},'id');
+ store.queueAdd({table:'sms_logs',op:'sms',payload:{messageId:'old-phone-sms',billing_id:'safe-bill',mobile:'919123456780',message:'Synthetic old number',smsType:'bill_saved'}});await safeSync.runSync();assert.equal(obsoleteCalls,0);assert.equal(store.cacheGetRow('sms_logs','old-phone-sms').status,'failed');
+ console.log('PASS cancelled bill and obsolete recipient SMS never reach the transport; cancellation stays reviewable');
  store.close();fs.rmSync(testDir,{recursive:true,force:true});
 })().catch(e=>{console.error(e);try{store.close()}catch{};fs.rmSync(testDir,{recursive:true,force:true});process.exitCode=1});

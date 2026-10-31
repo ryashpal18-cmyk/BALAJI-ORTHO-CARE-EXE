@@ -183,7 +183,7 @@ function cacheMergeServer(table, row, idField = 'id') {
       const old = cacheGetRow(table, row[idField]) || cacheGetRow(table, 'local_' + id);
       if (old && !old.registration_number) cacheUpsertRow(table, { ...old, registration_number: row.registration_number }, idField);
     }
-    if (queueGetAll().some(m => m.table === table && [m.rowId,m.tempId].some(v => v && v.replace(/^local_/, '') === id))) return;
+    if (queueGetAll().some(m => queueTouches(m,table,id))) return;
     const existing = cacheGetRow(table, row[idField]) || cacheGetRow(table, 'local_' + id);
     if (existing?._pendingSync) return;
     cacheUpsertRow(table, { ...existing, ...row }, idField);
@@ -236,6 +236,7 @@ function cacheReplaceRowKey(table, oldId, newRow, idField) {
 
 function queueAdd(mutation) {
   mutation={...mutation,payload:villageRow(mutation.table,mutation.payload)};
+  if(mutation.expectedBill)mutation.payload={...mutation.payload,_syncExpectedBill:mutation.expectedBill};
   if(mutation.op==='update' && (mutation.expectedPaid!==undefined || mutation.expectedWorkflow)) mutation.payload={...mutation.payload,...(mutation.expectedPaid!==undefined?{_syncExpectedPaid:mutation.expectedPaid}:{}),...(mutation.expectedWorkflow?{_syncExpectedWorkflow:mutation.expectedWorkflow}:{})};
   const info = getDb().prepare(
     `INSERT INTO mutation_queue (table_name, op, payload, rowId, tempId, selectAfter, createdAt, retries, lastError, ownerUserId)
@@ -386,12 +387,36 @@ function commitBatch(items) {
   if (!Array.isArray(items) || !items.length || items.length > 500) throw new Error('Invalid transaction');
   return getDb().transaction(() => items.map(({mutation,row,idField}) => commitMutation(mutation,row,idField)))();
 }
+const canonical=v=>String(v||'').replace(/^local_/,'');
+const stable=v=>JSON.stringify(v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,JSON.parse(stable(v[k]??null))])):Array.isArray(v)?v.map(x=>JSON.parse(stable(x))):v??null);
+function queueTouches(m,table,id){return m.op==='clinic_finance'?(m.payload?.items||[]).some(i=>i.mutation.table===table&&canonical(i.mutation.rowId||i.mutation.tempId)===canonical(id)):m.table===table&&[m.rowId,m.tempId,m.payload?.id].some(v=>v&&canonical(v)===canonical(id));}
+function assertWritable(table,old,row,op){
+ if(op==='delete'){
+  if(queueGetAll().some(m=>m.op==='clinic_finance'&&queueTouches(m,table,old?.id)))throw Error('Finance sync pending है; Delete नहीं कर सकते');
+  if(table==='patients' && (cacheGetAll('billing').some(b=>canonical(b.patient_id)===canonical(old?.id)) || old?.workflow_data?.account?.length))throw Error('हिसाब वाले मरीज को Delete की जगह Archive करें');
+  if(table==='billing' && (Number(old?.amount_paid)||old?.payment_history?.length))throw Error('Receipt history सुरक्षित रखें; Refund / Cancel करें');
+ }
+ if(table==='physiotherapy_sessions'&&op!=='delete'){
+  const same=cacheGetAll(table).some(r=>canonical(r.id)!==canonical(row.id)&&canonical(r.patient_id)===canonical(row.patient_id)&&(row.fracture_case_id?canonical(r.fracture_case_id)===canonical(row.fracture_case_id):!r.fracture_case_id&&String(r.exercise_plan||'')===String(row.exercise_plan||''))&&Number(r.session_number)===Number(row.session_number));
+  if(same)throw Error('इस course का session पहले से सेव है');
+ }
+ if(table!=='billing'||op==='delete')return;
+ if(old&&String(old.status).toLowerCase()==='cancelled'&&(['amount','discount','amount_paid'].some(k=>Number(row[k]||0)!==Number(old[k]||0))||row.status!=='Cancelled'))throw Error('रद्द bill में बदलाव नहीं कर सकते');
+ if(row.status==='Cancelled'&&Number(row.amount_paid||0)!==0)throw Error('Cancel से पहले Refund करें');
+ if(old?.payment_history?.some(r=>!(row.payment_history||[]).some(x=>stable(x)===stable(r))))throw Error('Receipt history सुरक्षित रखें; नई correction entry जोड़ें');
+ const prior=new Map((old?.payment_history||[]).map(r=>[r.id,r]));
+ const dates=(row.payment_history||[]).filter(r=>stable(prior.get(r.id))!==stable(r)).map(r=>r.paid_at);
+ if(!old || ['amount','discount'].some(k=>Number(old[k]||0)!==Number(row[k]||0)))dates.push(row.created_at);
+ const closed=new Set(cacheGetAll('cash_book_days').filter(d=>d.status==='closed').map(d=>d.entry_date));
+ for(const d of dates){if(d&&Number.isFinite(Date.parse(d))&&closed.has(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(d))))throw Error('पहले उस cash day को Reopen करें');}
+}
 function commitMutation(mutation, row, idField = 'id') {
   return getDb().transaction(() => {
     let saved = row;
     if (mutation.op === 'update') {
       const existing = cacheGetRow(mutation.table, mutation.rowId);
       if (!existing) throw new Error('Record not available locally; refresh before editing');
+      if(mutation.expectedBill && Object.entries(mutation.expectedBill).some(([k,v])=>stable(existing[k]??null)!==stable(v)))throw Error('Bill changed; reopen before editing');
       if(mutation.expectedWorkflow && JSON.stringify(existing.workflow_data||{})!==JSON.stringify(mutation.expectedWorkflow))throw Error('Record changed; reopen before editing');
       if (mutation.table === 'billing' && mutation.expectedPaid !== undefined && Number(existing.amount_paid || 0) !== mutation.expectedPaid) throw new Error('Payment changed; reopen bill before collecting');
       saved = { ...existing, ...row, [idField]: mutation.rowId, _pendingSync: true };
@@ -402,12 +427,16 @@ function commitMutation(mutation, row, idField = 'id') {
       }
     }
     if(mutation.table==='billing' && mutation.op==='insert' && saved.invoice_number==null){
-      const scope=metaGet('invoice-number:scope');const pools=metaGet('invoice-number:pools')||[];
-      for(const pool of pools.filter(p=>p.scope===scope)){
+      const scope=metaGet('invoice-number:verified-scope')||metaGet('invoice-number:scope');const pools=metaGet('invoice-number:pools')||[];
+      for(const pool of pools.filter(p=>p.scope===scope&&(!metaGet('invoice-number:owner')||!mutation.ownerUserId||mutation.ownerUserId===metaGet('invoice-number:owner')))){
         const key='invoice-number:used:'+pool.requestId,used=Number(metaGet(key)||0);
         if(used<pool.numbers.length){saved={...saved,invoice_number:pool.numbers[used]};metaSet(key,used+1);break;}
       }
       mutation={...mutation,payload:{...mutation.payload,...(saved.invoice_number?{invoice_number:saved.invoice_number}:{})}};
+    }
+    if(mutation.table==='billing'&&mutation.op==='insert'){
+      saved={...saved,workflow_data:{...saved.workflow_data,invoice_label:saved.workflow_data?.invoice_label||(saved.invoice_number?'BILL-'+String(saved.invoice_number).padStart(6,'0'):'INV-'+canonical(saved.id).toUpperCase())}};
+      mutation={...mutation,payload:{...mutation.payload,workflow_data:saved.workflow_data}};
     }
     if (mutation.table === 'patients' && mutation.op === 'insert') {
       saved = registration.allocate(module.exports, saved);
@@ -418,12 +447,19 @@ function commitMutation(mutation, row, idField = 'id') {
       if (Object.hasOwn(row, 'registration_number') && row.registration_number !== existing.registration_number)
         throw new Error('Registration number cannot be edited');
     }
+    assertWritable(mutation.table,cacheGetRow(mutation.table,mutation.rowId||saved?.id),saved,mutation.op);
+    if(mutation.op==='sms'&&mutation.payload?.billing_id){const bill=cacheGetRow('billing',mutation.payload.billing_id);if(bill){const label=bill.workflow_data?.invoice_label||(bill.invoice_number?'BILL-'+String(bill.invoice_number).padStart(6,'0'):'INV-'+canonical(bill.id).toUpperCase());const message=String(mutation.payload.message).replace(/बिल नं\.: INV-[^\n]+/, 'बिल नं.: '+label);saved={...saved,message};mutation={...mutation,payload:{...mutation.payload,message}};}}
     if (mutation.op === 'delete') cascadeLocalDelete(mutation.table, mutation.rowId);
     else cacheUpsertRow(mutation.table, saved, idField);
     queueAdd(mutation);
     return saved;
   })();
 }
+function acknowledgeFinanceItem(table,id,queueId){return getDb().transaction(()=>{
+ if(queueGetAll().some(m=>Number(m.id)>Number(queueId)&&queueTouches(m,table,id)))return false;
+ const row=cacheGetRow(table,id);if(!row)return false;
+ cacheUpsertRow(table,{...row,_pendingSync:false},'id');metaSet('cloud:verified:'+table+':'+canonical(id),new Date().toISOString());return true;
+})();}
 function commitFinance(items, requestId, result, ownerUserId) {
  return getDb().transaction(()=>{
   if(metaGet('finance:done:'+requestId))return;
@@ -561,6 +597,7 @@ module.exports = {
   correctApprovedVillages, setVillageNormalizer,
   patientDirectoryRows,
   commitFinance,
+  acknowledgeFinanceItem,
   monthlyAccountRows, patientStatementRows, diagnosticSnapshot, authorizedBatch, commitBatch, commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
   init, close,
   cacheGetAll, cacheGetRow, cacheSetRows, cacheReplaceTable, cacheUpsertRow, cacheDeleteRow, cacheReplaceRowKey,

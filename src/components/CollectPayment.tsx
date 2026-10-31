@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { toast } from "@/hooks/use-toast";
 
 export function CollectPayment({ bill, full = false, initiallyOpen = false, onClose }: { bill: any; full?: boolean; initiallyOpen?: boolean; onClose?: () => void }) {
-  const due = Math.max(Number(bill.amount || 0) - Number(bill.discount || 0) - Number(bill.amount_paid || 0), 0);
+  const due = bill.status==="Cancelled" ? 0 : Math.max(Number(bill.amount || 0) - Number(bill.discount || 0) - Number(bill.amount_paid || 0), 0);
   const [open, setOpen] = useState(initiallyOpen);
   const [amount, setAmount] = useState(full ? String(due) : "");
   const [mode, setMode] = useState("Cash");
@@ -24,7 +24,7 @@ export function CollectPayment({ bill, full = false, initiallyOpen = false, onCl
       if(mode==='Cash + UPI'){
         const finance=(window as any).electron?.finance;if(!finance)throw Error('नया Windows EXE चाहिए');
         const p=await finance.preview(bill.patient_id);await finance.apply({requestId:crypto.randomUUID(),patientId:bill.patient_id,billId:bill.id,action:'collect',amount:Number(amount),mode:'Cash',split:{cash:Number(cash)},fingerprint:p.fingerprint});
-        return await cacheGetRow('billing',bill.id);
+        return {...await cacheGetRow('billing',bill.id),patients:bill.patients};
       }
       const receiptId = crypto.randomUUID();
       const saved = await offlineUpdate("billing", bill.id, { _collectAmount: Number(amount), _receiptId: receiptId,

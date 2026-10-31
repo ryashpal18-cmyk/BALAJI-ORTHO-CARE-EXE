@@ -1,3 +1,4 @@
+import { validCalendarDate } from "./followupState";
 import { queryClient } from "./queryClient";
 import { withPaymentHistory, normalizeBill } from "./paymentLedger";
 import { commitMutation, commitBatch } from "./offlineDb";
@@ -63,11 +64,11 @@ export async function offlineFetchScoped<T = any>(table: string, fetcher: () => 
 export async function offlineInsert(table: string, payload: any, opts: { idField?: string } = {}) {
   const idField = opts.idField || "id";
   const rowId = payload[idField] || tempId();
-  return serialize(`${table}::${rowId}`, async () => {
+  return serialize(table === "physiotherapy_sessions" ? `${table}::${String(payload.patient_id).replace(/^local_/, "")}::${payload.fracture_case_id || payload.exercise_plan || "default"}` : `${table}::${rowId}`, async () => {
     if (table === "physiotherapy_sessions") {
       const n=Number(payload.session_number), total=Number(payload.total_sessions), pain=Number(payload.pain_scale);
       if(!Number.isInteger(n)||!Number.isInteger(total)||n<1||total<1||n>total||!Number.isFinite(pain)||pain<0||pain>10) throw new Error("सही session, total और pain 0–10 भरें");
-      const same=(await cacheGetAll(table)).some(r=>String(r.patient_id).replace(/^local_/,'')===String(payload.patient_id).replace(/^local_/,'') && r.exercise_plan===payload.exercise_plan && Number(r.session_number)===n);
+      const same=(await cacheGetAll(table)).some(r=>String(r.patient_id).replace(/^local_/,'')===String(payload.patient_id).replace(/^local_/,'') && (payload.fracture_case_id ? String(r.fracture_case_id).replace(/^local_/,'')===String(payload.fracture_case_id).replace(/^local_/,'') : !r.fracture_case_id && r.exercise_plan===payload.exercise_plan) && Number(r.session_number)===n);
       if(same) throw new Error("इस मरीज का यह session पहले से सेव है। नया course हो तो अलग exercise plan लिखें।");
     }
     if (table === "billing") payload = normalizeBill(payload);
@@ -97,6 +98,7 @@ export async function offlineUpdate(table: string, rowId: string, updates: any, 
       throw new Error("इस बिल का भुगतान बदल गया है। दोबारा खोलकर राशि जाँचें।");
     if (table === "billing" && _collectAmount !== undefined) {
       const amount = Number(_collectAmount);
+      if (existing.status === "Cancelled") throw new Error("रद्द bill पर भुगतान नहीं ले सकते");
       const due = Math.max(Number(existing.amount || 0) - Number(existing.discount || 0) - Number(existing.amount_paid || 0), 0);
       if (!Number.isFinite(amount) || amount <= 0 || amount > due) throw new Error("जमा राशि बकाया से अधिक या शून्य नहीं हो सकती");
       fields.amount_paid = Math.round((Number(existing.amount_paid || 0) + amount) * 100) / 100;
@@ -104,7 +106,8 @@ export async function offlineUpdate(table: string, rowId: string, updates: any, 
     if(_workflowPatch) fields.workflow_data={...existing.workflow_data,..._workflowPatch};
     let changes = table === "billing" ? normalizeBill(fields, existing) : { ...fields };
     if (table === "billing") changes = withPaymentHistory(existing, changes, _receiptId || tempId().slice(6), new Date().toISOString());
-    const item = { mutation: { table, op: "update", rowId, payload: changes, ...(_workflowPatch ? {expectedWorkflow:existing.workflow_data||{}} : {}), ...(_expectedPaid !== undefined ? { expectedPaid: _expectedPaid } : {}) }, row: changes, idField: opts.idField || "id" };
+    const expectedBill=table==="billing"?Object.fromEntries(["amount","discount","amount_paid","status","patient_id","payment_history"].map(k=>[k,existing[k]??null])):undefined;
+    const item = { mutation: { table, op: "update", rowId, payload: changes, ...(expectedBill?{expectedBill}:{}), ...(_workflowPatch ? {expectedWorkflow:existing.workflow_data||{}} : {}), ...(_expectedPaid !== undefined ? { expectedPaid: _expectedPaid } : {}) }, row: changes, idField: opts.idField || "id" };
     let saved;
     if (table === "billing") {
       const auditId = tempId();
@@ -127,14 +130,14 @@ export async function offlineDelete(table: string, rowId: string) {
 
 
 export async function saveFollowUpDates(caseId: string, followup: string, removal: string) {
-  for (const date of [followup, removal]) if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)))) throw new Error("सही तारीख चुनें");
+  for (const date of [followup, removal]) if (date && !validCalendarDate(date)) throw new Error("सही तारीख चुनें");
   return serialize("fracture_cases::" + caseId, async () => {
     const c = await cacheGetRow("fracture_cases", caseId);
     if (!c) throw new Error("केस डिवाइस पर उपलब्ध नहीं है");
     const patient = await cacheGetRow("patients", c.patient_id);
     if (!patient?.branch_id) throw new Error("मरीज की branch चुनें");
-    const now = new Date().toISOString(), changes = { next_followup_date: followup || null, workflow_data:{...c.workflow_data,followup_state:"तय है"}, updated_at: now };
-    const items: any[] = [{ mutation:{table:"fracture_cases", op:"update", rowId:c.id, payload:changes}, row:changes }];
+    const now = new Date().toISOString(), changes = { next_followup_date: followup || null, workflow_data:{...c.workflow_data,followup_state:"तय है",followup_for:followup||null,followup_history:[...(c.workflow_data?.followup_history||[]),...(c.workflow_data?.followup_checked_at?[{date:c.workflow_data.followup_for||c.next_followup_date,state:c.workflow_data.followup_state,checked_at:c.workflow_data.followup_checked_at}]:[])],followup_checked_at:null}, updated_at: now };
+    const items: any[] = [{ mutation:{table:"fracture_cases", op:"update", rowId:c.id, expectedWorkflow:c.workflow_data||{}, payload:changes}, row:changes }];
     const notes = "cast-removal:" + String(c.id).replace(/^local_/, "");
     const existing = (await cacheGetAll("appointments")).find(a => a.notes === notes);
     if (removal || existing) {

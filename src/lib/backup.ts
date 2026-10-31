@@ -1,3 +1,4 @@
+import { validateBackupShape } from "./backupShape";
 import { captureAttachments, restoreAttachmentData, compactAttachmentBackup } from "./attachmentBackup";
 import { fetchCompleteTable, OPERATIONAL_TABLES } from "./completeFetch";
 import { getLocalSnapshot, restoreLocalSnapshot } from "./offlineDb";
@@ -32,6 +33,7 @@ function recordBackupResult(result: BackupResult): BackupResult {
 }
 export function inspectBackup(json: string) {
   const backup = JSON.parse(json);
+  validateBackupShape(backup);
   if (![2,3].includes(backup.formatVersion) || !backup.tables || !Array.isArray(backup.localSnapshot?.queue)) throw new Error("Version 2/3 JSON backup required");
   if(backup.formatVersion===3&&(backup.attachmentFiles?.version!==2||!Array.isArray(backup.attachmentFiles.files)||!Array.isArray(backup.attachmentFiles.missing)))throw new Error('Version 3 photo archive missing or invalid');
   const tables = Object.values(backup.tables);
@@ -107,6 +109,7 @@ function parkRestoredMessages(backup:any) {
 }
 export async function restoreBackup(json: string) {
   inspectBackup(json);
+  if((window as any).electron?.verifyBackup)await (window as any).electron.verifyBackup(json);
   const currentData = await getLocalSnapshot();
   if (currentData.queue.length || Object.entries(currentData.cache).some(([table, rows]) => !["branches", "profiles", "user_roles"].includes(table) && (rows as any[]).length))
     throw new Error("Restore केवल खाली नए डिवाइस पर करें। मौजूदा मरीज और pending डेटा सुरक्षित है।");

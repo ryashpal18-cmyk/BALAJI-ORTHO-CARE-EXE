@@ -181,14 +181,16 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
 
 
   if(m.op==='clinic_finance') {
-    const items=m.payload.items.map((item:any)=>({...item,mutation:{...item.mutation,rowId:item.mutation.rowId?.replace(/^local_/,''),tempId:item.mutation.tempId?.replace(/^local_/,''),expectedPatient:item.mutation.expectedPatient?.replace(/^local_/,''),payload:stripEmbeddedRelations(stripLocalPrefixes(item.mutation.payload))},row:undefined}));
+    const items=m.payload.items.map((item:any)=>({...item,mutation:{...item.mutation,rowId:item.mutation.rowId?.replace(/^local_/,''),tempId:item.mutation.tempId?.replace(/^local_/,''),expectedBill:item.mutation.expectedBill ? stripLocalPrefixes(item.mutation.expectedBill) : undefined,expectedPatient:item.mutation.expectedPatient?.replace(/^local_/,''),payload:stripEmbeddedRelations(stripLocalPrefixes(item.mutation.payload))},row:undefined}));
     // A bundle waits for preceding ordinary inserts/updates of any of its records.
     if(latestQueue.some(q=>q.id!==m.id && Number(q.id)<Number(m.id) && items.some((i:any)=>i.mutation.table===q.table && [q.rowId,q.tempId].some(id=>id&&id.replace(/^local_/,'')===(i.mutation.rowId||i.mutation.tempId)))))throw Error('PENDING_PARENT_INSERT');
     const {data,error}=await supabase.rpc('save_clinic_finance' as any,{p_request:m.payload.requestId,p_items:items} as any);
     if(error)throw error;if(data!==true)throw Error('Finance transaction not acknowledged');
     for(const item of m.payload.items){
       const id=item.mutation.rowId||item.mutation.tempId;
-      const later=latestQueue.some(q=>Number(q.id)>Number(m.id) && (q.rowId===id||q.tempId===id||q.op==='clinic_finance'&&q.payload.items.some((i:any)=>(i.mutation.rowId||i.mutation.tempId)===id)));
+      const later=(await queueGetAll()).some(q=>Number(q.id)>Number(m.id) && touches(q,item.mutation.table,id));
+      const ack=(window as any).electron?.offline?.ackFinance;
+      if(ack){await ack({table:item.mutation.table,id,queueId:m.id});continue;}
       if(!later){const row=await cacheGetRow(item.mutation.table,id);if(row)await cacheUpsertRow(item.mutation.table,{...row,_pendingSync:false});await metaSet("cloud:verified:"+item.mutation.table+":"+String(id).replace(/^local_/,""),new Date().toISOString());}
     }
     return;
@@ -265,16 +267,18 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
       if (updatePayload.status !== m.payload.status && m.id !== undefined)
         await queueUpdate(m.id, { payload: { ...m.payload, status: updatePayload.status } });
     }
-    const expectedPaid=m.payload?._syncExpectedPaid,expectedWorkflow=m.payload?._syncExpectedWorkflow;
+    const expectedPaid=m.payload?._syncExpectedPaid,expectedWorkflow=m.payload?._syncExpectedWorkflow,expectedBill=m.payload?._syncExpectedBill;
+    delete updatePayload._syncExpectedBill;
     delete updatePayload._syncExpectedPaid;delete updatePayload._syncExpectedWorkflow;
     delete updatePayload.id; // The mutation rowId owns identity; stale local IDs must not update the PK.
     delete updatePayload._pendingSync;
     delete updatePayload._localOnly;
     let request=supabase.from(table).update(updatePayload).eq("id", m.rowId);
     if(expectedPaid!==undefined)request=request.eq('amount_paid',expectedPaid);
+    if(expectedBill)for(const [k,v]of Object.entries(expectedBill)) request=v==null?request.is(k,null):request.eq(k,typeof v==='object'?JSON.stringify(v):v);
     if(expectedWorkflow!==undefined)request=request.eq('workflow_data',JSON.stringify(expectedWorkflow));
     let {data:serverRow,error}=await request.select().single();
-    if(error && (expectedPaid!==undefined||expectedWorkflow!==undefined)){
+    if(error && (expectedPaid!==undefined||expectedWorkflow!==undefined||expectedBill!==undefined)){
       const current=await supabase.from(table).select('*').eq('id',m.rowId).single();
       if(!current.error && Object.keys(updatePayload).filter(k=>k!=='updated_at').every(k=>stable((current.data as any)?.[k])===stable(updatePayload[k]))){serverRow=current.data;error=null;}
       else throw Error('SYNC-CONFLICT: Cloud पर हिसाब बदल गया। PC की entry सुरक्षित है; मिलान करके निर्णय लें।');
@@ -314,6 +318,12 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     if(person?.workflow_data?.sms===false){
       const id=m.payload.messageId||crypto.randomUUID();const row={id,patient_name:patientName||'',mobile,message,status:'failed',sms_type:smsType||'bill_saved',sent_at:m.createdAt};
       await commitMutation({table:'sms_logs',op:'insert',tempId:id,payload:row},row);cLog.info('sync','SMS cancelled by patient preference');return;
+    }
+    if(m.payload.billing_id && (!bill || !person || String(bill.status).toLowerCase()==='cancelled' && smsType==='bill_saved' || String(person.mobile||'').replace(/\D/g,'').slice(-10)!==String(mobile||'').replace(/\D/g,'').slice(-10))){
+      const id=m.payload.messageId||crypto.randomUUID();
+      const row={id,patient_name:patientName||'',mobile,message,status:'failed',sms_type:smsType||'bill_saved',sent_at:m.createdAt};
+      await commitMutation({table:'sms_logs',op:'insert',tempId:id,payload:row},row);
+      await metaSet('sms:cancelled:'+id,'मरीज/नंबर बदला या bill रद्द हुआ; पुराना संदेश नहीं भेजा गया');return;
     }
     // Invalid legacy entries must stay reviewable, never be acknowledged as sent.
     if (!isValidMobile(mobile)) throw new Error("Invalid SMS recipient; correct or cancel this queued message");

@@ -19,5 +19,8 @@ export function dueAge(bill: any, today: string) {
 }
 export const outstandingBills = (bills: any[]) => bills.filter(b => billDue(b) > 0);
 export function parseSavedReport(value: unknown): any | null {
-  try { const data = typeof value === 'string' ? JSON.parse(value) : value; return data && typeof data === 'object' && !Array.isArray(data) ? data : null; } catch { return null; }
+  try { const data = typeof value === 'string' ? JSON.parse(value) : value; if(!data || typeof data!=='object' || Array.isArray(data))return null;
+    const text=(v:any)=>v==null || typeof v==='string';
+    if(!['bodyPartDetected','studyType','urgency','impression','recommendations'].every(k=>text(data[k])))return null;
+    if(data.findings!=null && (typeof data.findings!=='object'||Array.isArray(data.findings)||!Object.values(data.findings).every(text)))return null;return data; } catch { return null; }
 }

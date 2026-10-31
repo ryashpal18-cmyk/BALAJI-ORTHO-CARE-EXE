@@ -55,7 +55,7 @@ export const xrayAmount = (bill: any) => xrayLines(bill).reduce((sum, s) => sum 
 
 /** Sirf tab commission banta hai jab bill par koi registered (non-default) doctor ho. */
 export function billCommission(bill: any): number {
-  if (!bill?.doctor_id) return 0;
+  if (!bill?.doctor_id || String(bill.status).toLowerCase()==="cancelled") return 0;
   const pct = Number(bill.doctor_commission_percent ?? DEFAULT_COMMISSION_PERCENT);
   if (!Number.isFinite(pct) || pct <= 0) return 0;
   return Math.round(xrayAmount(bill) * pct) / 100;
