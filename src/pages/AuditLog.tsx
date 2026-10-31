@@ -1,3 +1,4 @@
+import { businessDate } from '@/lib/businessDate';
 import { useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,7 +22,7 @@ export default function AuditLog() {
   const [search, setSearch] = useState("");
 
   const [from,setFrom]=useState(""),[to,setTo]=useState(""),[page,setPage]=useState(0);
-  const filtered = logs.filter(l => (!from || l.created_at.slice(0,10)>=from) && (!to || l.created_at.slice(0,10)<=to)).filter((l) =>
+  const filtered = logs.filter(l => (!from || businessDate(l.created_at)>=from) && (!to || businessDate(l.created_at)<=to)).filter((l) =>
     `${l.actor_name} ${l.module} ${l.action} ${l.description || ""}`
       .toLowerCase()
       .includes(search.toLowerCase())

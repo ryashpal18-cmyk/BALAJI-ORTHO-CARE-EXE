@@ -1,6 +1,8 @@
 'use strict';
 const {app,BrowserWindow}=require('electron'),assert=require('node:assert/strict'),fs=require('fs'),path=require('path'),os=require('os');
 const M=require('../monthly-report.cjs');const dir=fs.mkdtempSync(path.join(os.tmpdir(),'balaji-monthly-native-'));app.setPath('userData',path.join(dir,'profile'));let win;const timer=setTimeout(()=>app.exit(1),45000);
+// Keep the process alive between the PDF window and the React UI window.
+app.on('window-all-closed',()=>{});
 app.whenReady().then(async()=>{try{
   const patients=Array.from({length:70},(_,i)=>({id:'p-'+i,name:'Synthetic <script>Patient '+i+'</script>',mobile:'9876543210'}));
   const bills=patients.map((p,i)=>({id:'bill-'+i,patient_id:p.id,amount:1000,discount:100,amount_paid:200,service:'X-ray:1000',created_at:'2026-10-05T05:00:00Z',payment_history:[{id:'receipt-'+i,amount:200,paid_at:'2026-10-06T05:00:00Z',payment_mode:'UPI'}]}));

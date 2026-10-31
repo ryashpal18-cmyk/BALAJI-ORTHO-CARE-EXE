@@ -4,6 +4,8 @@ const {app,BrowserWindow}=require('electron'),assert=require('node:assert/strict
 const {buildStatement,statementDocument}=require('../patient-statement.cjs');
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'balaji-statement-render-'));app.setPath('userData',path.join(dir,'profile'));
 let win;const timer=setTimeout(()=>app.exit(1),45000);
+// Keep the process alive between the PDF window and the React UI window.
+app.on('window-all-closed',()=>{});
 app.whenReady().then(async()=>{try{
   const patient={id:'synthetic-patient',name:'Synthetic <script>Patient</script>',mobile:'9876543210'};
   const bills=Array.from({length:70},(_,i)=>({id:'synthetic-bill-'+i,patient_id:patient.id,amount:1000,discount:100,amount_paid:200,service:'X-ray:1000',created_at:'2026-10-01T06:00:00Z',payment_history:[{id:'synthetic-receipt-'+i,amount:200,paid_at:'2026-10-02T06:00:00Z',payment_mode:'UPI'}]}));
