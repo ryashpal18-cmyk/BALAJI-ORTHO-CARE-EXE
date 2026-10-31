@@ -1,3 +1,6 @@
+import { uniquePatientCount } from '@/lib/reportMetrics';
+import { useBusinessToday } from '@/hooks/useBusinessToday';
+import { Button } from '@/components/ui/button';
 import { collectionRows } from "@/lib/paymentLedger";
 import { businessDate } from "@/lib/businessDate";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -19,9 +22,9 @@ const COLORS = [
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 // ── Real data fetch karna ─────────────────────────────────────────────────
-function useAnalyticsData() {
+function useAnalyticsData(today: string) {
   return useQuery({
-    queryKey: ["analytics"],
+    queryKey: ["analytics", today],
     staleTime: 5 * 60 * 1000, // 5 min cache
     queryFn: async () => {
       // The same complete local ledger as Billing; paginated refresh happens in the background.
@@ -30,7 +33,7 @@ function useAnalyticsData() {
         readBranchTable('physiotherapy_sessions', null),
       ]);
 
-      const receipts = collectionRows(bills);
+      const receipts = collectionRows(bills,patients);
 
       // ── Monthly patients (last 6 months) ──────────────────────────────
       const now      = new Date();
@@ -40,10 +43,10 @@ function useAnalyticsData() {
       });
 
       const monthlyPatients = last6.map(({ year, month }) => {
-        const count = bills.filter((b: any) => {
+        const count = uniquePatientCount(bills.filter((b: any) => {
           const d = new Date(b.created_at);
           return d.getFullYear() === year && d.getMonth() === month;
-        }).length;
+        }));
         return { month: MONTHS[month], patients: count };
       });
 
@@ -69,7 +72,7 @@ function useAnalyticsData() {
         })
         .reduce((sum: number, b: any) => sum + Number(b.amount_paid || 0), 0);
 
-      const pendingDues = bills.reduce((sum: number, b: any) => {
+      const pendingDues = bills.filter(b=>b.status!=="Cancelled").reduce((sum: number, b: any) => {
         const due = Number(b.amount || 0) - Number(b.discount || 0) - Number(b.amount_paid || 0);
         return sum + Math.max(due, 0);
       }, 0);
@@ -116,7 +119,9 @@ function useAnalyticsData() {
 }
 
 export default function Analytics() {
-  const { data, isLoading } = useAnalyticsData();
+  const today = useBusinessToday();
+  const { data, isLoading, isError, refetch } = useAnalyticsData(today);
+  if (isError) return <DashboardLayout><p role="alert">डेटा लोड नहीं हुआ। शून्य को वास्तविक हिसाब न मानें।</p><Button onClick={() => void refetch()}>दोबारा कोशिश करें</Button></DashboardLayout>;
 
   const fmt = (n: number) =>
     n >= 100000 ? `₹${(n / 100000).toFixed(1)}L` :

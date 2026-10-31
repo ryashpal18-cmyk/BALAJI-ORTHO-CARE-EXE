@@ -24,6 +24,13 @@ function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,acces
   const service=require('./whatsapp-service.cjs').createWhatsAppService({store,root:path.join(app.getPath('userData'),'clinic-messaging'),allowed,renderPdf,logger});
   const admin=fn=>(...args)=>{if(!allowed())throw Error('Administrator login required');return fn(...args);};
   ipcMain.handle('patients:directory',admin(()=>store.patientDirectoryRows()));
+  ipcMain.handle('backup:verify',admin((_e,json)=>require('./backup-verify.cjs').verifyBackup(json)));
+  const merge=require('./patient-merge.cjs');
+  ipcMain.handle('patients:mergePreview',admin((_e,input)=>merge.mergePreview(store,input.sourceId,input.targetId)));
+  ipcMain.handle('patients:mergeApply',admin((_e,input)=>merge.mergeApply(store,input,access.getPrincipal()?.name||'Admin',access.getPrincipal()?.userId)));
+  const finance=require('./clinic-finance.cjs');
+  ipcMain.handle('finance:preview',admin((_e,id)=>finance.financePreview(store,id)));
+  ipcMain.handle('finance:apply',admin((_e,input)=>finance.financeApply(store,input,access.getPrincipal()?.name||'Admin',access.getPrincipal()?.userId)));
   ipcMain.handle('family:list',admin(()=>familyGroups(store.cacheGetAll('patients'))));
   ipcMain.handle('family:profile',admin((_e,id)=>familyRecords(store,id)));
   ipcMain.handle('family:pending',admin(()=>{const id=pending;pending=null;return id;}));

@@ -1,4 +1,4 @@
-export type DirectoryPatient = { id: string; name?: string; mobile?: string; address?: string; age?: number; gender?: string; branch_id?: string; _pendingSync?: boolean };
+export type DirectoryPatient = { id: string; registration_number?: string; workflow_data?: any; name?: string; mobile?: string; address?: string; age?: number; gender?: string; branch_id?: string; _pendingSync?: boolean };
 export function searchText(value: unknown): string {
   return String(value ?? "").normalize("NFKC").replace(/[०-९]/g, c => String(c.charCodeAt(0) - 0x966)).trim().replace(/\s+/g, " ").toLocaleLowerCase("hi-IN");
 }
@@ -27,7 +27,7 @@ export function filterPatients(rows: DirectoryPatient[], query: string, village:
     if (v && !address.includes(v)) return false;
     if (!q) return true;
     return phoneQuery ? searchText(p.mobile).replace(/\D/g, "").includes(digits) || smsMobile(p.mobile).includes(digits)
-      : searchText(p.name).includes(q);
+      : searchText(p.name).includes(q) || searchText(p.registration_number).includes(q);
   }).sort((a,b) => searchText(a.name).localeCompare(searchText(b.name),"hi") || a.id.localeCompare(b.id));
 }
 export function uniqueSmsNumbers(rows: DirectoryPatient[]) {

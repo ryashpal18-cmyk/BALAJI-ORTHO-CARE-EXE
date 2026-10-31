@@ -1,3 +1,4 @@
+import { fetchCompleteTable } from "@/lib/completeFetch";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { isOnline } from "@/lib/offlineSync";
@@ -48,23 +49,15 @@ export async function logAudit(params: {
 // ── Audit log list — Settings/Reports page me dikhane ke liye ──
 export function useAuditLogs(filters?: { module?: string; limit?: number }) {
   return useQuery({
-    queryKey: ["audit-logs", filters?.module || "all", filters?.limit || 200],
+    queryKey: ["audit-logs", filters?.module || "all", filters?.limit || Number.MAX_SAFE_INTEGER],
     staleTime: 0,
     refetchOnMount: true,
     queryFn: async () => {
       const rows = await offlineFetch<AuditLogEntry>("audit_logs", async () => {
-        let query = supabase
-          .from("audit_logs" as any)
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(filters?.limit || 200);
-        if (filters?.module) query = query.eq("module", filters.module);
-        const { data, error } = await query;
-        if (error) throw error;
-        return (data || []) as any as AuditLogEntry[];
+        return await fetchCompleteTable("audit_logs") as AuditLogEntry[];
       });
       const filtered = filters?.module ? rows.filter((r: any) => r.module === filters.module) : rows;
-      return [...filtered].sort((a: any, b: any) => (b.created_at || "").localeCompare(a.created_at || "")).slice(0, filters?.limit || 200);
+      return [...filtered].sort((a: any, b: any) => (b.created_at || "").localeCompare(a.created_at || "")).slice(0, filters?.limit || Number.MAX_SAFE_INTEGER);
     },
   });
 }

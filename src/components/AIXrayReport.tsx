@@ -96,7 +96,7 @@ export default function AIXrayReport() {
 
     const prompt = `You are a senior expert radiologist at Balaji Ortho Care Center. Analyze this X-ray image carefully.
 
-Patient: ${name || "Not provided"}, Age: ${age || "?"} years, Gender: ${gender}
+Patient: ${name || "Not provided"}, Age: ${age ?? "?"} years, Gender: ${gender}
 
 Body Region: ${body}, Projection: ${view}
 
@@ -146,7 +146,7 @@ Respond ONLY with valid JSON no markdown no extra text:
         await offlineInsert("xray_reports", {
           patient_name: name || "Unknown",
 
-          patient_age: age || null,
+          patient_age: age ?? null,
 
           patient_gender: gender,
 
@@ -306,7 +306,7 @@ Respond ONLY with valid JSON no markdown no extra text:
               <b>Patient:</b> {name || "Unknown"}
             </p>
             <p>
-              <b>Age/Gender:</b> {age || "—"} / {gender}
+              <b>Age/Gender:</b> {age ?? "—"} / {gender}
             </p>
             <p>
               <b>Study:</b> {report.studyType || "—"}

@@ -1,3 +1,5 @@
+import { serviceTotals, outstandingBills } from '@/lib/reportMetrics';
+import { useBusinessToday } from '@/hooks/useBusinessToday';
 import { collectionRows } from "@/lib/paymentLedger";
 import { businessDate } from "@/lib/businessDate";
 import { useMemo } from "react";
@@ -13,7 +15,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from "recharts";
-import { useBills } from "@/hooks/useDatabase";
+import { useBills, usePatients } from "@/hooks/useDatabase";
 
 const COLORS = [
   "hsl(210, 80%, 35%)", "hsl(185, 65%, 45%)", "hsl(142, 70%, 40%)",
@@ -35,10 +37,12 @@ export default function RevenueDashboard() {
   const { data: bills, isLoading } = useBills();
   const navigate = useNavigate();
 
+  const {data:patients=[]}=usePatients(true);
+  const today = useBusinessToday();
   const stats = useMemo(() => {
     const all = bills || [];
-    const receipts = collectionRows(all);
-    const today = businessDate();
+    const receipts = collectionRows(all,patients);
+
     const thisMonth = businessDate().slice(0, 7);
     const days = getLast30Days();
 
@@ -50,10 +54,9 @@ export default function RevenueDashboard() {
       .filter((b: any) => businessDate(b.created_at || "").startsWith(thisMonth))
       .reduce((s: number, b: any) => s + Number(b.amount_paid || 0), 0);
 
-    const totalCollected = all.reduce((s: number, b: any) => s + Number(b.amount_paid || 0), 0);
+    const totalCollected = receipts.reduce((s: number, b: any) => s + Number(b.amount_paid || 0), 0);
 
-    const outstanding = all
-      .filter((b: any) => ["Pending", "Partial"].includes(b.status))
+    const outstanding = outstandingBills(all)
       .reduce((s: number, b: any) => s + Math.max(Number(b.amount || 0) - Number(b.discount || 0) - Number(b.amount_paid || 0), 0), 0);
 
     // Daily revenue — last 30 days
@@ -76,23 +79,14 @@ export default function RevenueDashboard() {
       .map(([name, value]) => ({ name, value }));
 
     // Top services by revenue (not just count)
-    const serviceRevenue: Record<string, number> = {};
-    all.forEach((b: any) => {
-      const services = String(b.service || "Other").split("|");
-      const perService = Number(b.amount || 0) / Math.max(services.length, 1);
-      services.forEach((s: string) => {
-        const key = s.split(":")[0].trim() || "Other";
-        serviceRevenue[key] = (serviceRevenue[key] || 0) + perService;
-      });
-    });
+    const serviceRevenue = serviceTotals(all);
     const topServices = Object.entries(serviceRevenue)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 6)
       .map(([name, value]) => ({ name, value: Math.round(value) }));
 
     // Outstanding dues — sorted by largest due
-    const duesList = all
-      .filter((b: any) => ["Pending", "Partial"].includes(b.status))
+    const duesList = outstandingBills(all)
       .map((b: any) => ({
         id: b.id,
         patient_id: b.patient_id,
@@ -104,7 +98,7 @@ export default function RevenueDashboard() {
       .slice(0, 8);
 
     return { todayRevenue, monthRevenue, totalCollected, outstanding, dailyRevenue, paymentModes, topServices, duesList };
-  }, [bills]);
+  }, [bills,patients,today]);
 
   const fmt = (n: number) =>
     n >= 100000 ? `₹${(n / 100000).toFixed(1)}L` : n >= 1000 ? `₹${(n / 1000).toFixed(1)}K` : `₹${n}`;

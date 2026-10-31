@@ -13,3 +13,5 @@ export function letterpadPatientInvoices<T extends { id: string; patient_id: str
   return rows.filter(row => row.id && canonical(row.patient_id) === canonical(patientId))
     .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '') || a.id.localeCompare(b.id));
 }
+
+export function displayBillNumber(bill:any) { return bill.invoice_number ? 'BILL-'+String(bill.invoice_number).padStart(6,'0') : invoiceNumber(bill.id); }

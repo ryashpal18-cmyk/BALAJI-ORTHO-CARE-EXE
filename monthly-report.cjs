@@ -16,16 +16,17 @@ function buildMonthly({patients,bills},month,now=Date.now()){
   let undatedPaid=0,cancelledBills=0,pending=0,unallocatedPaid=0;
   for(const {patient,bills:sourceItems} of grouped.values()){
     const selected=new Map();for(const b of [...sourceItems].sort((a,b)=>Number(!!b._pendingSync)-Number(!!a._pendingSync)||Number(String(a.id).startsWith('local_'))-Number(String(b.id).startsWith('local_')))){const id=normId(b._statementId||b.id);if(!selected.has(id))selected.set(id,b);}const items=[...selected.values()];
-    if(!items.length)continue;
+    if(!items.length && !patient.workflow_data?.account?.length)continue;
     // Validate/derive detailed receipts even for cancelled bills: a cancellation is not proof of refund.
     const all=buildStatement({patient,bills:items.map(b=>({...b,status:''}))},now);
     const cancelled=new Set(items.filter(b=>['cancelled','canceled','void','deleted'].includes(String(b.status||'').trim().toLowerCase())).map(b=>normId(b._statementId||b.id)));
     const active=all.rows.filter(b=>!cancelled.has(b.id));cancelledBills+=cancelled.size;pending+=active.filter(b=>b.pending).length;
-    const monthlyBills=active.filter(b=>monthKey(b.date)===month),monthlyReceipts=all.payments.filter(p=>monthKey(p.date)===month);
+    const monthlyBills=active.filter(b=>monthKey(b.date)===month),monthlyReceipts=all.payments.filter(p=>p.mode!=='Account Credit' && monthKey(p.date)===month);
+    for(const e of patient.workflow_data?.account||[]) if(e.kind!=='apply' && monthKey(e.paid_at)===month)monthlyReceipts.push({id:e.id,billId:'advance',amount:Math.round(Number(e.amount)*100),date:e.paid_at,mode:e.mode});
     const unknown=all.payments.filter(p=>!day(p.date)).reduce((n,p)=>n+p.amount,0);
     const gap=all.totals.paid-all.payments.reduce((n,p)=>n+p.amount,0);
     undatedPaid+=unknown;unallocatedPaid+=gap;
-    const row={patientId:all.patient.id,name:all.patient.name,mobile:all.patient.mobile,monthBillCount:monthlyBills.length,monthNet:monthlyBills.reduce((n,b)=>n+b.net,0),received:monthlyReceipts.reduce((n,p)=>n+p.amount,0),currentDue:active.reduce((n,b)=>n+b.due,0),currentCredit:active.reduce((n,b)=>n+b.credit,0),undatedPaid:unknown,unallocatedPaid:gap,cancelledReceiptAmount:monthlyReceipts.filter(p=>cancelled.has(p.billId)).reduce((n,p)=>n+p.amount,0)};
+    const row={patientId:all.patient.id,name:all.patient.name,mobile:all.patient.mobile,monthBillCount:monthlyBills.length,monthNet:monthlyBills.reduce((n,b)=>n+b.net,0),received:monthlyReceipts.reduce((n,p)=>n+p.amount,0),currentDue:active.reduce((n,b)=>n+b.due,0),currentCredit:active.reduce((n,b)=>n+b.credit,0)+(all.wallet||0),undatedPaid:unknown,unallocatedPaid:gap,cancelledReceiptAmount:monthlyReceipts.filter(p=>cancelled.has(p.billId)).reduce((n,p)=>n+p.amount,0)};
     if(monthlyBills.length||monthlyReceipts.length||row.currentDue||row.currentCredit||unknown||gap)rows.push(row);
     for(const b of monthlyBills){const {pending:pendingFlag,...financial}=b;billRows.push({...financial,patientId:all.patient.id,name:all.patient.name});}
     for(const p of monthlyReceipts)receipts.push({...p,patientId:all.patient.id,name:all.patient.name,cancelledBill:cancelled.has(p.billId)});

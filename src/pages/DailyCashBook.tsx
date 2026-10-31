@@ -244,7 +244,7 @@ export default function DailyCashBook() {
   // ── Build a chronological ledger for EVERY date that has any activity,
   // so opening/closing carries forward correctly day-to-day and closed
   // days keep their frozen snapshot forever (never overwritten). ──
-  const allBills = useMemo(() => collectionRows(sourceBills as any[]), [sourceBills]);
+  const allBills = useMemo(() => collectionRows(sourceBills as any[],[],false), [sourceBills]);
 
   const dailyMap = useMemo(() => {
     const dates = new Set<string>();

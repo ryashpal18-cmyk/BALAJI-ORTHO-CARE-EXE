@@ -1,3 +1,4 @@
+import { BackupVerify } from '@/components/BackupVerify';
 import { DiagnosticsPanel } from "@/components/DiagnosticsPanel";
 import { CloudSyncConnect } from "@/components/CloudSyncConnect";
 import { supabase } from "@/integrations/supabase/client";
@@ -928,7 +929,7 @@ export default function SettingsPage() {
 
                 {backupProgress&&<p role="status" className="text-sm">{backupProgress}{backupRunning?"":" — जाँच पूरी"}</p>}
                 <div className="my-4 border rounded p-3">
-                  <p>Restore JSON (केवल खाली नए/test database पर; existing data overwrite नहीं होगा)</p>
+                  <BackupVerify/><p>Restore JSON (केवल खाली नए/test database पर; existing data overwrite नहीं होगा)</p>
                   <Input type="file" accept=".json" onChange={async e => {
                     const file = e.target.files?.[0]; if (!file) return;
                     try {

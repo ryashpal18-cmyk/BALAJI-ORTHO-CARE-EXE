@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { useBills } from "@/hooks/useDatabase";
+import { useBills, usePatients } from "@/hooks/useDatabase";
 import { CalendarDays, IndianRupee, Printer, Receipt } from "lucide-react";
 import { useState } from "react";
 
@@ -110,6 +110,7 @@ const getMonthEnd = (date: Date) =>
 const billDate = (createdAt: string) => toLocalDateInput(new Date(createdAt));
 
 export default function CashTally() {
+ const {data:patients=[]}=usePatients(true);
   const { data: bills, isLoading } = useBills();
   const [rangeMode, setRangeMode] = useState("month");
   const [fromDate, setFromDate] = useState(getMonthStart(new Date()));
@@ -129,13 +130,13 @@ export default function CashTally() {
     }
   };
 
-  const filteredBills = (bills || []).filter((bill) => {
+  const filteredBills = (bills || []).filter(b=>b.status!=="Cancelled").filter((bill) => {
     const date = billDate(bill.created_at);
     return date >= fromDate && date <= toDate;
   });
 
-  const filteredReceipts = periodCollections(bills || [], fromDate, toDate);
-  const tally = cashTallyForPeriod(bills || [], fromDate, toDate);
+  const filteredReceipts = periodCollections(bills || [], fromDate, toDate,patients);
+  const tally = cashTallyForPeriod(bills || [], fromDate, toDate,patients);
   return (
     <DashboardLayout>
       <div className="space-y-6 page-enter">
@@ -223,7 +224,7 @@ export default function CashTally() {
           <Card>
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground">Total</p>
-              <p className="text-2xl font-bold">₹{tally.total.toLocaleString()}</p>
+              <p className="text-2xl font-bold">₹{tally.total.toLocaleString()}</p><p>छूट: ₹{tally.discount.toLocaleString()} · Net: ₹{tally.net.toLocaleString()}</p>
             </CardContent>
           </Card>
           <Card>

@@ -74,3 +74,21 @@ export async function refreshPatientRegistration(patientId: string) {
   if (refreshed?.registration_number) return { message: "नंबर डाउनलोड हो गया: " + refreshed.registration_number };
   throw new Error("Cloud में नंबर मिला, लेकिन local save पूरा नहीं हुआ। Storage error जाँचें।");
 }
+
+let invoiceWarming:Promise<void>|null=null;
+export function warmInvoiceNumbers():Promise<void>{
+ if(invoiceWarming)return invoiceWarming;
+ invoiceWarming=(async()=>{
+   if(!navigator.onLine || !await ensureCloudSession())return;
+   const {data:{session}}=await supabase.auth.getSession();if(!session)return;
+   const scope=String((supabase as any).supabaseUrl)+'::'+session.user.id;
+   const pools:any[]=await metaGet('invoice-number:pools')||[];
+   let available=0;for(const p of pools.filter(p=>p.scope===scope))available+=p.numbers.length-Number(await metaGet('invoice-number:used:'+p.requestId)||0);
+   if(available>8)return;
+   const requestId=await metaGet('invoice-number:request:'+scope)||crypto.randomUUID();await metaSet('invoice-number:request:'+scope,requestId);
+   const {data,error}=await supabase.rpc('reserve_invoice_numbers' as any,{p_request:requestId} as any);if(error)throw error;
+   if(!Array.isArray(data)||!data.every(n=>Number.isSafeInteger(n)&&n>0))throw Error('Invalid invoice number reservation');
+   const latest=await metaGet('invoice-number:pools')||[];if(!latest.some((p:any)=>p.requestId===requestId))await metaSet('invoice-number:pools',[...latest,{requestId,scope,numbers:data}]);
+   await metaSet('invoice-number:scope',scope);await metaSet('invoice-number:request:'+scope,null);
+ })().finally(()=>{invoiceWarming=null;});return invoiceWarming;
+}

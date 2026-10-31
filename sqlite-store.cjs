@@ -236,6 +236,7 @@ function cacheReplaceRowKey(table, oldId, newRow, idField) {
 
 function queueAdd(mutation) {
   mutation={...mutation,payload:villageRow(mutation.table,mutation.payload)};
+  if(mutation.op==='update' && (mutation.expectedPaid!==undefined || mutation.expectedWorkflow)) mutation.payload={...mutation.payload,...(mutation.expectedPaid!==undefined?{_syncExpectedPaid:mutation.expectedPaid}:{}),...(mutation.expectedWorkflow?{_syncExpectedWorkflow:mutation.expectedWorkflow}:{})};
   const info = getDb().prepare(
     `INSERT INTO mutation_queue (table_name, op, payload, rowId, tempId, selectAfter, createdAt, retries, lastError, ownerUserId)
      VALUES (@table, @op, @payload, @rowId, @tempId, @selectAfter, @createdAt, 0, NULL, @ownerUserId)`
@@ -391,6 +392,7 @@ function commitMutation(mutation, row, idField = 'id') {
     if (mutation.op === 'update') {
       const existing = cacheGetRow(mutation.table, mutation.rowId);
       if (!existing) throw new Error('Record not available locally; refresh before editing');
+      if(mutation.expectedWorkflow && JSON.stringify(existing.workflow_data||{})!==JSON.stringify(mutation.expectedWorkflow))throw Error('Record changed; reopen before editing');
       if (mutation.table === 'billing' && mutation.expectedPaid !== undefined && Number(existing.amount_paid || 0) !== mutation.expectedPaid) throw new Error('Payment changed; reopen bill before collecting');
       saved = { ...existing, ...row, [idField]: mutation.rowId, _pendingSync: true };
       if (mutation.table === 'billing' && Array.isArray(saved.payment_history)) {
@@ -398,6 +400,14 @@ function commitMutation(mutation, row, idField = 'id') {
         for (const receipt of saved.payment_history) if (typeof receipt.id === 'string' && !prior.has(receipt.id) && Number(receipt.amount) > 0 && !receipt.legacy && !receipt.id.startsWith('reclass:'))
           metaSet('outreach:receipt-origin:' + String(saved.id).replace(/^local_/, '') + ':' + receipt.id, true);
       }
+    }
+    if(mutation.table==='billing' && mutation.op==='insert' && saved.invoice_number==null){
+      const scope=metaGet('invoice-number:scope');const pools=metaGet('invoice-number:pools')||[];
+      for(const pool of pools.filter(p=>p.scope===scope)){
+        const key='invoice-number:used:'+pool.requestId,used=Number(metaGet(key)||0);
+        if(used<pool.numbers.length){saved={...saved,invoice_number:pool.numbers[used]};metaSet(key,used+1);break;}
+      }
+      mutation={...mutation,payload:{...mutation.payload,...(saved.invoice_number?{invoice_number:saved.invoice_number}:{})}};
     }
     if (mutation.table === 'patients' && mutation.op === 'insert') {
       saved = registration.allocate(module.exports, saved);
@@ -413,6 +423,20 @@ function commitMutation(mutation, row, idField = 'id') {
     queueAdd(mutation);
     return saved;
   })();
+}
+function commitFinance(items, requestId, result, ownerUserId) {
+ return getDb().transaction(()=>{
+  if(metaGet('finance:done:'+requestId))return;
+  const previous=new Set(queueGetAll().map(m=>m.id));
+  for(const item of items){
+   if(item.mutation.expectedWorkflow && JSON.stringify(cacheGetRow('patients',item.mutation.rowId)?.workflow_data||{})!==JSON.stringify(item.mutation.expectedWorkflow))throw Error('Advance balance changed');
+   if(item.mutation.expectedPatient && cacheGetRow(item.mutation.table,item.mutation.rowId)?.patient_id!==item.mutation.expectedPatient)throw Error('Patient relation changed');
+   commitMutation({...item.mutation,ownerUserId},item.row,item.idField);
+  }
+  for(const m of queueGetAll())if(!previous.has(m.id))queueRemove(m.id);
+  queueAdd({table:'billing',op:'clinic_finance',payload:{requestId,items},ownerUserId});
+  metaSet('finance:done:'+requestId,result);
+ })();
 }
 function snapshot() {
   return getDb().transaction(() => {
@@ -431,7 +455,7 @@ function restoreSnapshot(dump) {
     for (const m of dump.queue) { const id = queueAdd(m); queueUpdate(id, { ...m, id }); }
     for (const m of dump.meta || []) getDb().prepare('INSERT OR REPLACE INTO meta VALUES (?, ?)').run(m.key,m.value);
     // Restoring an old backup must not reuse a number consumed after that backup.
-    getDb().prepare("DELETE FROM meta WHERE key LIKE 'patient-registration:%'").run();
+    getDb().prepare("DELETE FROM meta WHERE (key LIKE 'patient-registration:%' OR key LIKE 'invoice-number:%')").run();
     metaSet("_legacy_migrated", true);
     return true;
   })();
@@ -536,6 +560,7 @@ function correctApprovedVillages(){
 module.exports = {
   correctApprovedVillages, setVillageNormalizer,
   patientDirectoryRows,
+  commitFinance,
   monthlyAccountRows, patientStatementRows, diagnosticSnapshot, authorizedBatch, commitBatch, commitMutation, snapshot, restoreSnapshot, adjustStock, cacheMergeServer,
   init, close,
   cacheGetAll, cacheGetRow, cacheSetRows, cacheReplaceTable, cacheUpsertRow, cacheDeleteRow, cacheReplaceRowKey,

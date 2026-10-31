@@ -17,6 +17,9 @@ files:
   - dist/**
   - main.js
   - pc-messaging.cjs
+  - clinic-finance.cjs
+  - patient-merge.cjs
+  - backup-verify.cjs
   - pdf-renderer.cjs
   - whatsapp-service.cjs
   - whatsapp-browser.cjs
@@ -26,6 +29,7 @@ files:
   - invoice-template.cjs
   - village-names.cjs
   - src/assets/invoice-brand.jpg
+  - src/assets/payment-qr.png
   - patient-statement.cjs
   - monthly-report.cjs
   - festival-messaging.cjs

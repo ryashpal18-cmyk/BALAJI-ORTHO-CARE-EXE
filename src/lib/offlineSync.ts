@@ -1,4 +1,4 @@
-import { warmRegistrationNumbers } from "./patientRegistration";
+import { warmRegistrationNumbers, warmInvoiceNumbers } from "./patientRegistration";
 import { normalizeBill } from "./paymentLedger";
 import { smsCloudRow, SMS_REVIEW_STATUSES } from "./smsReview";
 import { fetchCompleteTable, OPERATIONAL_TABLES, resetCloudSchemaBackoff } from "./completeFetch";
@@ -11,7 +11,7 @@ import { supabase, usesApiSync } from "@/integrations/supabase/client";
 import { cLog } from "@/lib/clientLogger";
 import { isValidMobile } from "@/lib/utils";
 import { queryClient } from "@/lib/queryClient";
-import { metaSet, commitMutation, queueGetAll, queueRemove, queueUpdate, queueRemapRowId, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetAll, backupCacheToDisk, QueuedMutation, MAX_SYNC_RETRIES } from "./offlineDb";
+import { metaSet, commitMutation, queueGetAll, queueRemove, queueUpdate, queueRemapRowId, cacheReplaceRowKey, cacheDeleteRow, cacheReplaceTable, cacheUpsertRow, cacheGetRow, cacheGetAll, backupCacheToDisk, QueuedMutation, MAX_SYNC_RETRIES } from "./offlineDb";
 
 
 declare global {
@@ -84,6 +84,7 @@ export async function downloadAllDataToCache(): Promise<void> {
   // ensureCloudSession accepts the verified local owner API mode too.
   downloadInProgress = true;
   try {
+    await warmInvoiceNumbers().catch(error=>cLog.warn("invoice",error.message));
     await warmRegistrationNumbers().catch(error => cLog.warn("registration", error.message));
     for (const table of OPERATIONAL_TABLES) {
       try {
@@ -152,7 +153,7 @@ function stripLocalPrefixes(payload: Record<string, any>) {
 // "Could not find the 'patients' column of 'billing' in the schema cache".
 // Ye function aise embedded objects ko sync se pehle hata deta hai — sirf
 // genuinely allowed JSONB columns (jaise record_data) ko chhodta hai.
-const ALLOWED_OBJECT_FIELDS = new Set(["record_data"]);
+const ALLOWED_OBJECT_FIELDS = new Set(["record_data", "workflow_data"]);
 function stripEmbeddedRelations(payload: Record<string, any>) {
   const out = { ...payload };
   for (const key of Object.keys(out)) {
@@ -164,6 +165,8 @@ function stripEmbeddedRelations(payload: Record<string, any>) {
   return out;
 }
 
+const stable=(x:any):string=>JSON.stringify(x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.keys(x).sort().map(k=>[k,JSON.parse(stable(x[k]??null))])):Array.isArray(x)?x.map(v=>JSON.parse(stable(v))):x);
+function touches(q:any,table:string,id:string){const norm=(v:any)=>String(v||'').replace(/^local_/,'');return q.op==='clinic_finance'?q.payload.items.some((i:any)=>i.mutation.table===table&&norm(i.mutation.rowId||i.mutation.tempId)===norm(id)):q.table===table&&[q.rowId,q.tempId,q.payload?.id].some(v=>v&&norm(v)===norm(id));}
 async function applyMutation(m: QueuedMutation): Promise<void> {
   const table = m.table as any;
   const latestQueue = await queueGetAll();
@@ -177,6 +180,19 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
   }
 
 
+  if(m.op==='clinic_finance') {
+    const items=m.payload.items.map((item:any)=>({...item,mutation:{...item.mutation,rowId:item.mutation.rowId?.replace(/^local_/,''),tempId:item.mutation.tempId?.replace(/^local_/,''),expectedPatient:item.mutation.expectedPatient?.replace(/^local_/,''),payload:stripEmbeddedRelations(stripLocalPrefixes(item.mutation.payload))},row:undefined}));
+    // A bundle waits for preceding ordinary inserts/updates of any of its records.
+    if(latestQueue.some(q=>q.id!==m.id && Number(q.id)<Number(m.id) && items.some((i:any)=>i.mutation.table===q.table && [q.rowId,q.tempId].some(id=>id&&id.replace(/^local_/,'')===(i.mutation.rowId||i.mutation.tempId)))))throw Error('PENDING_PARENT_INSERT');
+    const {data,error}=await supabase.rpc('save_clinic_finance' as any,{p_request:m.payload.requestId,p_items:items} as any);
+    if(error)throw error;if(data!==true)throw Error('Finance transaction not acknowledged');
+    for(const item of m.payload.items){
+      const id=item.mutation.rowId||item.mutation.tempId;
+      const later=latestQueue.some(q=>Number(q.id)>Number(m.id) && (q.rowId===id||q.tempId===id||q.op==='clinic_finance'&&q.payload.items.some((i:any)=>(i.mutation.rowId||i.mutation.tempId)===id)));
+      if(!later){const row=await cacheGetRow(item.mutation.table,id);if(row)await cacheUpsertRow(item.mutation.table,{...row,_pendingSync:false});await metaSet("cloud:verified:"+item.mutation.table+":"+String(id).replace(/^local_/,""),new Date().toISOString());}
+    }
+    return;
+  }
   if (m.table === "audit_logs" && m.op === "insert") {
     const { data, error } = await supabase.rpc("append_audit_event" as any, {
       p_id: (m.tempId || m.payload.id).replace(/^local_/, ""), p_event: stripLocalPrefixes(m.payload),
@@ -205,6 +221,7 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     delete payload._localOnly;
     // Old databases can keep syncing patient/bill records before registration SQL is installed.
     // Omitting a missing number also lets the upgraded database trigger assign it centrally.
+    if(table==="billing" && payload.invoice_number==null) delete payload.invoice_number;
     if (table === "patients" && payload.registration_number == null) delete payload.registration_number;
     // ✅ upsert use karo (insert nahi) — agar retry ho (network drop mid-sync
     // ke baad), to same id pe dobara likhega, duplicate row nahi banega.
@@ -232,6 +249,7 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
       // warna wo mutation hamesha "PENDING_PARENT_INSERT" bol ke atka rahega.
       await queueRemapRowId(table, m.tempId, (data as any).id);
     }
+    await metaSet("cloud:verified:"+table+":"+String((data as any)?.id||m.tempId).replace(/^local_/,""),new Date().toISOString());
     console.info(`Insert sync OK — table: ${table}`);
     return;
   }
@@ -247,23 +265,34 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
       if (updatePayload.status !== m.payload.status && m.id !== undefined)
         await queueUpdate(m.id, { payload: { ...m.payload, status: updatePayload.status } });
     }
+    const expectedPaid=m.payload?._syncExpectedPaid,expectedWorkflow=m.payload?._syncExpectedWorkflow;
+    delete updatePayload._syncExpectedPaid;delete updatePayload._syncExpectedWorkflow;
     delete updatePayload.id; // The mutation rowId owns identity; stale local IDs must not update the PK.
     delete updatePayload._pendingSync;
     delete updatePayload._localOnly;
-    const { data: serverRow, error } = await supabase.from(table).update(updatePayload).eq("id", m.rowId).select().single();
-    if (error) { console.error(`Update failed — table: ${table}`); throw error; }
+    let request=supabase.from(table).update(updatePayload).eq("id", m.rowId);
+    if(expectedPaid!==undefined)request=request.eq('amount_paid',expectedPaid);
+    if(expectedWorkflow!==undefined)request=request.eq('workflow_data',JSON.stringify(expectedWorkflow));
+    let {data:serverRow,error}=await request.select().single();
+    if(error && (expectedPaid!==undefined||expectedWorkflow!==undefined)){
+      const current=await supabase.from(table).select('*').eq('id',m.rowId).single();
+      if(!current.error && Object.keys(updatePayload).filter(k=>k!=='updated_at').every(k=>stable((current.data as any)?.[k])===stable(updatePayload[k]))){serverRow=current.data;error=null;}
+      else throw Error('SYNC-CONFLICT: Cloud पर हिसाब बदल गया। PC की entry सुरक्षित है; मिलान करके निर्णय लें।');
+    }
+    if(error)throw error;
     // 🚨 FIX: Update sync ho jaane ke baad local cache row abhi bhi
     // "_pendingSync: true" flagged reh jaata tha — isse wo row hamesha ke
     // liye background server-refresh se "protected" (excluded) reh jaata,
     // aur kabhi bhi fresh nahi hota. Ab sync confirm hote hi flag hata dete
     // hain, taaki row wapas normal (non-pending) ban jaaye.
     const cachedRow = (await cacheGetAll(table)).find((r: any) => r.id === m.rowId);
-    const later = (await queueGetAll()).some(q => q.id !== m.id && q.table === table && (q.rowId === m.rowId || q.rowId === `local_${m.rowId}`));
+    const later = (await queueGetAll()).some(q => q.id !== m.id && touches(q,table,m.rowId!));
     if (!later && cachedRow && cachedRow._pendingSync) {
       const cleaned = { ...cachedRow, ...(serverRow as any) };
       delete cleaned._pendingSync;
       await cacheUpsertRow(table, cleaned, "id");
     }
+    await metaSet("cloud:verified:"+table+":"+m.rowId,new Date().toISOString());
     console.info(`Update sync OK — table: ${table}`);
     return;
   }
@@ -280,6 +309,12 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
   if (m.op === "sms") {
     const { mobile, message, patientName, smsType } = m.payload;
 
+    const bill=m.payload.billing_id?await cacheGetRow('billing',m.payload.billing_id):null;
+    const person=bill?await cacheGetRow('patients',bill.patient_id):null;
+    if(person?.workflow_data?.sms===false){
+      const id=m.payload.messageId||crypto.randomUUID();const row={id,patient_name:patientName||'',mobile,message,status:'failed',sms_type:smsType||'bill_saved',sent_at:m.createdAt};
+      await commitMutation({table:'sms_logs',op:'insert',tempId:id,payload:row},row);cLog.info('sync','SMS cancelled by patient preference');return;
+    }
     // Invalid legacy entries must stay reviewable, never be acknowledged as sent.
     if (!isValidMobile(mobile)) throw new Error("Invalid SMS recipient; correct or cancel this queued message");
 
@@ -370,13 +405,14 @@ export async function runSync(options:{retrySchema?:boolean}={}): Promise<{ sync
       if (m.op === "xray_upload") continue; // Preserve existing local files; cloud media transfer disabled.
       if (isParkedSms(m)) continue; // manual check pending — never auto-resend, never an error
       const key = `${m.table}::${(m.rowId || m.tempId || String(m.id)).replace(/^local_/, "")}`;
-      if (blocked.has(key)) continue;
+      const keys=m.op==='clinic_finance'?m.payload.items.map((i:any)=>i.mutation.table+'::'+String(i.mutation.rowId||i.mutation.tempId).replace(/^local_/,'')):[key];
+      if (keys.some((k:string)=>blocked.has(k))) continue;
       // Never abandon durable work after a fixed number of failed requests.
       // Backoff is persisted, so restarting the app doesn't hammer the server.
       const schemaBlocked=/schema cache|could not find the function|relation .*does not exist|violates check constraint/i.test(m.lastError||"");
       const repairableSms = m.table === "sms_logs" && ["insert", "update"].includes(m.op) && SMS_REVIEW_STATUSES.includes(m.payload?.status);
       const retryDelay = schemaBlocked?30*60*1000:Math.min(30000 * 2 ** Math.min(Math.max((m.retries || 0) - 1, 0), 4), 300000);
-      if (!repairableSms && !(options.retrySchema&&schemaBlocked) && m.lastAttemptAt && Date.now() - m.lastAttemptAt < retryDelay) { blocked.add(key); continue; }
+      if (!repairableSms && !(options.retrySchema&&schemaBlocked) && m.lastAttemptAt && Date.now() - m.lastAttemptAt < retryDelay) { keys.forEach((k:string)=>blocked.add(k)); continue; }
 
       try {
         await applyMutation(m);
@@ -384,7 +420,7 @@ export async function runSync(options:{retrySchema?:boolean}={}): Promise<{ sync
         if (m.id !== undefined) await queueRemove(m.id);
         synced++;
       } catch (err: any) {
-        blocked.add(key);
+        keys.forEach((k:string)=>blocked.add(k));
         const msg = err?.message || String(err);
         if (msg === "PENDING_PARENT_INSERT") continue;
         if (msg === "SMS_UNCONFIRMED") {

@@ -62,6 +62,9 @@ contextBridge.exposeInMainWorld('electron', {
   cloudSyncStatus: () => ipcRenderer.invoke('auth:cloudSyncStatus'),
 
   // ── Patient Operations ──────────────────────────────────────
+  verifyBackup:json=>ipcRenderer.invoke('backup:verify',json),
+  patientMerge:{preview:(sourceId,targetId)=>ipcRenderer.invoke('patients:mergePreview',{sourceId,targetId}),apply:input=>ipcRenderer.invoke('patients:mergeApply',input)},
+  finance:{preview:patientId=>ipcRenderer.invoke('finance:preview',patientId),apply:input=>ipcRenderer.invoke('finance:apply',input)},
   patientDirectory: () => ipcRenderer.invoke('patients:directory'),
   savePatient:     (data)   => ipcRenderer.invoke('db:savePatient', data),
   getAllPatients:   ()       => ipcRenderer.invoke('db:getAllPatients'),
