@@ -1,9 +1,11 @@
+import paymentQrAsset from '@/assets/payment-qr.png';
+import { readBillDraft, saveBillDraft, clearBillDraft } from '@/lib/billDraft';
 import invoiceBrand from '@/assets/invoice-brand.jpg';
 import { invoiceTemplate } from '@/lib/invoiceTemplate';
 import { billCareCategory, buildBillWelcomeMessage } from "@/lib/billSmsMessage";
 import { cashTallyForPeriod } from "@/lib/collectionReport";
 import QRCode from "qrcode";
-import { invoiceNumber } from "@/lib/invoiceNumber";
+import { invoiceNumber, displayBillNumber } from "@/lib/invoiceNumber";
 import { netBillAmount } from "@/lib/billAmounts";
 import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { businessDate } from "@/lib/businessDate";
@@ -136,10 +138,11 @@ Balaji Ortho Care Center`;
 }
 
 function buildInvoiceHTML(bill: any, logoUrl: string = "/images/logo.png") {
+  bill={...bill,patients:bill.workflow_data?.patient_snapshot||bill.patients};
   const patientName = escapeHtml((bill.patients as any)?.name || "Patient");
-  const patientAge = (bill.patients as any)?.age || "—";
+  const patientAge = (bill.patients as any)?.age ?? "—";
   const patientGender = (bill.patients as any)?.gender || "—";
-  const invoiceNo = invoiceNumber(bill.id);
+  const invoiceNo = displayBillNumber(bill);
   const _dateObj = bill.created_at ? new Date(bill.created_at) : new Date();
   const date = (!bill.created_at || isNaN(_dateObj.getTime()) ? new Date() : _dateObj).toLocaleDateString("en-IN", {
     day: "2-digit",
@@ -339,7 +342,7 @@ async function previewInvoice(bill: any) {
   const win=window.open('', '_blank', 'width=900,height=900');if(!win)return;
   try {
     const qr=await QRCode.toDataURL('balajiclinic://family/'+String(bill.patient_id).replace(/^local_/,''),{width:256,margin:4});
-    writeReportDocument(win,invoiceTemplate(bill,bill.patients || {},{brandImage:invoiceBrand,qr}));win.document.close();
+    writeReportDocument(win,invoiceTemplate(bill,bill.patients || {},{brandImage:invoiceBrand,qr,paymentQr:await getBase64Image(paymentQrAsset)}));win.document.close();
   }catch{win.close();toast({title:'PDF preview नहीं बना; फिर कोशिश करें',variant:'destructive'});}
 }
 
@@ -359,6 +362,7 @@ function BillingContent() {
   const location = useLocation();
   const { data: bills, isLoading } = useBills();
   const { data: patients } = usePatients();
+  const { data: reportPatients } = usePatients(true);
   const { data: doctors = [] } = useDoctors();
   const addBill = useAddBill();
   const addFractureCase = useAddFractureCase();
@@ -389,6 +393,15 @@ function BillingContent() {
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const navPatientConsumedRef = useRef(false);
+  const [availableDraft,setAvailableDraft]=useState(readBillDraft);
+  const [draftError,setDraftError]=useState('');
+  useEffect(()=>{
+    if (!open || editingBill || availableDraft) return;
+    try { saveBillDraft({selectedPatient,patientSearch,services,amountPaid,discountAmount,paymentMode,doctorChoice});setDraftError(''); }
+    catch { setDraftError('अधूरा बिल सुरक्षित नहीं हो पाया। ऐप बंद करने से पहले बिल सेव करें।'); }
+  },[open,editingBill,availableDraft,selectedPatient,patientSearch,services,amountPaid,discountAmount,paymentMode,doctorChoice]);
+  const restoreDraft=()=>{const d=availableDraft;if(!d)return;setSelectedPatient(d.selectedPatient||'');setPatientSearch(d.patientSearch||'');setServices(d.services);setAmountPaid(d.amountPaid||'');setDiscountAmount(d.discountAmount||'');setPaymentMode(d.paymentMode||'');setDoctorChoice(d.doctorChoice||DEFAULT_DOCTOR_VALUE);setAvailableDraft(null);setOpen(true);};
+
 
   // OPD se "navigate('/billing', { state: { patientId, patientName } })" karke aate hain —
   // Pehle patients list mein dhoondo; offline naye patient ka ID "local_xxx" hota hai
@@ -431,7 +444,7 @@ function BillingContent() {
     return tb - ta;
   }), [bills, fromDate, toDate]);
 
-  const cashTally = useMemo(() => cashTallyForPeriod(bills || [], fromDate, toDate), [bills, fromDate, toDate]);
+  const cashTally = useMemo(() => cashTallyForPeriod(bills || [], fromDate, toDate,reportPatients || []), [bills, reportPatients, fromDate, toDate]);
   const pageCount = Math.max(1, Math.ceil(filteredBills.length / BILLS_PER_PAGE));
   const currentPage = Math.min(billPage, pageCount);
   const visibleBills = useMemo(() => filteredBills.slice((currentPage - 1) * BILLS_PER_PAGE, currentPage * BILLS_PER_PAGE), [filteredBills, currentPage]);
@@ -597,6 +610,7 @@ function BillingContent() {
       // PDF sirf tab generate hogi jab user manually PDF/WhatsApp button dabaye
 
       setSelectedPatient("");
+      clearBillDraft();
       setServices([{ name: "", amount: "" }]);
       setAmountPaid("");
       setDiscountAmount("");
@@ -740,6 +754,7 @@ function BillingContent() {
       setEditOpen(false);
       setEditingBill(null);
       setEditReason("");
+      clearBillDraft();
       setServices([{ name: "", amount: "" }]);
       setAmountPaid("");
       setDiscountAmount("");
@@ -1108,7 +1123,7 @@ function BillingContent() {
                             </Select>
                           </td>
                           <td className="py-3 text-right">
-                            <div className="flex justify-end gap-1">
+                            <div className="flex justify-end gap-1">{availableDraft && <div role="status" className="rounded border p-3">अधूरा बिल उपलब्ध है। <Button variant="outline" onClick={restoreDraft}>पिछला बिल खोलें</Button> <Button variant="ghost" onClick={()=>{clearBillDraft();setAvailableDraft(null);}}>Draft हटाएँ</Button></div>}{draftError && <p role="alert">{draftError}</p>}
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -1370,7 +1385,7 @@ function BillingContent() {
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-lg bg-primary/10 p-3">
                 <p className="text-xs text-muted-foreground">Total Amount</p>
-                <b className="text-primary">₹{cashTally.total.toLocaleString()}</b>
+                <b className="text-primary">₹{cashTally.total.toLocaleString()}</b><p>छूट ₹{cashTally.discount.toLocaleString()} · Net ₹{cashTally.net.toLocaleString()}</p>
               </div>
               <div className="rounded-lg bg-success/10 p-3">
                 <p className="text-xs text-muted-foreground">इस अवधि में जमा / Received</p>

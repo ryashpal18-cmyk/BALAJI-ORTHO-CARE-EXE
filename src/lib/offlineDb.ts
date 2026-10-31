@@ -17,7 +17,7 @@ import { cLog } from "@/lib/clientLogger";
 export type QueuedMutation = {
   id?: number;
   table: string;
-  op: "insert" | "update" | "delete" | "sms" | "xray_upload" | "stock_adjust";
+  op: "insert" | "update" | "delete" | "sms" | "xray_upload" | "stock_adjust" | "clinic_finance";
   payload?: any;
   rowId?: string;
   tempId?: string;

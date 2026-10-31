@@ -1,3 +1,7 @@
+import { DuePromise } from '@/components/DuePromise';
+import { offlineUpdate } from '@/lib/offlineQuery';
+import { dueAge } from '@/lib/reportMetrics';
+import { PatientStatement } from '@/components/PatientStatement';
 import { CollectPayment } from "@/components/CollectPayment";
 import { PaymentReceipts } from "@/components/PaymentReceipts";
 import { businessDate } from "@/lib/businessDate";
@@ -41,6 +45,7 @@ function getDueMessage(patientName: string, total: number, paid: number, due: nu
 export default function DueAmount() {
   const { data: bills = [], isLoading } = useBills();
   const updateBill = useUpdateBill();
+  const [age,setAge]=useState("all"),[oldest,setOldest]=useState(false);
 
   const [search, setSearch] = useState("");
   const [payTarget, setPayTarget] = useState<any>(null);
@@ -57,11 +62,11 @@ export default function DueAmount() {
         const due = Math.max(total - paid, 0);
         return { ...bill, _total: total, _paid: paid, _due: due };
       })
-      .filter((b: any) => b._due > 0)
+      .filter((b: any) => b.status!=="Cancelled" && b._due > 0)
       .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [bills]);
 
-  const filtered = dueBills.filter((b: any) => {
+  const filtered = dueBills.filter((b:any)=>{const days=dueAge(b,businessDate());return age==="all" || days!==null && (age==="0"?days<=7:age==="1"?days>=8&&days<=30:age==="2"?days>=31&&days<=90:days>90);}).filter((b: any) => {
     const name = b.patients?.name?.toLowerCase() || "";
     const mobile = b.patients?.mobile || "";
     const q = search.toLowerCase();
@@ -77,8 +82,8 @@ export default function DueAmount() {
       if (!map.has(dateKey)) map.set(dateKey, []);
       map.get(dateKey)!.push(b);
     }
-    return Array.from(map.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1));
-  }, [filtered]);
+    return Array.from(map.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1) * (oldest?-1:1));
+  }, [filtered,oldest]);
 
   const totalDue = filtered.reduce((sum: number, b: any) => sum + b._due, 0);
 
@@ -149,6 +154,7 @@ export default function DueAmount() {
     try {
       const result = await sendSMS(mobile, msg, bill.patients?.name || "", "due_reminder");
       if (!result.ok) throw new Error(result.error || "SMS queue save failed");
+      await offlineUpdate('billing',bill.id,{_workflowPatch:{last_reminder:new Date().toISOString()},_auditReason:'Due SMS queued'});
       toast({ title: result.queued ? "SMS PC par queue mein saved — net par bheja jayega" : "SMS gateway ne accept kiya" });
     } catch {
       toast({ title: "SMS bhejne me dikkat hui", variant: "destructive" });
@@ -203,6 +209,7 @@ export default function DueAmount() {
           />
         </div>
 
+        <div className="flex gap-3"><select aria-label="बकाया की उम्र" value={age} onChange={e=>setAge(e.target.value)} className="rounded border p-2 bg-background"><option value="all">सभी बकाया</option><option value="0">0–7 दिन</option><option value="1">8–30 दिन</option><option value="2">31–90 दिन</option><option value="3">90 दिन से पुराने</option></select><Button variant="outline" onClick={()=>setOldest(!oldest)}>{oldest?'पुराने पहले':'नए पहले'}</Button></div>
         {isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
 
         {!isLoading && grouped.length === 0 && (
@@ -249,7 +256,7 @@ export default function DueAmount() {
                     <div className="flex flex-wrap gap-2 pt-1">
                       <Button size="sm" variant="outline" onClick={() => setPayTarget({bill, full:false})}>भुगतान जमा</Button>
                       <Button size="sm" variant="outline" onClick={() => setPayTarget({bill, full:true})}>पूरा बकाया जमा</Button>
-                      <PaymentReceipts bill={bill} />
+                      <PaymentReceipts bill={bill} /><PatientStatement patientId={bill.patient_id} /><DuePromise bill={bill} />
                     </div>
 
                     <div className="flex flex-wrap gap-2">

@@ -22,7 +22,7 @@ app.whenReady().then(async()=>{
   const longHtml=invoiceDocument({id:'long-bill',amount:1700,discount:0,amount_paid:700,service:Array.from({length:17},(_,i)=>'Synthetic service '+(i+1)+':100').join('|'),created_at:'2026-10-21T06:00:00Z'},{id,name:'Synthetic Patient'},qr);
   await loadPdfDocument(win,longHtml);
   const multi=await win.webContents.executeJavaScript('({pages:document.querySelectorAll(".invoice-page").length,overflow:[...document.querySelectorAll(".sheet-main")].some(e=>e.scrollHeight>e.clientHeight+2),totals:document.querySelectorAll(".totals").length})');
-  assert.equal(multi.pages,3);assert.equal(multi.overflow,false);assert.equal(multi.totals,1);const longPdf=await win.webContents.printToPDF({printBackground:true,pageSize:'A4',preferCSSPageSize:true});assert.equal(longPdf.subarray(0,5).toString(),'%PDF-');assert.ok(longPdf.length>pdf.length);
+  assert.equal(multi.pages,4);assert.equal(multi.overflow,false);assert.equal(multi.totals,1);const longPdf=await win.webContents.printToPDF({printBackground:true,pageSize:'A4',preferCSSPageSize:true});assert.equal(longPdf.subarray(0,5).toString(),'%PDF-');assert.ok(longPdf.length>pdf.length);
   console.log('PASS native branded invoice: financial amounts, distinct registration/bill number, QR and brand images, nonempty PDF and 17-service pagination without overflow');
   win.destroy();clearTimeout(timer);app.exit(0);
  }catch(e){console.error(e);if(win&&!win.isDestroyed())win.destroy();clearTimeout(timer);app.exit(1);}

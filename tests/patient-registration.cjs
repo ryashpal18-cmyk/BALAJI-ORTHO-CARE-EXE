@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('fs'),os=require('os'),path=require('path');
-const store=require('../sqlite-store.cjs'), KEY='patient-registration:last-number';
+const store=require('./sqlite-fixture.cjs').createStore(), KEY='patient-registration:last-number';
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'balaji-registration-'));
 try {
 store.init(dir);

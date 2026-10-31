@@ -58,25 +58,25 @@ function buildPrescriptionHTML(patient: any, rxForm: any, advice: string) {
         <p style="margin: 2px 0; font-size: 12px; color: #555;">Phone: ${CLINIC.phone}</p>
       </div>
       <div style="display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 13px;">
-        <div><strong>Patient:</strong> ${patient?.name || "N/A"}</div>
+        <div><strong>Patient:</strong> ${escapeHtml(patient?.name || "N/A")}</div>
         <div><strong>Date:</strong> ${today}</div>
       </div>
       <div style="display: flex; gap: 16px; margin-bottom: 16px; font-size: 13px;">
-        <div><strong>Age:</strong> ${patient?.age || "N/A"}</div>
-        <div><strong>Gender:</strong> ${patient?.gender || "N/A"}</div>
-        <div><strong>Mobile:</strong> ${patient?.mobile || "N/A"}</div>
+        <div><strong>Age:</strong> ${patient?.age ?? "N/A"}</div>
+        <div><strong>Gender:</strong> ${escapeHtml(patient?.gender || "N/A")}</div>
+        <div><strong>Mobile:</strong> ${escapeHtml(patient?.mobile || "N/A")}</div>
       </div>
       <div style="border-top: 1px solid #ddd; padding-top: 12px; margin-bottom: 12px;">
         <h3 style="margin: 0 0 6px; font-size: 14px; color: #0a2647;">Diagnosis</h3>
-        <p style="margin: 0; font-size: 13px;">${rxForm.diagnosis || "—"}</p>
+        <p style="margin: 0; font-size: 13px;">${escapeHtml(rxForm.diagnosis || "—")}</p>
       </div>
       <div style="border-top: 1px solid #ddd; padding-top: 12px; margin-bottom: 12px;">
         <h3 style="margin: 0 0 6px; font-size: 14px; color: #0a2647;">℞ Medicines</h3>
-        <pre style="margin: 0; font-size: 13px; white-space: pre-wrap; font-family: inherit;">${rxForm.medicines || "—"}</pre>
+        <pre style="margin: 0; font-size: 13px; white-space: pre-wrap; font-family: inherit;">${escapeHtml(rxForm.medicines || "—")}</pre>
       </div>
       <div style="border-top: 1px solid #ddd; padding-top: 12px; margin-bottom: 12px;">
         <h3 style="margin: 0 0 6px; font-size: 14px; color: #0a2647;">Advice</h3>
-        <pre style="margin: 0; font-size: 13px; white-space: pre-wrap; font-family: inherit;">${advice || "—"}</pre>
+        <pre style="margin: 0; font-size: 13px; white-space: pre-wrap; font-family: inherit;">${escapeHtml(advice || "—")}</pre>
       </div>
       ${rxForm.followup_date ? `<div style="border-top: 1px solid #ddd; padding-top: 12px; margin-bottom: 12px;">
         <h3 style="margin: 0 0 6px; font-size: 14px; color: #0a2647;">Next Visit</h3>
@@ -163,10 +163,6 @@ export default function OPD() {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!regForm.mobile) {
-      toast({ title: "Error", description: "Mobile number is required", variant: "destructive" });
-      return;
-    }
     if (!regForm.name) {
       toast({ title: "Error", description: "Name is required", variant: "destructive" });
       return;
@@ -190,7 +186,7 @@ export default function OPD() {
     if (canonicalAddress === null) { toast({ title: 'गाँव सूची से चुनें या नया गाँव जोड़ें', variant: 'destructive' }); return; }
     if (registering.current) return;
     const digits = regForm.mobile.replace(/\D/g, '');
-    if (!/^(?:91)?[6-9]\d{9}$/.test(digits) || !regForm.name.trim()) {
+    if ((digits && !/^(?:91)?[6-9]\d{9}$/.test(digits)) || !regForm.name.trim()) {
       toast({ title: 'सही नाम और 10 अंकों का मोबाइल भरें', variant: 'destructive' }); return;
     }
     const goToPrint = (e.nativeEvent as SubmitEvent | undefined)?.submitter?.getAttribute("data-print-patient") === "true";
@@ -395,12 +391,11 @@ export default function OPD() {
                 <form onSubmit={handleRegister} className="space-y-4">
                   {/* Mobile Number FIRST */}
                   <div className="space-y-2">
-                    <Label>Mobile Number * (पहले मोबाइल नंबर डालें)</Label>
+                    <Label>Mobile Number (वैकल्पिक) (पहले मोबाइल नंबर डालें)</Label>
                     <Input
                       placeholder="10 digit mobile number"
                       value={regForm.mobile}
                       onChange={e => handleMobileChange(e.target.value)}
-                      required
                       className="text-lg font-medium"
                       maxLength={13}
                     />

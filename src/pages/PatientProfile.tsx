@@ -1,3 +1,7 @@
+import { RecordSyncState } from '@/components/RecordSyncState';
+import { PatientMerge } from '@/components/PatientMerge';
+import { PatientFinance } from '@/components/PatientFinance';
+import { PatientWorkflow } from '@/components/PatientWorkflow';
 import { useIsAdmin } from '@/hooks/useIsAdmin';
 import { VillagePicker } from '@/components/VillagePicker';
 import { useVillageCatalog } from '@/lib/useVillageCatalog';
@@ -90,7 +94,7 @@ export default function PatientProfile() {
   const startEdit = () => {
     setEditName(patient?.name    || "");
     setEditMobile(patient?.mobile || "");
-    setEditAge(patient?.age ? String(patient.age) : "");
+    setEditAge(patient?.age != null ? String(patient.age) : "");
     setEditGender(patient?.gender  || "");
     setEditAddress(patient?.address || "");
     setEditing(true);
@@ -138,9 +142,9 @@ export default function PatientProfile() {
     } catch (e: any) { toast({ title: 'Report उपलब्ध नहीं है', description: e.message, variant: 'destructive' }); }
   };
 
-  const totalBilled = bills.reduce((s, b) => s + Math.max(Number(b.amount || 0) - Number(b.discount || 0), 0), 0);
+  const totalBilled = bills.filter(b=>b.status!=="Cancelled").reduce((s, b) => s + Math.max(Number(b.amount || 0) - Number(b.discount || 0), 0), 0);
   const totalPaid   = bills.reduce((s, b) => s + Number(b.amount_paid  || 0), 0);
-  const totalDue = bills.reduce((s,b) => s + Math.max(Number(b.amount || 0) - Number(b.discount || 0) - Number(b.amount_paid || 0), 0), 0);
+  const totalDue = bills.filter(b=>b.status!=="Cancelled").reduce((s,b) => s + Math.max(Number(b.amount || 0) - Number(b.discount || 0) - Number(b.amount_paid || 0), 0), 0);
 
   if (loading) return <DashboardLayout><div className="p-8 text-center text-muted-foreground">Loading...</div></DashboardLayout>;
   if (!patient) return <DashboardLayout><div className="p-8 text-center">Patient not found</div></DashboardLayout>;
@@ -161,7 +165,7 @@ export default function PatientProfile() {
         </Button>
 
         <Button variant="outline" onClick={() => navigate(`/family-profile/${id}`)}>Family Profile / QR</Button>
-        <PatientStatement key={id} patientId={id!} />
+        <RecordSyncState table="patients" row={patient}/><PatientMerge key={"merge-"+id} patientId={id!} /><PatientFinance key={"finance-"+id} patientId={id!} /><PatientWorkflow key={"workflow-"+id} patient={patient} /><PatientStatement key={id} patientId={id!} />
         {/* ── Patient Info Card ── */}
         <div className="border rounded-xl p-5 bg-card shadow-sm">
           {!editing ? (

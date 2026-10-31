@@ -1,3 +1,4 @@
+import { billDue } from '@/lib/billAmounts';
 import { attachPatients } from "@/lib/patientRecords";
 import { collectionRows } from "@/lib/paymentLedger";
 import { saveBillOffline } from "@/lib/saveBillOffline";
@@ -28,8 +29,8 @@ export function useDashboardStats() {
         readBranchTable("patients", selectedBranchId), readBranchTable("appointments", selectedBranchId),
         readBranchTable("billing", selectedBranchId), cacheGetAll("beds")]);
       return { todayPatients: patients.length, todayAppointments: appointments.filter(a => a.date === today).length,
-        pendingPayments: billing.reduce((sum,b) => sum + Math.max(Number(b.amount || 0)-Number(b.discount || 0)-Number(b.amount_paid || 0),0),0),
-        todayRevenue: collectionRows(billing).filter(b => businessDate(b.created_at) === today).reduce((sum,b) => sum+Number(b.amount_paid || 0),0),
+        pendingPayments: billing.reduce((sum,b) => sum + billDue(b),0),
+        todayRevenue: collectionRows(billing,patients).filter(b => businessDate(b.created_at) === today).reduce((sum,b) => sum+Number(b.amount_paid || 0),0),
         bedsOccupied: beds.filter(b => b.status === "occupied").length, totalBeds: beds.length };
     } });
 }
@@ -43,7 +44,7 @@ export function useTodayBills() {
 export function usePendingBills() {
   const { selectedBranchId } = useBranchContext();
   return useQuery({ queryKey: ["billing", "pending", selectedBranchId], ...QUERY_OPTS,
-    queryFn: async () => (await readBranchTable("billing", selectedBranchId, "*, patients(name, mobile, address)")).filter(b => ["Pending", "Partial"].includes(b.status)) });
+    queryFn: async () => (await readBranchTable("billing", selectedBranchId, "*, patients(name, mobile, address)")).filter(b => billDue(b)>0) });
 }
 
 export function useBills(scope: "selected" | "clinic" = "selected") {
@@ -58,10 +59,10 @@ export function useBills(scope: "selected" | "clinic" = "selected") {
     })()).sort((a,b) => (b.created_at || "").localeCompare(a.created_at || "")) });
 }
 
-export function usePatients() {
+export function usePatients(includeArchived = false) {
   const { selectedBranchId } = useBranchContext();
-  return useQuery({ queryKey: ["patients", selectedBranchId], ...QUERY_OPTS,
-    queryFn: async () => (await readBranchTable("patients", selectedBranchId)).sort((a,b) => (a.name || "").localeCompare(b.name || "")) });
+  return useQuery({ queryKey: ["patients", selectedBranchId, includeArchived], ...QUERY_OPTS,
+    queryFn: async () => (await readBranchTable("patients", selectedBranchId)).filter(p=>includeArchived || !p.workflow_data?.archived).sort((a,b) => (a.name || "").localeCompare(b.name || "")) });
 }
 
 export function useUpdateBill() {

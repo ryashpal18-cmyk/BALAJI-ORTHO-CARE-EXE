@@ -17,10 +17,11 @@ export async function saveBillOffline(input: any) {
   if (!branch_id) throw new Error('Select a branch before saving this bill');
   const bill = withPaymentHistory({ id, amount_paid: 0 }, {
     ...normalizeBill(input), id, created_at, branch_id, patient_id: patient.id,
+    workflow_data:{...input.workflow_data,patient_snapshot:{name:patient.name,mobile:patient.mobile,age:patient.age,gender:patient.gender,address:patient.address,registration_number:patient.registration_number}},
     patients: { name: patient.name || '', mobile: patient.mobile || '', address: patient.address || '' }, _pendingSync: true,
   }, crypto.randomUUID(), created_at);
   const items: any[] = [{ mutation: { table: 'billing', op: 'insert', tempId: id, payload: bill }, row: bill }];
-  const smsQueued = isValidMobile(patient.mobile || '');
+  const smsQueued = patient.workflow_data?.sms !== false && isValidMobile(patient.mobile || '');
   if (smsQueued) {
     const messageId = crypto.randomUUID();
     const mobile = normalizeIndianMobile(patient.mobile);

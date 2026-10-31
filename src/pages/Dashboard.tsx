@@ -1,3 +1,5 @@
+import { CollectPayment } from '@/components/CollectPayment';
+import { uniquePatientCount } from '@/lib/reportMetrics';
 import { billDue, netBillAmount } from "@/lib/billAmounts";
 import { normalizeIndianMobile } from "@/lib/mobile";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -26,9 +28,6 @@ export default function Dashboard() {
 
   // ── Quick Pay popup state ──
   const [qpBill, setQpBill] = useState<any>(null);
-  const [qpPaid, setQpPaid] = useState("");
-  const [qpMode, setQpMode] = useState("Cash");
-  const [qpSaving, setQpSaving] = useState(false);
 
   // ── Full Edit popup state ──
   const [editBill, setEditBill] = useState<any>(null);
@@ -53,36 +52,10 @@ export default function Dashboard() {
 
   // ── Quick Pay: sirf payment update ──
   const openQuickPay = (bill: any) => {
-    const currentPaid = Number((bill as any).amount_paid || 0);
     setQpBill(bill);
-    setQpPaid(String(currentPaid));
-    setQpMode((bill as any).payment_mode || "Cash");
   };
 
-  const handleQuickPay = async () => {
-    if (!qpBill) return;
-    setQpSaving(true);
-    const total = netBillAmount(qpBill);
-    const paid = parseFloat(qpPaid) || 0;
-    const status = paid <= 0 ? "Pending" : paid >= total ? "Paid" : "Partial";
-    try {
-      await updateBill.mutateAsync({
-        id: qpBill.id,
-        expected_paid: Number(qpBill.amount_paid || 0),
-        amount: Number(qpBill.amount || 0),
-        amount_paid: paid,
-        status,
-        payment_mode: qpMode,
-      } as any);
-      toast({ title: "✅ Payment Updated", description: `${(qpBill.patients as any)?.name} — ₹${paid} paid` });
-      setQpBill(null);
-      refetchPending();
-    } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
-    } finally {
-      setQpSaving(false);
-    }
-  };
+
 
   // ── Full Edit: services bhi change kar sako ──
   const openFullEdit = (bill: any) => {
@@ -165,7 +138,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 dash-animate dash-animate-1">
-          <StatCard title="Today's Patients" value={todayBills?.length ?? 0} icon={Users} variant="primary" />
+          <StatCard title="Today's Patients" value={uniquePatientCount(todayBills || [])} icon={Users} variant="primary" />
           <StatCard title="Appointments" value={stats?.todayAppointments ?? 0} icon={Calendar} variant="secondary" />
           <StatCard title="Pending Payments" value={`₹${pendingTotal.toLocaleString()}`} icon={Receipt} variant="warning" />
           <StatCard title="आज प्राप्त / Collected" value={`₹${todayTotalAmount.toLocaleString()}`} icon={IndianRupee} variant="success" />
@@ -296,85 +269,8 @@ export default function Dashboard() {
         )}
 
         {/* ── Quick Pay Dialog ── */}
-        <Dialog open={!!qpBill} onOpenChange={(o) => { if (!o) setQpBill(null); }}>
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <CheckCircle className="h-5 w-5 text-success" />
-                Quick Pay — {(qpBill?.patients as any)?.name}
-              </DialogTitle>
-            </DialogHeader>
-            {qpBill && (
-              <div className="space-y-4">
-                <div className="p-3 rounded-lg bg-muted/50 text-sm space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Total Bill</span>
-                    <span className="font-bold">₹{Number(qpBill.amount).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Pehle se Paid</span>
-                    <span className="text-success font-medium">₹{Number((qpBill as any).amount_paid || 0).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between border-t pt-1 mt-1">
-                    <span className="text-muted-foreground font-medium">Baki Due</span>
-                    <span className="text-destructive font-bold">
-                      ₹{billDue(qpBill).toLocaleString()}
-                    </span>
-                  </div>
-                </div>
+        {qpBill && <CollectPayment bill={qpBill} initiallyOpen onClose={() => setQpBill(null)} />}
 
-                <div className="space-y-2">
-                  <Label>Ab kitna paid hua? (Total paid amount)</Label>
-                  <Input
-                    type="number"
-                    value={qpPaid}
-                    onChange={e => setQpPaid(e.target.value)}
-                    placeholder="₹ amount paid"
-                    className="text-lg font-bold"
-                    autoFocus
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    💡 Total paid likho — jaise pehle ₹500 tha aur ab ₹200 aur aaya to ₹700 likho
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Payment Mode</Label>
-                  <Select value={qpMode} onValueChange={setQpMode}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Cash">Cash</SelectItem>
-                      <SelectItem value="UPI">UPI</SelectItem>
-                      <SelectItem value="Card">Card</SelectItem>
-                      <SelectItem value="Online">Online</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Preview new status */}
-                {qpPaid && (
-                  <div className="text-xs p-2 rounded bg-primary/10 flex justify-between">
-                    <span>New Status:</span>
-                    <span className="font-bold">
-                      {parseFloat(qpPaid) >= netBillAmount(qpBill) ? "✅ Paid" :
-                       parseFloat(qpPaid) > 0 ? "🟡 Partial" : "🔴 Pending"}
-                    </span>
-                  </div>
-                )}
-
-                <div className="flex gap-2">
-                  <Button onClick={handleQuickPay} disabled={qpSaving} className="flex-1 gap-2">
-                    <CheckCircle className="h-4 w-4" />
-                    {qpSaving ? "Saving..." : "Payment Update Karo"}
-                  </Button>
-                  <Button variant="outline" onClick={() => setQpBill(null)} className="gap-2">
-                    <X className="h-4 w-4" /> Cancel
-                  </Button>
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
 
         {/* ── Full Edit Dialog ── */}
         <Dialog open={!!editBill} onOpenChange={(o) => { if (!o) setEditBill(null); }}>

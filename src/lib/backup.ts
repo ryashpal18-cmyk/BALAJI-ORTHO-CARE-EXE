@@ -83,7 +83,7 @@ function clinicalLocalStorage() {
   const notes: Record<string, string> = {};
   for (let i=0; i<localStorage.length; i++) {
     const key = localStorage.key(i)!;
-    if (key.startsWith("ortho_visits_") || ["bocc_service_catalog","bocc_selected_branch","bocc_dash_modules","bocc_app_theme"].includes(key)) notes[key] = localStorage.getItem(key)!;
+    if ((key.startsWith("ortho_visits_") || key.startsWith("bocc_bill_draft:")) || ["bocc_service_catalog","bocc_selected_branch","bocc_dash_modules","bocc_app_theme"].includes(key)) notes[key] = localStorage.getItem(key)!;
   }
   return notes;
 }
@@ -116,7 +116,7 @@ export async function restoreBackup(json: string) {
   parkRestoredMessages(backup);
   await restoreLocalSnapshot({ cache: backup.tables, queue: backup.localSnapshot.queue, meta: backup.localSnapshot.meta || [] });
   for (const [key,value] of Object.entries(backup.localStorage || {})) {
-    if (key.startsWith("ortho_visits_") || ["bocc_service_catalog","bocc_selected_branch","bocc_dash_modules","bocc_app_theme"].includes(key)) localStorage.setItem(key, String(value));
+    if ((key.startsWith("ortho_visits_") || key.startsWith("bocc_bill_draft:")) || ["bocc_service_catalog","bocc_selected_branch","bocc_dash_modules","bocc_app_theme"].includes(key)) localStorage.setItem(key, String(value));
   }
 }
 

@@ -17,10 +17,11 @@ const ACTION_COLORS: Record<string, string> = {
 };
 
 export default function AuditLog() {
-  const { data: logs = [], isLoading } = useAuditLogs({ limit: 300 });
+  const { data: logs = [], isLoading } = useAuditLogs();
   const [search, setSearch] = useState("");
 
-  const filtered = logs.filter((l) =>
+  const [from,setFrom]=useState(""),[to,setTo]=useState(""),[page,setPage]=useState(0);
+  const filtered = logs.filter(l => (!from || l.created_at.slice(0,10)>=from) && (!to || l.created_at.slice(0,10)<=to)).filter((l) =>
     `${l.actor_name} ${l.module} ${l.action} ${l.description || ""}`
       .toLowerCase()
       .includes(search.toLowerCase())
@@ -48,6 +49,7 @@ export default function AuditLog() {
           />
         </div>
 
+        <div className="flex gap-3"><Input aria-label="From date" type="date" value={from} onChange={e=>{setFrom(e.target.value);setPage(0);}}/><Input aria-label="To date" type="date" value={to} onChange={e=>{setTo(e.target.value);setPage(0);}}/><button disabled={!page} onClick={()=>setPage(page-1)}>पिछला</button><button disabled={(page+1)*100>=filtered.length} onClick={()=>setPage(page+1)}>अगला</button></div>
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Activity Log ({filtered.length})</CardTitle>
@@ -73,7 +75,7 @@ export default function AuditLog() {
                       Koi log nahi mila (offline ho sakte ho, ya abhi tak koi activity nahi hui)
                     </td></tr>
                   )}
-                  {filtered.map((log) => (
+                  {filtered.slice(page*100,page*100+100).map((log) => (
                     <tr key={log.id} className="border-t hover:bg-muted/30">
                       <td className="p-3 text-muted-foreground whitespace-nowrap">
                         {new Date(log.created_at).toLocaleString("en-IN")}

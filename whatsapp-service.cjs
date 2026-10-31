@@ -37,13 +37,14 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
     const bill=store.cacheGetAll('billing').find(b=>normId(b.id)===normId(id));
     if(!bill)throw Error('Bill अब उपलब्ध नहीं है');
     const patient=store.cacheGetAll('patients').find(p=>normId(p.id)===normId(bill.patient_id));
-    if(!patient||!familyNumber(patient.mobile))throw Error('मरीज का सही mobile number चाहिए');
+    if(!patient)throw Error('मरीज उपलब्ध नहीं है');
     if(['cancelled','canceled','void','deleted'].includes(String(bill.status).toLowerCase()))throw Error('Bill रद्द है');
     const fingerprint=crypto.createHash('sha256').update(JSON.stringify([normId(bill.id),normId(patient.id),familyNumber(patient.mobile),patient.name,bill.service,bill.amount,bill.discount||0,bill.amount_paid||0])).digest('hex');
     return{bill,patient,fingerprint};
   }
+  function assertMessageAllowed(patient){const current=store.cacheGetAll('patients').find(p=>normId(p.id)===normId(patient.id))||patient;if(current.workflow_data?.whatsapp===false)throw Error('इस मरीज के लिए WhatsApp बंद है');if(!familyNumber(current.mobile))throw Error('मरीज का सही mobile number चाहिए');}
   function enqueue(id){
-    assertAllowed();const data=billData(id),list=jobs();
+    assertAllowed();const data=billData(id),list=jobs();assertMessageAllowed(data.patient);
     const unresolved=list.find(j=>normId(j.billId)===normId(id)&&['sending','unconfirmed'].includes(j.state));
     if(unresolved)throw Error('पहले इसी bill के अनिश्चित WhatsApp परिणाम की जाँच करें');
     const same=list.find(j=>normId(j.billId)===normId(id)&&j.fingerprint===data.fingerprint&&j.state!=='cancelled');
@@ -57,7 +58,7 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
   function previewStatement(id){assertAllowed();return statementSummary(statementData(id).statement);}
   function enqueueStatement(id,expectedFingerprint){
     assertAllowed();const data=statementData(id);
-    if(!familyNumber(data.patient.mobile))throw Error('STATEMENT-003: मरीज का सही mobile number चाहिए।');
+    if(!familyNumber(data.patient.mobile))throw Error('STATEMENT-003: मरीज का सही mobile number चाहिए।');assertMessageAllowed(data.patient);
     if(!data.statement.rows.length)throw Error('STATEMENT-003: भेजने के लिए कोई सक्रिय bill उपलब्ध नहीं है।');
     if(!expectedFingerprint||expectedFingerprint!==data.fingerprint)throw Error('STATEMENT-004: हिसाब बदल गया है; फिर preview करके भेजें।');
     const list=jobs(),samePatient=j=>j.kind==='statement'&&normId(j.patientId)===normId(data.patient.id);
@@ -123,7 +124,7 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
     fs.writeFileSync(file+'.tmp',bytes);fs.renameSync(file+'.tmp',file);return file;
   }
   const stillQueued=job=>jobs().some(j=>j.id===job.id&&j.state==='queued'&&j.fingerprint===job.fingerprint);
-  const jobData=job=>job.kind==='monthly'?(assertMonthlyJob(job),monthlyData(job.month)):job.kind==='statement'?statementData(job.patientId):billData(job.billId);
+  const jobData=job=>{const data=job.kind==='monthly'?(assertMonthlyJob(job),monthlyData(job.month)):job.kind==='statement'?statementData(job.patientId):billData(job.billId);if(job.kind!=='monthly')assertMessageAllowed(data.patient);return data;};
   function patch(id,values){const list=jobs(),job=list.find(j=>j.id===id);if(job)Object.assign(job,values);save(list);return job;}
   async function createPdf(id){
     assertAllowed();const {bill,patient,fingerprint}=billData(id);

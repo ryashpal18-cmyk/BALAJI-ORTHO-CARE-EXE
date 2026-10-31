@@ -21,7 +21,7 @@ function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
   return{festival:input.festival,title,scheduledAt:new Date(at).toISOString(),date:indiaDate(at),channels,messages};
  }
  function audience(){
-  const raw=store.patientDirectoryRows().filter(p=>!p.deleted_at),blocked=new Set(exclusions()),seen=new Set(),rows=[];let invalid=0,duplicates=0,excluded=0;
+  const raw=store.patientDirectoryRows().filter(p=>!p.deleted_at&&!p.workflow_data?.archived&&p.workflow_data?.marketing!==false),blocked=new Set(exclusions()),seen=new Set(),rows=[];let invalid=0,duplicates=0,excluded=0;
   for(const p of raw){const mobile=familyNumber(p.mobile);if(!mobile){invalid++;continue;}if(seen.has(mobile)){duplicates++;continue;}seen.add(mobile);if(blocked.has(mobile)){excluded++;continue;}rows.push({mobile,name:String(p.name||'परिवार'),patientId:p.id});}
   rows.sort((a,b)=>a.mobile.localeCompare(b.mobile));return{rows,invalid,duplicates,excluded};
  }
@@ -56,6 +56,7 @@ function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
    for(const c of due){if(c.date!==indiaDate(now())){for(const j of c.jobs)if(j.state==='queued')patchJob(c.id,j.id,{state:'expired',error:'त्योहार का चुना हुआ दिन समाप्त हो गया।'});continue;}for(const j of c.jobs){if(j.state!=='queued'||j.retryAt>now())continue;
     if(exclusions().includes(j.mobile)){patchJob(c.id,j.id,{state:'cancelled',error:'इस नंबर पर शुभकामनाएँ बंद हैं।'});continue;}
     if(!eligible.has(j.mobile)){patchJob(c.id,j.id,{state:'cancelled',error:'नंबर मरीज सूची से हट गया है।'});continue;}
+    const contact=store.patientDirectoryRows().find(p=>String(p.id).replace(/^local_/,'')===String(j.patientId).replace(/^local_/,''));if(contact?.workflow_data?.[j.channel]===false){patchJob(c.id,j.id,{state:'cancelled',error:'मरीज की संपर्क पसंद के अनुसार रोका गया'});continue;}
     if(j.channel==='sms'&&!(gateway?.apiUrl&&gateway.apiKey&&gateway.deviceId))continue;
     if(j.channel==='whatsapp'&&!whatsapp.status().ready)continue;
     selected={c,j};break;
@@ -66,6 +67,7 @@ function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
    // again immediately before WhatsApp hands the message to the paired client.
    const validate=()=>{
     if(!allowed())return 'cancelled';
+    const person=store.patientDirectoryRows().find(p=>String(p.id).replace(/^local_/,'')===String(j.patientId).replace(/^local_/,''));if(person?.workflow_data?.[j.channel]===false||person?.workflow_data?.marketing===false)return 'cancelled';
     const current=list().find(x=>x.id===c.id),job=current?.jobs.find(x=>x.id===j.id);
     if(!current||current.state==='cancelled'||job?.state!=='sending'||current.date!==indiaDate(now())||exclusions().includes(j.mobile)||!audience().rows.some(p=>p.mobile===j.mobile))return 'cancelled';
     return current.state==='active'?true:'wait';

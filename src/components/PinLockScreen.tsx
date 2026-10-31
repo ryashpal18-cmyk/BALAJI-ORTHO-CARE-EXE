@@ -9,21 +9,13 @@ export function PinLockScreen({ onUnlock }: { onUnlock: () => void }) {
   const [shake, setShake] = useState(false);
   const attemptingRef = useRef(false);
 
-  useEffect(() => {
-    if (pin.length >= 4 && !attemptingRef.current) {
-      attemptingRef.current = true;
-      verifyPin(pin).then((ok) => {
-        if (ok) {
-          markActive();
-          onUnlock();
-        } else {
-          setError(true);
-          setShake(true);
-          setTimeout(() => { setPin(""); setShake(false); attemptingRef.current = false; }, 500);
-        }
-      });
-    }
-  }, [pin, onUnlock]);
+  const unlock = async () => {
+    if (pin.length < 4 || attemptingRef.current) return;
+    attemptingRef.current = true;
+    try { if (await verifyPin(pin)) { markActive(); onUnlock(); }
+      else { setError(true); setPin(""); }
+    } finally { attemptingRef.current = false; }
+  };
 
   const press = (digit: string) => {
     setError(false);
@@ -72,6 +64,7 @@ export function PinLockScreen({ onUnlock }: { onUnlock: () => void }) {
         <button onClick={backspace} style={numBtnStyle}><Delete style={{ width: 20, height: 20, margin: "0 auto" }} /></button>
       </div>
 
+      <button onClick={() => void unlock()} disabled={pin.length < 4} className="rounded bg-blue-600 px-8 py-3">Unlock</button>
       <style>{`
         @keyframes shake {
           0%, 100% { transform: translateX(0); }

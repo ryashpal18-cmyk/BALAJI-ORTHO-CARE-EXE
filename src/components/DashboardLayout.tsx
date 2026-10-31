@@ -1,3 +1,4 @@
+import { filterPatients } from '@/lib/patientDirectory';
 import { businessDate } from "@/lib/businessDate";
 import { useState, useEffect, useRef } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -31,6 +32,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [fading, setFading]     = useState(false);
   const navigate = useNavigate();
   const wrapRef  = useRef<HTMLDivElement>(null);
+  useEffect(()=>{const key=(e:KeyboardEvent)=>{if(!(e.ctrlKey||e.metaKey)||!e.shiftKey||e.isComposing)return;const k=e.key.toLowerCase();if(k==='f'){e.preventDefault();navigate('/patient-search');}if(k==='b'){e.preventDefault();navigate('/billing');}if(k==='r'){e.preventDefault();navigate('/opd');}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[navigate]);
   const [isOffline, setIsOffline] = useState(!navigator.onLine); // ✅ Offline banner
 
   const { data: followups } = useFollowupsAround();
@@ -75,41 +77,13 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   useEffect(() => {
     if (query.trim().length < 2) { setResults([]); setShowDrop(false); return; }
     setLoading(true);
+    let active=true;
     const timer = setTimeout(async () => {
-      const online = await isOnline();
-      if (online) {
-        try {
-          const { data, error } = await supabase
-            .from("patients")
-            .select("id, name, mobile, age, gender")
-            .ilike("name", `%${query}%`)
-            .limit(8);
-          if (error) throw error;
-          setResults(data || []);
-        } catch {
-          // online query fail ho gayi (net flaky) — cache se search karo
-          const all = await cacheGetAll("patients");
-          const q = query.toLowerCase();
-          setResults(
-            (all as any[])
-              .filter((p) => (p.name || "").toLowerCase().includes(q) || (p.mobile || "").includes(query))
-              .slice(0, 8)
-          );
-        }
-      } else {
-        // ✅ Offline — local cache (PC pe save hua data) mein search karo
-        const all = await cacheGetAll("patients");
-        const q = query.toLowerCase();
-        setResults(
-          (all as any[])
-            .filter((p) => (p.name || "").toLowerCase().includes(q) || (p.mobile || "").includes(query))
-            .slice(0, 8)
-        );
-      }
-      setShowDrop(true);
-      setLoading(false);
-    }, 300);
-    return () => clearTimeout(timer);
+      try { const all=await cacheGetAll('patients');if(active){setResults(filterPatients(all,query,'',null).slice(0,8));setShowDrop(true);} }
+      catch {if(active)setResults([]);}
+      finally {if(active)setLoading(false);}
+    },150);
+    return ()=>{active=false;clearTimeout(timer);};
   }, [query]);
 
   const handleSelect = (patient: any) => {

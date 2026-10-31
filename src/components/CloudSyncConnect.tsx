@@ -1,3 +1,4 @@
+import { CloudReconcile } from './CloudReconcile';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { resetCloudConnection, ensureCloudSession } from '@/lib/localSession';
@@ -60,7 +61,7 @@ export function CloudSyncConnect() {
     <CardContent>
       <p className="mb-3 text-sm" role="status">{message}</p>
       <p className="mb-4 text-sm text-muted-foreground">BJ BACKUP से connect करें। Cloud password save नहीं होगा; connection इस PC पर सुरक्षित रखा जाएगा।</p>
-      <form onSubmit={connect} className="space-y-3">
+      <CloudReconcile/><form onSubmit={connect} className="space-y-3">
         <Label htmlFor="cloud-sync-email">Cloud account email</Label>
         <Input id="cloud-sync-email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required disabled={busy} />
         <Label htmlFor="cloud-sync-password">Cloud account password</Label>

@@ -33,10 +33,16 @@ export function withPaymentHistory(existing: any, changes: any, eventId: string,
   }
   return { ...changes, payment_history: history };
 }
-export function collectionRows(bills: any[]) {
-  return bills.flatMap(bill => paymentHistory(bill).map(receipt => ({ ...bill,
+export function collectionRows(bills: any[], patients: any[] = [], includeAdvance = true) {
+  const receipts=bills.flatMap(bill => paymentHistory(bill).filter(r=>r.payment_mode!=='Account Credit').map(receipt => ({ ...bill,
     id: receipt.id, bill_id: bill.id, bill_created_at: bill.created_at, created_at: receipt.paid_at, amount_paid: receipt.amount,
     payment_mode: receipt.payment_mode, legacy_collection: !!receipt.legacy })));
+  const people=new Map([...bills.map(b=>b.patients).filter(Boolean),...patients].map(p=>[String(p.id||'').replace(/^local_/,''),p]));
+  if(includeAdvance) for(const patient of people.values()) for(const e of patient.workflow_data?.account||[]){
+    if(e.kind==='apply')continue;
+    receipts.push({id:e.id,patient_id:patient.id,patients:patient,bill_id:'Advance',bill_created_at:e.paid_at,created_at:e.paid_at,amount_paid:e.amount,payment_mode:e.mode,service:'Advance '+e.kind,legacy_collection:false});
+  }
+  return receipts;
 }
 
 export function normalizeBill(changes: any, existing: any = {}) {
@@ -49,6 +55,6 @@ export function normalizeBill(changes: any, existing: any = {}) {
   }
   if (Number(bill.discount || 0) > Number(bill.amount || 0)) throw new Error('Discount cannot exceed bill amount');
   const net = Number(bill.amount || 0) - Number(bill.discount || 0);
-  result.status = Number(bill.amount_paid || 0) >= net ? 'Paid' : Number(bill.amount_paid || 0) > 0 ? 'Partial' : 'Pending';
+  result.status = bill.status === 'Cancelled' ? 'Cancelled' : Number(bill.amount_paid || 0) >= net ? 'Paid' : Number(bill.amount_paid || 0) > 0 ? 'Partial' : 'Pending';
   return result;
 }
