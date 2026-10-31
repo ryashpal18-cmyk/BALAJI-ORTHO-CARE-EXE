@@ -428,7 +428,7 @@ function commitMutation(mutation, row, idField = 'id') {
     }
     if(mutation.table==='billing' && mutation.op==='insert' && saved.invoice_number==null){
       const scope=metaGet('invoice-number:verified-scope')||metaGet('invoice-number:scope');const pools=metaGet('invoice-number:pools')||[];
-      for(const pool of pools.filter(p=>p.scope===scope)){
+      for(const pool of pools.filter(p=>p.scope===scope&&(!metaGet('invoice-number:owner')||!mutation.ownerUserId||mutation.ownerUserId===metaGet('invoice-number:owner')))){
         const key='invoice-number:used:'+pool.requestId,used=Number(metaGet(key)||0);
         if(used<pool.numbers.length){saved={...saved,invoice_number:pool.numbers[used]};metaSet(key,used+1);break;}
       }

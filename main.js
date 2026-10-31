@@ -53,7 +53,9 @@ ipcMain.handle('auth:establish', async (_event, token) => {
   const verified = { ...profile, expiresAt: Date.now() + 8 * 60 * 60 * 1000 };
   if (epoch !== authGeneration || access.getPrincipal()?.localAdmin) throw new Error('Session changed during verification');
   verifiedCloudToken = token;
-  access.setPrincipal(verified); return { success: true, principal: verified };
+  access.setPrincipal(verified);
+  if(verified.userId){const scope=authPublicConfig.url+'::'+verified.userId;sqliteStore.metaSet('invoice-number:verified-scope',scope);sqliteStore.metaSet('invoice-number:scope',scope);sqliteStore.metaSet('invoice-number:owner',verified.userId);}
+  return { success: true, principal: verified };
 });
 // Local login and cloud sync are independent. A cloud outage never clears local access.
 const offlineAuth = require('./offline-login.cjs').register({ ipcMain, access, app, safeStorage, net,
@@ -63,7 +65,7 @@ let cloudSync;
 const getCloudSync = () => cloudSync ||= require('./cloud-sync.cjs').createCloudSync({
   file: path.join(app.getPath('userData'), 'cloud-sync-session.json'), safeStorage, access,
   config: authPublicConfig, fetchCloud: (...args) => net.fetch(...args),
-  onCloudScope: scope => { sqliteStore.metaSet('invoice-number:verified-scope',scope);sqliteStore.metaSet('invoice-number:scope',scope); },
+  onCloudScope: scope => { sqliteStore.metaSet('invoice-number:owner',access.getPrincipal()?.userId);sqliteStore.metaSet('invoice-number:verified-scope',scope);sqliteStore.metaSet('invoice-number:scope',scope); },
   onCloudToken: token => { verifiedCloudToken = token; }
 });
 ipcMain.handle('auth:syncSession', () => getCloudSync().connect());
