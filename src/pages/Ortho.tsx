@@ -1,3 +1,4 @@
+import { attendedVisit } from "@/lib/followupState";
 import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { isOnline } from "@/lib/offlineSync";
 import { cacheGetAll } from "@/lib/offlineDb";
@@ -68,7 +69,8 @@ function printRemovalSlip(c: any) {
   const win = window.open("","_blank"); if(!win) return;
   const name = c.patients?.name||"—"; const mob = c.patients?.mobile||"";
   const bp = `${c.side||""} ${c.body_part||""}`.trim();
-  const totalDays = c.plaster_date && c.next_followup_date ? diffDays(c.plaster_date, todayIso()) : "—";
+  const removedOn=c.workflow_data?.removed_on || c.removed_at?.slice(0,10);
+  const totalDays = c.plaster_date && removedOn ? diffDays(c.plaster_date, removedOn) : "—";
   writeReportDocument(win, `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Plaster Removal Slip</title>
   <style>
     @page{size:A5;margin:12mm} body{font-family:Arial,sans-serif;color:#1e293b}
@@ -90,7 +92,7 @@ function printRemovalSlip(c: any) {
   <div class="row"><span class="label">Fracture Type</span><span class="val">${c.fracture_type||"—"}</span></div>
   <div class="row"><span class="label">Plaster Type</span><span class="val">${c.plaster_type||"—"}</span></div>
   <div class="row"><span class="label">Plaster लगाई</span><span class="val">${fmtDate(c.plaster_date)}</span></div>
-  <div class="row"><span class="label">हटाई गई</span><span class="val">${fmtDate(todayIso())}</span></div>
+  <div class="row"><span class="label">हटाई गई</span><span class="val">${removedOn?fmtDate(removedOn):"पुरानी removal तारीख उपलब्ध नहीं"}</span></div>
   <div class="row"><span class="label">Total Treatment</span><span class="val">${totalDays} दिन</span></div>
   <div class="badge">✅ Plaster Successfully Removed</div>
   <div><b style="font-size:12px">सावधानियां:</b><ul style="font-size:12px;color:#374151;padding-left:16px;margin:6px 0">
@@ -144,7 +146,7 @@ function printMonthlyReport(cases: any[], followups: any[]) {
   const thisMo = cases.filter(c => (c.plaster_date||"").startsWith(today.slice(0,7)));
   const active = cases.filter(c => c.plaster_status==="Active");
   const completed = cases.filter(c => c.plaster_status!=="Active");
-  const missed = followups.filter(f => f.next_followup_date && f.next_followup_date < today && f.plaster_status==="Active");
+  const missed = followups.filter(f => f.next_followup_date && f.next_followup_date < today && f.plaster_status==="Active"&&!attendedVisit(f));
   const bodyCount: Record<string,number> = {};
   cases.forEach(c => { if(c.body_part) bodyCount[c.body_part]=(bodyCount[c.body_part]||0)+1; });
   const topParts = Object.entries(bodyCount).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -809,7 +811,7 @@ function AnalyticsSection({ cases, followups }: { cases: any[]; followups: any[]
   const today = todayIso();
   const active    = cases.filter(c=>c.plaster_status==="Active");
   const done      = cases.filter(c=>c.plaster_status!=="Active");
-  const missed    = followups.filter(f=>f.next_followup_date && f.next_followup_date<today && f.plaster_status==="Active");
+  const missed    = followups.filter(f=>f.next_followup_date && f.next_followup_date<today && f.plaster_status==="Active"&&!attendedVisit(f));
   const bodyCount: Record<string,number> = {};
   const typeCount: Record<string,number> = {};
   const causeCount: Record<string,number> = {};
@@ -1016,7 +1018,7 @@ export default function Ortho() {
   // ── Stats ──
   const { todayFuList, missedFuList } = useMemo(()=>({
     todayFuList:  (followups as any[]).filter(c=>c.next_followup_date===today),
-    missedFuList: (followups as any[]).filter(c=>c.next_followup_date&&c.next_followup_date<today&&c.plaster_status==="Active"),
+    missedFuList: (followups as any[]).filter(c=>c.next_followup_date&&c.next_followup_date<today&&c.plaster_status==="Active"&&!attendedVisit(c)),
   }), [followups, today]);
 
   const activeCases    = useMemo(()=>(cases as any[]).filter(c=>c.plaster_status==="Active"), [cases]);
@@ -1040,7 +1042,7 @@ export default function Ortho() {
   const handleRemove = async () => {
     if(!removeTarget) return; setRemoveBusy(true);
     try {
-      await updateCase.mutateAsync({ id: removeTarget.id, plaster_status: "Removed" } as any);
+      await updateCase.mutateAsync({ id: removeTarget.id, plaster_status: "Removed", _workflowPatch:{removed_on:todayIso()} } as any);
       const n = removeTarget.patients?.name||""; const mob = removeTarget.patients?.mobile||"";
       if(mob) { const r = await sendSMS(mob, tplRemoved(n, removeTarget.body_part||""), n, "plaster_removed"); if(r.ok) toast.success(r.queued?"⏳ SMS queue":"✅ Plaster removed SMS bheja"); }
       else toast.success("✅ Plaster Removed");

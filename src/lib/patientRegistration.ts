@@ -84,10 +84,12 @@ export function warmInvoiceNumbers():Promise<void>{
    const scope=String((supabase as any).supabaseUrl)+'::'+session.user.id;
    const pools:any[]=await metaGet('invoice-number:pools')||[];
    let available=0;for(const p of pools.filter(p=>p.scope===scope))available+=p.numbers.length-Number(await metaGet('invoice-number:used:'+p.requestId)||0);
+   await metaSet('invoice-number:scope',scope);
    if(available>8)return;
    const requestId=await metaGet('invoice-number:request:'+scope)||crypto.randomUUID();await metaSet('invoice-number:request:'+scope,requestId);
    const {data,error}=await supabase.rpc('reserve_invoice_numbers' as any,{p_request:requestId} as any);if(error)throw error;
    if(!Array.isArray(data)||!data.every(n=>Number.isSafeInteger(n)&&n>0))throw Error('Invalid invoice number reservation');
+   if((await supabase.auth.getSession()).data.session?.user.id!==session.user.id)throw Error('Cloud account बदला; नंबर फिर reserve करें');
    const latest=await metaGet('invoice-number:pools')||[];if(!latest.some((p:any)=>p.requestId===requestId))await metaSet('invoice-number:pools',[...latest,{requestId,scope,numbers:data}]);
    await metaSet('invoice-number:scope',scope);await metaSet('invoice-number:request:'+scope,null);
  })().finally(()=>{invoiceWarming=null;});return invoiceWarming;

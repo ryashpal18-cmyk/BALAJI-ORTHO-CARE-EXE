@@ -197,7 +197,7 @@ export default function DrReg() {
     const byId = new Map(doctors.map((d) => [normId(d.id), d]));
     const rows: ReportRow[] = [];
     for (const b of bills as any[]) {
-      if (!b.doctor_id) continue;
+      if (!b.doctor_id || String(b.status).toLowerCase()==="cancelled") continue;
       const lines = xrayLines(b);
       const amount = lines.reduce((s, l) => s + l.amount, 0);
       if (amount <= 0) continue;

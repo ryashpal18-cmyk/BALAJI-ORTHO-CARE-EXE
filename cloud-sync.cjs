@@ -2,7 +2,7 @@
 // Cloud refresh tokens are independent of the offline owner's password.
 const fs = require('fs');
 const path = require('path');
-function createCloudSync({ file, safeStorage, access, config, fetchCloud, onCloudToken = () => {}, now = Date.now }) {
+function createCloudSync({ file, safeStorage, access, config, fetchCloud, onCloudToken = () => {}, onCloudScope = () => {}, now = Date.now }) {
   let generation = 0, connecting = null, retryAt = 0, lastError = '';
   function owner() {
     const p = access.getPrincipal();
@@ -69,7 +69,7 @@ function createCloudSync({ file, safeStorage, access, config, fetchCloud, onClou
     const userId = await verify(session);
     if (!unchanged(p, epoch)) throw new Error('Local login changed during cloud connection');
     write({ ownerId: p.userId, url: config.url, userId, session });
-    retryAt = 0; lastError = ''; onCloudToken(session.access_token);
+    retryAt = 0; lastError = ''; onCloudScope(config.url+'::'+userId); onCloudToken(session.access_token);
     return { success: true };
   }
   async function connect() {
@@ -90,7 +90,7 @@ function createCloudSync({ file, safeStorage, access, config, fetchCloud, onClou
         }
         const userId = await verify(session);
         if (userId !== record.userId || !unchanged(p, epoch)) return { success: false, error: 'Cloud identity changed' };
-        lastError = ''; onCloudToken(session.access_token);
+        lastError = ''; onCloudScope(config.url+'::'+userId); onCloudToken(session.access_token);
         return { success: true, session };
       } catch (error) {
         if (unchanged(p, epoch)) { retryAt = now() + 60000; lastError = error.message; onCloudToken(null); }

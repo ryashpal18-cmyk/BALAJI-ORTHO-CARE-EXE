@@ -6,6 +6,7 @@ export function paymentHistory(bill: any): Receipt[] {
     payment_mode: bill.payment_mode || "Cash", legacy: true }] : [];
 }
 export function withPaymentHistory(existing: any, changes: any, eventId: string, now: string) {
+  if (changes.payment_mode === "Account Credit" && changes.payment_mode !== existing.payment_mode) throw new Error("Advance लगाने के लिए मरीज का Advance विकल्प इस्तेमाल करें");
   const history = paymentHistory(existing).map(r => ({ ...r }));
   if (changes.amount_paid !== undefined) {
     const delta = Math.round((Number(changes.amount_paid) - Number(existing.amount_paid || 0)) * 100) / 100;
@@ -13,7 +14,7 @@ export function withPaymentHistory(existing: any, changes: any, eventId: string,
     if (delta === 0 && changes.payment_mode && changes.payment_mode !== existing.payment_mode) {
       const groups = new Map<string, { amount: number; paid_at: string; payment_mode: string }>();
       for (const receipt of history) {
-        if (receipt.payment_mode === changes.payment_mode) continue;
+        if (receipt.payment_mode === "Account Credit" || receipt.payment_mode === changes.payment_mode) continue;
         const key = `${receipt.paid_at}|${receipt.payment_mode}`;
         const group = groups.get(key) || { amount: 0, paid_at: receipt.paid_at, payment_mode: receipt.payment_mode };
         group.amount += Number(receipt.amount); groups.set(key,group);
@@ -49,6 +50,8 @@ export function normalizeBill(changes: any, existing: any = {}) {
   const result = { ...changes };
   if ('discount' in result || !('id' in existing)) result.discount = Number(result.discount ?? 0);
   const bill = { ...existing, ...result };
+  if (String(existing.status).toLowerCase() === "cancelled" && (Object.entries(changes).some(([k,v]) => ["amount","discount","amount_paid"].includes(k) && Number(v||0)!==Number(existing[k]||0)) || (changes.status && changes.status!=="Cancelled"))) throw new Error("रद्द बिल में भुगतान या Edit नहीं कर सकते");
+  if (String(bill.status).toLowerCase()==="cancelled" && Number(bill.amount_paid||0)!==0) throw new Error("Cancel से पहले जमा राशि वापस करें");
   for (const key of ['amount','amount_paid','discount']) {
     const value = Number(bill[key] ?? 0);
     if (!Number.isFinite(value) || value < 0) throw new Error('Amount, payment and discount must be non-negative numbers');

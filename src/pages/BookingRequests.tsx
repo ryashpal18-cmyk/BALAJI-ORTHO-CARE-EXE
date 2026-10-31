@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { cacheGetAll, commitBatch } from "@/lib/offlineDb";
 import { runSync } from "@/lib/offlineSync";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -25,9 +25,11 @@ interface BookingRequest {
 }
 
 export default function BookingRequests() {
+  const [choices,setChoices]=useState<Record<string,string>>({});
   const processing = useRef(new Set<string>());
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const {data:bookingPeople=[]}=useQuery({queryKey:["booking-patient-choices"],queryFn:()=>cacheGetAll("patients"),refetchInterval:5000});
 
   const { data: requests = [], isLoading } = useQuery({
     queryKey: ["booking-requests"],
@@ -67,7 +69,11 @@ export default function BookingRequests() {
       const [patients, branches, requests, appointments] = await Promise.all(['patients','branches','booking_requests','appointments'].map(cacheGetAll));
       if (requests.find(r => r.id === req.id)?.status === 'Confirmed') return;
       const mobile = req.mobile.replace(/\D/g,'').slice(-10);
-      const patient = patients.find(p => (p.mobile || '').replace(/\D/g,'').slice(-10) === mobile);
+      const matches=patients.filter(p=>(p.mobile||'').replace(/\D/g,'').slice(-10)===mobile&&!p.workflow_data?.merged_into);
+      const chosen=choices[req.id];
+      if(matches.length&&!chosen)throw new Error('परिवार में सही मरीज चुनें या नया सदस्य चुनें');
+      const patient=chosen&&chosen!=='new'?matches.find(p=>p.id===chosen):null;
+      if(chosen&&chosen!=='new'&&!patient)throw new Error('मरीज सूची बदली; फिर चुनें');
       const patientId = patient?.id || req.id;
       const branch = patient?.branch_id || localStorage.getItem('bocc_selected_branch') || (branches.filter(b => b.is_active).length === 1 ? branches.find(b => b.is_active)?.id : null);
       if (!branch) throw new Error('पहले branch चुनें');
@@ -149,7 +155,11 @@ export default function BookingRequests() {
                       </td>
                       <td className="p-3">
                         {r.status === "Pending" && (
-                          <div className="flex justify-end gap-1.5">
+                          <div className="flex flex-wrap justify-end gap-1.5">
+                            <select aria-label="Booking patient selection" className="rounded border bg-background p-1" value={choices[r.id]||''} onChange={e=>setChoices(c=>({...c,[r.id]:e.target.value}))}>
+                              <option value="">सही मरीज चुनें</option><option value="new">नया मरीज / परिवार सदस्य: {r.patient_name}</option>
+                              {bookingPeople.filter(p=>(p.mobile||'').replace(/\D/g,'').slice(-10)===r.mobile.replace(/\D/g,'').slice(-10)&&!p.workflow_data?.merged_into).map(p=><option key={p.id} value={p.id}>{p.name} · {p.registration_number||p.id}</option>)}
+                            </select>
                             <Button size="sm" className="h-8 px-2 gap-1" onClick={() => confirmAndCreateAppointment(r)}>
                               <Check className="h-3.5 w-3.5" /> Confirm
                             </Button>

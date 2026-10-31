@@ -26,15 +26,15 @@ function financeApply(store,input,actor='Admin',ownerUserId=null){
  if(input.split&&input.action!=='collect')throw Error('Split केवल नई जमा में उपलब्ध है');
  const mode=input.mode||'Cash';if(!['Cash','UPI','Card','Bank Transfer'].includes(mode))throw Error('सही भुगतान माध्यम चुनें');
  if(['deposit','refund-advance'].includes(input.action)&&!['Cash','UPI'].includes(mode))throw Error('Advance के लिए Cash या UPI चुनें');
- const items=[],result={requestId:input.requestId,action:input.action,amount:amount/100,paid_at:now,patient:p.patient.name,receipts:[]};
+ const items=[],result={requestId:input.requestId,action:input.action,amount:amount/100,paid_at:now,patient:p.patient.name,mode:input.action==='apply'?'Account Credit':input.split?'Cash + UPI':mode,reason:input.reason||'',receipts:[]};
  const patchBill=(b,delta,receiptMode)=>{
    const id=randomUUID(),history=Array.isArray(b.payment_history)?b.payment_history.map(r=>({...r})):Number(b.amount_paid)?[{id:'legacy-'+b.id,amount:Number(b.amount_paid),paid_at:b.created_at,payment_mode:b.payment_mode||'Cash',legacy:true}]:[];
    const paid=cents(b.amount_paid||0)+delta;if(paid<0)throw Error('जमा राशि से अधिक वापसी नहीं हो सकती');
    history.push({id,amount:delta/100,paid_at:now,payment_mode:receiptMode,reason:input.reason||input.action,group_id:input.requestId});
    const status=b.status==='Cancelled'?'Cancelled':paid>=cents(b.amount)-cents(b.discount||0)?'Paid':paid?'Partial':'Pending';
    const row={amount_paid:paid/100,payment_history:history,payment_mode:receiptMode,status,updated_at:now};
-   items.push({mutation:{table:'billing',op:'update',rowId:b.id,expectedPaid:Number(b.amount_paid||0),payload:row},row});
-   result.receipts.push({billId:b.id,id,amount:delta/100,mode:receiptMode});Object.assign(b,row);
+   items.push({mutation:{table:'billing',op:'update',rowId:b.id,expectedPaid:Number(b.amount_paid||0),expectedBill:Object.fromEntries(['amount','discount','amount_paid','status','patient_id','payment_history'].map(k=>[k,b[k]??null])),payload:row},row});
+   result.receipts.push({billId:b.id,billNumber:b.workflow_data?.invoice_label||(b.invoice_number?'BILL-'+String(b.invoice_number).padStart(6,'0'):b.id),id,amount:delta/100,mode:receiptMode});Object.assign(b,row);
  };
  if(['collect','apply'].includes(input.action)){
    if(amount>Math.round(p.due*100)||input.action==='apply'&&amount>Math.round(p.credit*100))throw Error('राशि उपलब्ध बकाया / advance से अधिक है');
@@ -49,7 +49,7 @@ function financeApply(store,input,actor='Admin',ownerUserId=null){
    const bill=p.bills.find(b=>key(b.id)===key(input.billId));if(!bill||amount>cents(bill.amount_paid||0))throw Error('सही bill और वापसी की राशि चुनें');patchBill(bill,-amount,mode);
  } else if(input.action==='cancel'){
    const bill=p.bills.find(b=>key(b.id)===key(input.billId));if(!bill||Number(bill.amount_paid)>0||!String(input.reason||'').trim())throw Error('Cancel से पहले जमा रकम वापस करें और कारण लिखें');
-   const row={status:'Cancelled',workflow_data:{...bill.workflow_data,cancel_reason:input.reason,cancelled_at:now},updated_at:now};items.push({mutation:{table:'billing',op:'update',rowId:bill.id,expectedPaid:0,payload:row},row});
+   const row={status:'Cancelled',workflow_data:{...bill.workflow_data,cancel_reason:input.reason,cancelled_at:now},updated_at:now};items.push({mutation:{table:'billing',op:'update',rowId:bill.id,expectedPaid:0,expectedBill:Object.fromEntries(['amount','discount','amount_paid','status','patient_id','payment_history'].map(k=>[k,bill[k]??null])),payload:row},row});Object.assign(bill,row);
  }
  if(['deposit','apply','refund-advance'].includes(input.action)){
    if(input.action==='refund-advance'&&(amount>Math.round(p.credit*100)||!String(input.reason||'').trim()))throw Error('सही वापसी राशि और कारण भरें');
@@ -64,6 +64,7 @@ function financeApply(store,input,actor='Admin',ownerUserId=null){
  }
  const audit={id:randomUUID(),actor_name:actor,actor_role:'admin',action:'update',module:'billing',record_id:p.patient.id,description:JSON.stringify(result),created_at:now};items.push({mutation:{table:'audit_logs',op:'insert',tempId:audit.id,payload:audit},row:audit});
  if(items.length>450)throw Error('एक बार में कम bills चुनें');
+ result.creditAfter=(Math.round(p.credit*100)+(['deposit'].includes(input.action)?amount:['apply','refund-advance'].includes(input.action)?-amount:0))/100;result.dueAfter=p.bills.reduce((n,b)=>n+due(b),0)/100;
  store.commitFinance(items,input.requestId,result,ownerUserId);return result;
 }
 module.exports={financePreview,financeApply};

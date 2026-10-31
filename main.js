@@ -63,6 +63,7 @@ let cloudSync;
 const getCloudSync = () => cloudSync ||= require('./cloud-sync.cjs').createCloudSync({
   file: path.join(app.getPath('userData'), 'cloud-sync-session.json'), safeStorage, access,
   config: authPublicConfig, fetchCloud: (...args) => net.fetch(...args),
+  onCloudScope: scope => { sqliteStore.metaSet('invoice-number:verified-scope',scope);sqliteStore.metaSet('invoice-number:scope',scope); },
   onCloudToken: token => { verifiedCloudToken = token; }
 });
 ipcMain.handle('auth:syncSession', () => getCloudSync().connect());
@@ -953,6 +954,7 @@ ipcMain.handle('offline:commitMutation', async (_e, { mutation, row, idField }) 
   try { return { success: true, data: sqliteStore.commitMutation({ ...mutation, ownerUserId: access.getPrincipal()?.userId || null }, row, idField) }; }
   catch (e) { return { success: false, error: e.message }; }
 });
+ipcMain.handle('offline:ackFinance',(_e,{table,id,queueId})=>sqliteStore.acknowledgeFinanceItem(table,id,queueId));
 ipcMain.handle('offline:snapshot', async () => {
   try { return { success: true, data: sqliteStore.snapshot() }; }
   catch (e) { return { success: false, error: e.message }; }
@@ -1056,7 +1058,7 @@ ipcMain.handle('offline:metaGet', async (_e, key) => {
 });
 
 ipcMain.handle('offline:metaSet', async (_e, { key, value }) => {
-  try { sqliteStore.metaSet(key, value); return { success: true }; }
+  try { if(key==='invoice-number:scope' && sqliteStore.metaGet('invoice-number:verified-scope') && value!==sqliteStore.metaGet('invoice-number:verified-scope'))throw Error('Cloud identity mismatch');sqliteStore.metaSet(key, value); return { success: true }; }
   catch (e) { logger.logError('sqlite', `metaSet(${key}) fail: ${e.message}`); return { success: false }; }
 });
 

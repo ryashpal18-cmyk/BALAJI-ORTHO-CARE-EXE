@@ -120,6 +120,7 @@ contextBridge.exposeInMainWorld('electron', {
   // ── Offline Store (SQLite — IndexedDB replacement) ───────────
   offline: {
     commitBatch: (items) => ipcRenderer.invoke('offline:commitBatch', items),
+    ackFinance:input=>ipcRenderer.invoke('offline:ackFinance',input),
     commitMutation: (mutation, row, idField) => ipcRenderer.invoke('offline:commitMutation', { mutation, row, idField }),
     snapshot: () => ipcRenderer.invoke('offline:snapshot'),
     restoreSnapshot: (dump) => ipcRenderer.invoke('offline:restoreSnapshot', dump),

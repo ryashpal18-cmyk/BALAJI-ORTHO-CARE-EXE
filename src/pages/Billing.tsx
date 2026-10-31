@@ -1,3 +1,4 @@
+import { CollectPayment } from "@/components/CollectPayment";
 import paymentQrAsset from '@/assets/payment-qr.png';
 import { readBillDraft, saveBillDraft, clearBillDraft } from '@/lib/billDraft';
 import invoiceBrand from '@/assets/invoice-brand.jpg';
@@ -1101,29 +1102,12 @@ function BillingContent() {
                             {due > 0 ? `₹${due.toLocaleString()}` : "—"}
                           </td>
                           <td className="py-3 text-center">
-                            <Select
-                              value={bill.status}
-                              onValueChange={(v) =>
-                                updateBillStatus({ id: bill.id, status: v } as any)
-                              }
-                            >
-                              <SelectTrigger
-                                className={cn(
-                                  "h-7 w-20 text-[10px] border-0 mx-auto",
-                                  statusStyle[bill.status] || "",
-                                )}
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="Pending">Pending</SelectItem>
-                                <SelectItem value="Paid">Paid</SelectItem>
-                                <SelectItem value="Partial">Partial</SelectItem>
-                              </SelectContent>
-                            </Select>
+                            <span className={cn("rounded px-2 py-1 text-xs",statusStyle[bill.status]||"")}>{bill.status}</span>
+                            {due>0 && <CollectPayment bill={bill}/>}
+
                           </td>
                           <td className="py-3 text-right">
-                            <div className="flex justify-end gap-1">{availableDraft && <div role="status" className="rounded border p-3">अधूरा बिल उपलब्ध है। <Button variant="outline" onClick={restoreDraft}>पिछला बिल खोलें</Button> <Button variant="ghost" onClick={()=>{clearBillDraft();setAvailableDraft(null);}}>Draft हटाएँ</Button></div>}{draftError && <p role="alert">{draftError}</p>}
+                            <div className="flex justify-end gap-1">
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -1200,8 +1184,7 @@ function BillingContent() {
                                       </AlertDialogTitle>
                                       <AlertDialogDescription>
                                         {patient?.name} का invoice (₹
-                                        {Number(bill.amount).toLocaleString()}) permanently delete
-                                        हो जाएगा। PDF file भी delete होगी।
+                                        {Number(bill.amount).toLocaleString()}) हटाया जाएगा। जमा इतिहास वाले bill को Refund / Cancel करें। PDF सुरक्षित रहेगी।
                                       </AlertDialogDescription>
                                     </AlertDialogHeader>
                                     <AlertDialogFooter>
@@ -1225,6 +1208,7 @@ function BillingContent() {
 
   return (
       <div className="space-y-6 page-enter">
+        {availableDraft && <div role="status" className="rounded border p-3">अधूरा बिल उपलब्ध है। <Button variant="outline" onClick={restoreDraft}>पिछला बिल खोलें</Button> <Button variant="ghost" onClick={()=>{clearBillDraft();setAvailableDraft(null);}}>Draft हटाएँ</Button></div>}{draftError && <p role="alert">{draftError}</p>}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div style={{
             background: "linear-gradient(135deg, #0d2351 0%, #1e57b0 55%, #0e7c4a 100%)",
