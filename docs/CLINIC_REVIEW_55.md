@@ -18,8 +18,12 @@ Apply and verify this setup before releasing the new EXE to users. A review bran
 build produces an artifact without publishing an auto-update release. Main builds
 retain the existing installer/release workflow.
 
-The first Supabase migration confirmation expired; that attempt did not apply it.
-Cloud setup and live-device verification are separately tracked below.
+BJ BACKUP setup was applied on 31 October 2026 as migration
+`20261031041638_clinic_review_55_finance_and_workflows`. Verification preserved
+1,146 patients, 1,302 bills, 736 SMS logs, gross 909748, discount 6797 and paid
+889284. All 1,302 invoice numbers are unique; new tables have RLS and the new
+financial/number RPCs cannot be executed by anon. Physical owner-device delivery
+and printing remain a separate verification step.
 
 | Item | Implementation / evidence | Remaining external verification |
 | --- | --- | --- |
@@ -48,23 +52,23 @@ Cloud setup and live-device verification are separately tracked below.
 | 23 | 0–7 / 8–30 / 31–90 / 90+ day filters and oldest-first ordering | None at source level |
 | 24 | Due promise date, collection note and last queued SMS reminder timestamp | User-entered promise remains optional |
 | 25 | Due page links patient statement/PDF/WhatsApp; unpaid statement includes payment QR | Live delivery |
-| 26 | Patient Profile → combined payment, oldest bills first, one receipt group; atomic local/cloud bundle | Requires cloud setup |
-| 27 | Advance deposit, balance, application to bills, cash book entries; no income counted twice | Requires cloud setup; advances support Cash/UPI |
-| 28 | Advance refund and bill refund with reason/date/mode; negative receipts retained | Requires cloud setup |
+| 26 | Patient Profile → combined payment, oldest bills first, one receipt group; atomic local/cloud bundle | Cloud setup verified |
+| 27 | Advance deposit, balance, application to bills, cash book entries; no income counted twice | Cloud setup verified; advances support Cash/UPI |
+| 28 | Advance refund and bill refund with reason/date/mode; negative receipts retained | Cloud setup verified |
 | 29 | Follow-up arrival/missed state, timestamps, next dates and selected-patient messaging | Live reminder sending |
 | 30 | Patient/receipt views show queued/error/verified upload status; absence of a stamp does not claim verified cloud data | Existing legacy rows need read-only comparison |
 | 31 | Separate SQLite-in-memory backup verification, counts, financial totals and attachment checksums | Owner-selected backup; never overwrites active DB |
-| 32 | Collect Payment supports Cash + UPI split with separate receipt entries | Requires cloud setup for atomic bundle |
+| 32 | Collect Payment supports Cash + UPI split with separate receipt entries | Cloud setup verified for atomic bundle |
 | 33 | BAOR directory search and visible registration number | None |
 | 34 | Complete paginated audit fetch, date filters and UI paging; 300-row cutoff removed | None |
 | 35 | Optional registration phone; no fake number or SMS is required; local PDF works without a phone | Cloud mobile column verified nullable |
-| 36 | Human BILL-000001 number distinct from permanent UUID; reserved offline pools and replay-safe cloud reservations | Requires cloud setup/first reservation; full reference remains available |
+| 36 | Human BILL-000001 number distinct from permanent UUID; reserved offline pools and replay-safe cloud reservations | Cloud setup verified/first reservation; full reference remains available |
 | 37 | Rate list cloud upload and explicit reviewed import on another EXE; local backup retained | APK needs its own client support for this new settings table |
 | 38 | Session/total/pain ranges and duplicate-session guard at write boundary | New course must use a distinct plan |
-| 39 | Exact-name/phone duplicate preview, target BAOR confirmation, atomic relinking, source archived; family members blocked | Requires cloud setup; no real patients merged during tests |
-| 40 | Archive/reactivate preserves bills, due and history; archived patients can be shown in directory | Requires workflow columns for cloud persistence |
-| 41 | Per-patient SMS/WhatsApp/marketing preferences; dispatch checks current preference | Requires workflow columns for cloud persistence |
-| 42 | Reasoned cancellation available in patient finance; refund first if paid; cancelled bills excluded from due/revenue totals | Requires cloud setup |
+| 39 | Exact-name/phone duplicate preview, target BAOR confirmation, atomic relinking, source archived; family members blocked | Cloud setup verified; no real patients merged during tests |
+| 40 | Archive/reactivate preserves bills, due and history; archived patients can be shown in directory | Workflow columns deployed and verified |
+| 41 | Per-patient SMS/WhatsApp/marketing preferences; dispatch checks current preference | Workflow columns deployed and verified |
+| 42 | Reasoned cancellation available in patient finance; refund first if paid; cancelled bills excluded from due/revenue totals | Cloud setup verified |
 | 43 | New bills capture immutable demographic snapshot for reprint; original reference retained | Original pre-update demographics cannot be reconstructed if never saved |
 | 44 | Ctrl+Shift+F search, Ctrl+Shift+B billing, Ctrl+Shift+R registration; no typing-triggered save shortcut | Windows keyboard check |
 | 45 | Monthly and today's billed-patient count uses distinct canonical patient IDs | Counts represent billed patients, not all registrations |
@@ -94,5 +98,6 @@ Cloud setup and live-device verification are separately tracked below.
 ## Local validation
 
 All 37 Node regression suites in the workflow passed, including the new finance SQL
-and 11 review scenarios. TypeScript and production Vite build passed. Native
-Windows UI/PDF tests are run by the review-branch GitHub Actions job.
+and 11 review scenarios. TypeScript and production Vite build passed. All native
+Windows UI/PDF tests and the review Setup EXE build passed in GitHub Actions run
+41162946165. Main release follows the verified setup.
