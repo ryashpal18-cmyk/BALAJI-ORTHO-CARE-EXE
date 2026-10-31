@@ -7,7 +7,14 @@ validation for item 55, are implemented. Item 51 remains excluded. Local
 validation: 39 Node suites, TypeScript and production build passed. New SQL was
 verified with PGlite, including the existing receipt-merging trigger used in
 BJ BACKUP. Cloud deployment and native Windows review are checked separately
-before the main release. The findings below record the original reproduction,
+before the main release. BJ BACKUP migration
+`20261031091847_clinic_deep_review_finance_and_session_guards` is applied and
+verified: five guards installed, full bill revision checks active, anonymous
+finance/delete execution denied. The migration contains no historical DML.
+The current live snapshot is 1,149 patients / 1,307 bills / 741 SMS logs; clinic
+records grew during the review, so unchanged aggregate counts are not claimed.
+Security advisors show no new warnings; anonymous delete execution warning was
+removed. The findings below record the original reproduction,
 not the behavior of the repaired code.
 
 - Finance: full bill revision checks, append-only history, cancellation and
