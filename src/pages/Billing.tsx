@@ -756,7 +756,6 @@ function BillingContent() {
       setEditOpen(false);
       setEditingBill(null);
       setEditReason("");
-      clearBillDraft();
       setServices([{ name: "", amount: "" }]);
       setAmountPaid("");
       setDiscountAmount("");
@@ -1239,6 +1238,7 @@ function BillingContent() {
               onOpenChange={(v) => {
                 setOpen(v);
                 if (!v) {
+                  setAvailableDraft(readBillDraft());
                   setServices([{ name: "", amount: "" }]);
                   setAmountPaid("");
                   setDiscountAmount("");

@@ -390,6 +390,7 @@ function commitBatch(items) {
 const canonical=v=>String(v||'').replace(/^local_/,'');
 const stable=v=>JSON.stringify(v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,JSON.parse(stable(v[k]??null))])):Array.isArray(v)?v.map(x=>JSON.parse(stable(x))):v??null);
 function queueTouches(m,table,id){return m.op==='clinic_finance'?(m.payload?.items||[]).some(i=>i.mutation.table===table&&canonical(i.mutation.rowId||i.mutation.tempId)===canonical(id)):m.table===table&&[m.rowId,m.tempId,m.payload?.id].some(v=>v&&canonical(v)===canonical(id));}
+function physioIdentity(row){let n={};try{n=JSON.parse(row.progress_notes||'{}');}catch{}const bill=canonical(n.billId);return n.clinicTool===1&&['physio-package-plan','physio-package-session'].includes(n.kind)&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bill)?(n.kind==='physio-package-plan'?'marker:':'')+'package:'+bill:row.fracture_case_id?'case:'+canonical(row.fracture_case_id):'plan:'+(row.exercise_plan||'');}
 function assertWritable(table,old,row,op){
  if(op==='delete'){
   if(queueGetAll().some(m=>m.op==='clinic_finance'&&queueTouches(m,table,old?.id)))throw Error('Finance sync pending है; Delete नहीं कर सकते');
@@ -397,7 +398,8 @@ function assertWritable(table,old,row,op){
   if(table==='billing' && (Number(old?.amount_paid)||old?.payment_history?.length))throw Error('Receipt history सुरक्षित रखें; Refund / Cancel करें');
  }
  if(table==='physiotherapy_sessions'&&op!=='delete'){
-  const same=cacheGetAll(table).some(r=>canonical(r.id)!==canonical(row.id)&&canonical(r.patient_id)===canonical(row.patient_id)&&(row.fracture_case_id?canonical(r.fracture_case_id)===canonical(row.fracture_case_id):!r.fracture_case_id&&String(r.exercise_plan||'')===String(row.exercise_plan||''))&&Number(r.session_number)===Number(row.session_number));
+  const course=physioIdentity(row);
+  const same=cacheGetAll(table).some(r=>canonical(r.id)!==canonical(row.id)&&canonical(r.patient_id)===canonical(row.patient_id)&&physioIdentity(r)===course&&(course.startsWith('marker:')||Number(r.session_number)===Number(row.session_number)));
   if(same)throw Error('इस course का session पहले से सेव है');
  }
  if(table!=='billing'||op==='delete')return;

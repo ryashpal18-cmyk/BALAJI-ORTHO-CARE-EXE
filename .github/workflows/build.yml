@@ -50,6 +50,7 @@ jobs:
           node tests/billing-catalog.cjs
           node tests/clinic-updates.cjs
           node tests/review-55.cjs
+          node tests/bill-draft-lifecycle.cjs
           node tests/deep-review.cjs
           node tests/deep-review-sql.cjs
           node tests/finance-sql.cjs

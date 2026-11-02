@@ -1,0 +1,14 @@
+'use strict';
+const fs=require('fs'),ts=require('typescript'),vm=require('vm'),assert=require('assert/strict');
+const source=fs.readFileSync('src/pages/Billing.tsx','utf8'),ast=ts.createSourceFile('Billing.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+let close,effect;function visit(n){if(ts.isJsxAttribute(n)&&n.name.getText(ast)==='onOpenChange'&&n.initializer?.expression?.getText(ast).includes('setAvailableDraft'))close=n.initializer.expression.getText(ast);if(ts.isCallExpression(n)&&n.expression.getText(ast)==='useEffect'&&n.arguments[0]?.getText(ast).includes('saveBillDraft'))effect=n.arguments[0].getText(ast);ts.forEachChild(n,visit);}visit(ast);assert.ok(close);assert.ok(effect);
+const storage=new Map(),localStorage={getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)};
+const m={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/lib/billDraft.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{module:m,exports:m.exports,localStorage});
+const state={open:true,editingBill:null,availableDraft:null,selectedPatient:'synthetic-person',patientSearch:'Synthetic',services:[{name:'X-Ray',amount:'500'}],amountPaid:'100',discountAmount:'0',paymentMode:'Cash',doctorChoice:'default',DEFAULT_DOCTOR_VALUE:'default',...m.exports};
+for(const key of ['open','availableDraft','selectedPatient','patientSearch','services','amountPaid','discountAmount','paymentMode','doctorChoice','draftError'])state['set'+key[0].toUpperCase()+key.slice(1)]=v=>state[key]=v;
+state.setSuggestions=()=>{};state.setSugForRow=()=>{};
+const ctx=vm.createContext(state);const run=text=>vm.runInContext(ts.transpileModule('('+text+')()',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,ctx);
+run(effect);assert.equal(m.exports.readBillDraft().services[0].name,'X-Ray');vm.runInContext('('+close+')(false)',ctx);assert.equal(state.services[0].name,'');assert.equal(state.availableDraft.services[0].name,'X-Ray');
+vm.runInContext('('+close+')(true)',ctx);run(effect);assert.equal(m.exports.readBillDraft().services[0].name,'X-Ray');assert.equal(m.exports.readBillDraft().amountPaid,'100');
+state.services=state.availableDraft.services;state.availableDraft=null;run(effect);assert.equal(m.exports.readBillDraft().services[0].name,'X-Ray');m.exports.clearBillDraft();assert.equal(m.exports.readBillDraft(),null);
+console.log('PASS actual Billing close/reopen effect preserves persisted draft, explicit restore and discard work');

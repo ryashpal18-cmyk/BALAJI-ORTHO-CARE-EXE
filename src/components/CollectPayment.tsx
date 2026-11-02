@@ -18,12 +18,13 @@ export function CollectPayment({ bill, full = false, initiallyOpen = false, onCl
   const [cash,setCash]=useState("");
   const [savedBill, setSavedBill] = useState<any>(null);
   const busy = useRef(false);
+  const requestId=useRef(crypto.randomUUID());
   const qc = useQueryClient();
   const save = useMutation({
     mutationFn: async () => {
       if(mode==='Cash + UPI'){
         const finance=(window as any).electron?.finance;if(!finance)throw Error('नया Windows EXE चाहिए');
-        const p=await finance.preview(bill.patient_id);await finance.apply({requestId:crypto.randomUUID(),patientId:bill.patient_id,billId:bill.id,action:'collect',amount:Number(amount),mode:'Cash',split:{cash:Number(cash)},fingerprint:p.fingerprint});
+        const p=await finance.preview(bill.patient_id);await finance.apply({requestId:requestId.current,patientId:bill.patient_id,billId:bill.id,action:'collect',amount:Number(amount),mode:'Cash',split:{cash:Number(cash)},fingerprint:p.fingerprint});
         return {...await cacheGetRow('billing',bill.id),patients:bill.patients};
       }
       const receiptId = crypto.randomUUID();
@@ -37,7 +38,7 @@ export function CollectPayment({ bill, full = false, initiallyOpen = false, onCl
     onSettled: () => { busy.current = false; void qc.invalidateQueries(); },
   });
   return <>
-    {!initiallyOpen && <Button type="button" size="sm" variant="outline" disabled={due <= 0} onClick={() => { setSavedBill(null); setAmount(full ? String(due) : ""); setMode("Cash"); setOpen(true); }}>{full ? "पूरा बकाया जमा" : "भुगतान जमा"}</Button>}
+    {!initiallyOpen && <Button type="button" size="sm" variant="outline" disabled={due <= 0} onClick={() => { requestId.current=crypto.randomUUID();setSavedBill(null); setAmount(full ? String(due) : ""); setMode("Cash"); setOpen(true); }}>{full ? "पूरा बकाया जमा" : "भुगतान जमा"}</Button>}
     <Dialog open={open} onOpenChange={value => { if (!save.isPending) { setOpen(value); if (!value) onClose?.(); } }}><DialogContent>
       <DialogHeader><DialogTitle>{bill.patients?.name || "मरीज"} — बकाया ₹{due.toLocaleString("en-IN")}</DialogTitle></DialogHeader>
       {savedBill ? <div className="space-y-3"><p>भुगतान सेव हो गया है।</p><PaymentReceipts bill={savedBill} /><Button onClick={() => { setOpen(false); onClose?.(); }}>बंद करें</Button></div> :
