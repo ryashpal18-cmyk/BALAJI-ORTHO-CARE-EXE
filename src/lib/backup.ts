@@ -20,7 +20,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { ensureCloudSession } from "./localSession";
 import { isOnline } from "@/lib/offlineSync";
 import { cacheGetAll } from "@/lib/offlineDb";
-import * as XLSX from "xlsx";
 
 // Tables jo backup mein shamil hoti hain — clinic ka pura operational data.
 const BACKUP_TABLES = OPERATIONAL_TABLES;
@@ -222,7 +221,8 @@ async function performBackupNow(label: string, onProgress?:(done:number,total:nu
     return recordBackupResult({ok:false,mode:(window as any).electron?.verifyBackup?'electron':'browser',recordCounts,warnings,...photoResult,complete:false,error:sizeError?reason:`बैकअप सत्यापन असफल / Backup validation failed: ${reason}. Cloud data may have changed while reading; कृपया फिर प्रयास करें / please retry.`});
   }
 
-  // Excel: ek sheet per table, taaki Dr Excel mein khol kar seedha dekh sakein.
+  // Spreadsheet code is large; load it only when a backup actually starts.
+  const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
   for (const table of Object.keys(backupData)) {
     const rows = backupData[table];

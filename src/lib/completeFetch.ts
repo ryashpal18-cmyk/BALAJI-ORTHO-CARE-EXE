@@ -6,7 +6,7 @@ function missingSchema(error:any){return ['PGRST202','PGRST204','PGRST205','42P0
 export async function fetchCompleteTable(table:string,select="*"):Promise<any[]>{
  const paused=schemaCooldown.get(table);
  if(paused&&paused.until>Date.now())throw Object.assign(new Error(paused.error.message),{code:paused.error.code,cachedSchemaFailure:true});
- const rows:any[]=[],pageSize=100;let columns=select;
+ const rows:any[]=[],pageSize=500;let columns=select;
  try{
   for(let offset=0;;){
    let result=await supabase.from(table as any).select(columns).order("id",{ascending:true}).range(offset,offset+pageSize-1);

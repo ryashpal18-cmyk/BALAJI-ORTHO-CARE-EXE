@@ -77,6 +77,9 @@ if (typeof window !== "undefined") {
 // ─────────────────────────────────────────────────────────────────────────
 
 let downloadPromise: Promise<void> | null = null;
+let nextFullRefreshAt = 0;
+const FULL_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const FAILED_REFRESH_RETRY_MS = 60 * 1000;
 
 export function downloadAllDataToCache(): Promise<void> {
   if (downloadPromise) return downloadPromise;
@@ -86,6 +89,7 @@ export function downloadAllDataToCache(): Promise<void> {
     // ensureCloudSession accepts the verified local owner API mode too.
     await warmInvoiceNumbers().catch(error=>cLog.warn("invoice",error.message));
     await warmRegistrationNumbers().catch(error => cLog.warn("registration", error.message));
+    let refreshFailures = 0;
     for (const table of OPERATIONAL_TABLES) {
       try {
         const select = ["billing", "appointments", "prescriptions", "physiotherapy_sessions", "xray_reports", "fracture_cases", "insurance_claims", "beds"].includes(table) ? "*, patients(*)" : "*";
@@ -95,8 +99,9 @@ export function downloadAllDataToCache(): Promise<void> {
           continue;
         }
         await cacheReplaceTable(table, rows);
-      } catch (error:any) { if(!error.cachedSchemaFailure)cLog.warn("sync", `${table}: complete refresh failed; existing cache preserved`, error); }
+      } catch (error:any) { refreshFailures++; if(!error.cachedSchemaFailure)cLog.warn("sync", `${table}: complete refresh failed; existing cache preserved`, error); }
     }
+    nextFullRefreshAt = Date.now() + (refreshFailures ? FAILED_REFRESH_RETRY_MS : FULL_REFRESH_INTERVAL_MS);
     void queryClient.invalidateQueries();
   }).finally(() => {
     if (downloadPromise === shared) downloadPromise = null;
@@ -494,7 +499,8 @@ export function startAutoSync() {
       if (online !== lastKnownOnline) emitNetworkChange(online);
       if (online) {
         await runSync();
-        void downloadAllDataToCache().catch(error => cLog.warn("sync", "Refresh delayed", error));
+        if (!nextFullRefreshAt || Date.now() >= nextFullRefreshAt)
+          void downloadAllDataToCache().catch(error => cLog.warn("sync", "Refresh delayed", error));
       }
     } catch (error) { cLog.warn("sync", "Background cycle delayed; local data retained", error); }
   };

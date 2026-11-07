@@ -1,11 +1,8 @@
 import { reportRuntimeIssue } from "@/lib/clientLogger";
-import FestivalGreetings from "@/pages/FestivalGreetings";
-import FamilyProfile from "@/pages/FamilyProfile";
 import { FamilyDeepLinks } from "@/components/FamilyDeepLinks";
-import FollowUps from "@/pages/FollowUps";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import React from "react";
+import React, { lazy, Suspense } from "react";
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -57,40 +54,46 @@ import { PinLockScreen } from "@/components/PinLockScreen";
 import { shouldShowLock, markActive, isPinEnabled } from "@/lib/pinLock";
 import { useAppointmentReminders } from "@/hooks/useAppointmentReminders";
 import { BugAlertWatcher } from "@/components/BugAlertWatcher";
-import Dashboard from "./pages/Dashboard";
-import OPD from "./pages/OPD";
-import IPD from "./pages/IPD";
-import Appointments from "./pages/Appointments";
-import Billing from "./pages/Billing";
-import Products from "./pages/Products";
-import DueAmount from "./pages/DueAmount";
-import CashTally from "./pages/CashTally";
-import DailyCashBook from "./pages/DailyCashBook";
-import MedicineCommission from "./pages/MedicineCommission";
-import DrReg from "./pages/DrReg";
-import Physiotherapy from "./pages/Physiotherapy";
-import Reports from "./pages/Reports";
-import Analytics from "./pages/Analytics";
-import RevenueDashboard from "./pages/RevenueDashboard";
-import SettingsPage from "./pages/SettingsPage";
-import WhatsApp from "./pages/WhatsApp";
-import MedicineMaster from "./pages/MedicineMaster";
-import PatientMedicine from "./pages/PatientMedicine";
-import PatientProfile from "./pages/PatientProfile";
-import PatientSearch from "./pages/PatientSearch";
-import Prescription from "./pages/Prescription";
-import Ortho from "./pages/Ortho";
-import RecoveryTracker from "./pages/RecoveryTracker";
-import SmsLogs from "./pages/SmsLogs";
-import PlasterSync from "./pages/PlasterSync";
-import Inventory from "./pages/Inventory";
-import AuditLog from "./pages/AuditLog";
-import InsuranceClaims from "./pages/InsuranceClaims";
-import Branches from "./pages/Branches";
-import BookAppointment from "./pages/BookAppointment";
-import BookingRequests from "./pages/BookingRequests";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+
+const Dashboard=lazy(()=>import("./pages/Dashboard"));
+const OPD=lazy(()=>import("./pages/OPD"));
+const IPD=lazy(()=>import("./pages/IPD"));
+const Appointments=lazy(()=>import("./pages/Appointments"));
+const Billing=lazy(()=>import("./pages/Billing"));
+const Products=lazy(()=>import("./pages/Products"));
+const DueAmount=lazy(()=>import("./pages/DueAmount"));
+const CashTally=lazy(()=>import("./pages/CashTally"));
+const DailyCashBook=lazy(()=>import("./pages/DailyCashBook"));
+const MedicineCommission=lazy(()=>import("./pages/MedicineCommission"));
+const DrReg=lazy(()=>import("./pages/DrReg"));
+const Physiotherapy=lazy(()=>import("./pages/Physiotherapy"));
+const Reports=lazy(()=>import("./pages/Reports"));
+const Analytics=lazy(()=>import("./pages/Analytics"));
+const RevenueDashboard=lazy(()=>import("./pages/RevenueDashboard"));
+const SettingsPage=lazy(()=>import("./pages/SettingsPage"));
+const WhatsApp=lazy(()=>import("./pages/WhatsApp"));
+const MedicineMaster=lazy(()=>import("./pages/MedicineMaster"));
+const PatientMedicine=lazy(()=>import("./pages/PatientMedicine"));
+const PatientProfile=lazy(()=>import("./pages/PatientProfile"));
+const PatientSearch=lazy(()=>import("./pages/PatientSearch"));
+const Prescription=lazy(()=>import("./pages/Prescription"));
+const Ortho=lazy(()=>import("./pages/Ortho"));
+const RecoveryTracker=lazy(()=>import("./pages/RecoveryTracker"));
+const SmsLogs=lazy(()=>import("./pages/SmsLogs"));
+const PlasterSync=lazy(()=>import("./pages/PlasterSync"));
+const Inventory=lazy(()=>import("./pages/Inventory"));
+const AuditLog=lazy(()=>import("./pages/AuditLog"));
+const InsuranceClaims=lazy(()=>import("./pages/InsuranceClaims"));
+const Branches=lazy(()=>import("./pages/Branches"));
+const BookAppointment=lazy(()=>import("./pages/BookAppointment"));
+const BookingRequests=lazy(()=>import("./pages/BookingRequests"));
+const FestivalGreetings=lazy(()=>import("@/pages/FestivalGreetings"));
+const FamilyProfile=lazy(()=>import("@/pages/FamilyProfile"));
+const FollowUps=lazy(()=>import("@/pages/FollowUps"));
+
+const RouteLoading=()=> <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">Screen खोल रहे हैं…</div>;
 
 // ✅ queryClient ab "@/lib/queryClient" se import hota hai — offlineSync.ts
 // isi shared instance ko Background Sync ke baad invalidate karta hai
@@ -152,6 +155,7 @@ const App = () => {
               {locked && <PinLockScreen onUnlock={handleUnlock} />}
               <HashRouter>
                 <FamilyDeepLinks />
+                <Suspense fallback={<RouteLoading />}>
                 <Routes>
                   <Route path="/" element={<Login />} />
                   <Route path="/login" element={<Login />} />
@@ -193,6 +197,7 @@ const App = () => {
                   <Route path="/booking-requests" element={<ProtectedRoute><BookingRequests /></ProtectedRoute>} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
+                </Suspense>
               </HashRouter>
             </TooltipProvider>
           </BranchProvider>
