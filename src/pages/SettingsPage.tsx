@@ -30,7 +30,14 @@ import {
 import { toast } from "@/hooks/use-toast";
 
 // ── Tab type ──
-type Tab = "clinic" | "dashboard" | "users" | "backup" | "about";
+type Tab = "clinic" | "dashboard" | "users" | "sms" | "backup" | "about";
+type TextBeeStatus = {
+  available: boolean;
+  configured: boolean;
+  apiUrl: string;
+  apiKey: string;
+  deviceId: string;
+};
 
 // ── Preset colors ──
 const COLORS = [
@@ -77,6 +84,14 @@ export default function SettingsPage() {
   const [selPages,     setSelPages]     = useState<string[]>(["/dashboard"]);
   const [editingUser,  setEditingUser]  = useState<StaffUser | null>(null);
 
+  // ── TextBee SMS ──
+  const [textBeeUrl, setTextBeeUrl] = useState("");
+  const [textBeeKey, setTextBeeKey] = useState("");
+  const [textBeeDeviceId, setTextBeeDeviceId] = useState("");
+  const [textBeeStatus, setTextBeeStatus] = useState<TextBeeStatus | null>(null);
+  const [textBeeBusy, setTextBeeBusy] = useState(false);
+  const [showTextBeeKey, setShowTextBeeKey] = useState(false);
+
   // ── Backup ──
   const [backupRunning, setBackupRunning] = useState(false);
   const [backupProgress,setBackupProgress]=useState("");
@@ -106,6 +121,19 @@ export default function SettingsPage() {
   useEffect(() => {
     applyThemeToDom(theme);
   }, [theme]);
+
+  // ── TextBee tab: load only redacted main-process status ──
+  useEffect(() => {
+    if (tab !== "sms" || !isAdmin) return;
+    const bridge = (window as any).electron?.textBee;
+    if (!bridge?.status) {
+      setTextBeeStatus({ available: false, configured: false, apiUrl: "", apiKey: "", deviceId: "" });
+      return;
+    }
+    void bridge.status().then(setTextBeeStatus).catch(() => {
+      setTextBeeStatus({ available: false, configured: false, apiUrl: "", apiKey: "", deviceId: "" });
+    });
+  }, [tab, isAdmin]);
 
   // ── Backup tab: load folder/file info when opened ──
   useEffect(() => {
@@ -295,6 +323,38 @@ export default function SettingsPage() {
     toast({ title: "✅ Theme saved", description: "Reload app to apply fully" });
   };
 
+  const handleSaveTextBee = async () => {
+    setTextBeeBusy(true);
+    try {
+      const status = await (window as any).electron?.textBee?.save({
+        apiUrl: textBeeUrl,
+        apiKey: textBeeKey,
+        deviceId: textBeeDeviceId,
+      });
+      if (!status) throw new Error("Secure desktop settings are unavailable");
+      setTextBeeStatus(status);
+      setTextBeeKey("");
+      setShowTextBeeKey(false);
+      toast({ title: "TextBee SMS saved", description: "API key encrypted desktop storage mein save hui." });
+    } catch (error: any) {
+      toast({ title: "TextBee settings save nahi hui", description: error?.message || "Secure storage unavailable", variant: "destructive" });
+    } finally { setTextBeeBusy(false); }
+  };
+
+  const handleClearTextBee = async () => {
+    if (!window.confirm("Saved TextBee SMS configuration clear karein? Pending SMS configuration dobara save hone tak nahi bheje jayenge.")) return;
+    setTextBeeBusy(true);
+    try {
+      const status = await (window as any).electron?.textBee?.clear();
+      if (!status) throw new Error("Secure desktop settings are unavailable");
+      setTextBeeStatus(status);
+      setTextBeeUrl(""); setTextBeeKey(""); setTextBeeDeviceId(""); setShowTextBeeKey(false);
+      toast({ title: "TextBee SMS configuration cleared" });
+    } catch (error: any) {
+      toast({ title: "TextBee settings clear nahi hui", description: error?.message || "Try again", variant: "destructive" });
+    } finally { setTextBeeBusy(false); }
+  };
+
   // ── Toggle module ──
   const toggleModule = (key: keyof DashModules) => {
     setModules(prev => ({ ...prev, [key]: !prev[key] }));
@@ -407,7 +467,7 @@ export default function SettingsPage() {
           display: "flex", gap: "4px", marginBottom: "24px",
           background: "rgba(255,255,255,0.85)", padding: "4px",
           borderRadius: "14px", border: "1.5px solid #e4ecfa",
-          width: "fit-content", backdropFilter: "blur(8px)",
+          width: "fit-content", maxWidth: "100%", flexWrap: "wrap", backdropFilter: "blur(8px)",
         }}>
           <button style={TAB_STYLE(tab === "clinic")}    onClick={() => setTab("clinic")}>
             <Building2 style={{ width: "14px", height: "14px", display: "inline", marginRight: "6px" }} />
@@ -421,6 +481,12 @@ export default function SettingsPage() {
             <button style={TAB_STYLE(tab === "users")} onClick={() => setTab("users")}>
               <Users style={{ width: "14px", height: "14px", display: "inline", marginRight: "6px" }} />
               User Management
+            </button>
+          )}
+          {isAdmin && (
+            <button style={TAB_STYLE(tab === "sms")} onClick={() => setTab("sms")}>
+              <KeyRound style={{ width: "14px", height: "14px", display: "inline", marginRight: "6px" }} />
+              SMS Gateway
             </button>
           )}
           <button style={TAB_STYLE(tab === "backup")} onClick={() => setTab("backup")}>
@@ -880,6 +946,65 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ══════════ TEXTBEE SMS GATEWAY ══════════ */}
+        {tab === "sms" && isAdmin && (
+          <Card className="dash-card">
+            <CardHeader>
+              <CardTitle style={{ fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <KeyRound style={{ width: "16px", height: "16px", color: "#1e57b0" }} />
+                TextBee SMS Gateway
+              </CardTitle>
+            </CardHeader>
+            <CardContent style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ padding: "12px 14px", borderRadius: "10px", background: textBeeStatus?.configured ? "#f0fdf4" : "#fff7ed", border: `1.5px solid ${textBeeStatus?.configured ? "#bbf7d0" : "#fed7aa"}` }}>
+                <p style={{ fontSize: "13px", fontWeight: 700, color: textBeeStatus?.configured ? "#166534" : "#9a3412" }}>
+                  {textBeeStatus?.configured ? "Configured securely" : textBeeStatus?.available === false ? "Secure storage unavailable" : "Not configured"}
+                </p>
+                {textBeeStatus?.configured && (
+                  <div style={{ fontSize: "12px", color: "#475569", marginTop: "6px", display: "grid", gap: "3px" }}>
+                    <span>API URL: {textBeeStatus.apiUrl}</span>
+                    <span>API key: {textBeeStatus.apiKey}</span>
+                    <span>Device ID: {textBeeStatus.deviceId}</span>
+                  </div>
+                )}
+              </div>
+
+              <p style={{ fontSize: "12px", color: "#64748b" }}>
+                पुरानी key को पहले TextBee Dashboard में revoke/rotate करें, फिर नई API URL, key और Device ID यहाँ save करें। Credentials Electron secure storage में encrypted रहेंगी; saved API key renderer को वापस नहीं भेजी जाती।
+              </p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <Label style={{ fontSize: "12px", fontWeight: 600 }}>TextBee HTTPS API URL</Label>
+                <Input type="url" maxLength={2048} placeholder="https://api.textbee.dev/..." value={textBeeUrl} onChange={e => setTextBeeUrl(e.target.value)} autoComplete="off" />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <Label style={{ fontSize: "12px", fontWeight: 600 }}>API Key</Label>
+                <div style={{ position: "relative" }}>
+                  <Input type={showTextBeeKey ? "text" : "password"} maxLength={4096} value={textBeeKey} onChange={e => setTextBeeKey(e.target.value)} autoComplete="new-password" style={{ paddingRight: "42px" }} />
+                  <button type="button" aria-label={showTextBeeKey ? "Hide API key" : "Show API key"} onClick={() => setShowTextBeeKey(value => !value)} style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#64748b" }}>
+                    {showTextBeeKey ? <EyeOff style={{ width: "16px", height: "16px" }} /> : <Eye style={{ width: "16px", height: "16px" }} />}
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <Label style={{ fontSize: "12px", fontWeight: 600 }}>Device ID</Label>
+                <Input maxLength={256} value={textBeeDeviceId} onChange={e => setTextBeeDeviceId(e.target.value)} autoComplete="off" />
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <Button onClick={handleSaveTextBee} disabled={textBeeBusy || textBeeStatus?.available === false} style={{ gap: "6px" }}>
+                  {textBeeBusy ? <Loader2 className="animate-spin" style={{ width: "14px", height: "14px" }} /> : <Check style={{ width: "14px", height: "14px" }} />}
+                  Save / replace key securely
+                </Button>
+                <Button variant="outline" onClick={handleClearTextBee} disabled={textBeeBusy || !textBeeStatus?.configured} style={{ gap: "6px", color: "#b91c1c" }}>
+                  <Trash2 style={{ width: "14px", height: "14px" }} />
+                  Clear saved configuration
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* ══════════ TAB 4: BACKUP ══════════ */}

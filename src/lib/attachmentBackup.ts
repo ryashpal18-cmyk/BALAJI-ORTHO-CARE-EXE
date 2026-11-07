@@ -42,6 +42,16 @@ export async function captureAttachments(value:any,onProgress?:(done:number,tota
  }
  return{version:1,files,missing,total:groups.length,complete:missing.length===0};
 }
+/** Verify attachment bytes exactly as restore does, without writing to cache or changing data. */
+export async function verifyAttachmentArchive(backup:any){
+ const archive=backup?.attachmentFiles;if(!archive)return{attachments:0,missing:0};
+ if(![1,2].includes(archive.version)||!Array.isArray(archive.files)||(archive.missing!=null&&!Array.isArray(archive.missing)))throw Error('Invalid photo backup');
+ for(const file of archive.files){
+  const actual=await pack(bytesFromBase64(file.base64),file.mime);
+  if(actual.sha256!==file.sha256||actual.size!==file.size)throw Error('फोटो checksum नहीं मिला; backup/restore रोका गया।');
+ }
+ return{attachments:archive.files.length,missing:archive.missing?.length||0};
+}
 export async function restoreAttachmentData(backup:any){
  if(!backup.attachmentFiles)return backup;
  const archive=backup.attachmentFiles;if(![1,2].includes(archive.version)||!Array.isArray(archive.files))throw Error('Invalid photo backup');

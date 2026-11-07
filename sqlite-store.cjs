@@ -389,6 +389,12 @@ function commitBatch(items) {
 }
 const canonical=v=>String(v||'').replace(/^local_/,'');
 const stable=v=>JSON.stringify(v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,JSON.parse(stable(v[k]??null))])):Array.isArray(v)?v.map(x=>JSON.parse(stable(x))):v??null);
+function moneyCents(value){const amount=Number(value??0);if(!Number.isFinite(amount)||amount<0)throw Error('Amount, payment and discount must be non-negative numbers');const scaled=amount*100;return Math.round(scaled+Number.EPSILON*Math.abs(scaled));}
+function assertBillingAmounts(row){
+ const amount=moneyCents(row?.amount),discount=moneyCents(row?.discount),paid=moneyCents(row?.amount_paid);
+ if(discount>amount)throw Error('Discount cannot exceed bill amount');
+ if(String(row?.status).toLowerCase()!=='cancelled'&&paid>amount-discount)throw Error('Payment cannot exceed bill amount after discount');
+}
 function queueTouches(m,table,id){return m.op==='clinic_finance'?(m.payload?.items||[]).some(i=>i.mutation.table===table&&canonical(i.mutation.rowId||i.mutation.tempId)===canonical(id)):m.table===table&&[m.rowId,m.tempId,m.payload?.id].some(v=>v&&canonical(v)===canonical(id));}
 function physioIdentity(row){let n={};try{n=JSON.parse(row.progress_notes||'{}');}catch{}const bill=canonical(n.billId);return n.clinicTool===1&&['physio-package-plan','physio-package-session'].includes(n.kind)&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bill)?(n.kind==='physio-package-plan'?'marker:':'')+'package:'+bill:row.fracture_case_id?'case:'+canonical(row.fracture_case_id):'plan:'+(row.exercise_plan||'');}
 function assertWritable(table,old,row,op){
@@ -403,8 +409,9 @@ function assertWritable(table,old,row,op){
   if(same)throw Error('इस course का session पहले से सेव है');
  }
  if(table!=='billing'||op==='delete')return;
- if(old&&String(old.status).toLowerCase()==='cancelled'&&(['amount','discount','amount_paid'].some(k=>Number(row[k]||0)!==Number(old[k]||0))||row.status!=='Cancelled'))throw Error('रद्द bill में बदलाव नहीं कर सकते');
- if(row.status==='Cancelled'&&Number(row.amount_paid||0)!==0)throw Error('Cancel से पहले Refund करें');
+ assertBillingAmounts(row);
+ if(old&&String(old.status).toLowerCase()==='cancelled'&&(['amount','discount','amount_paid'].some(k=>Number(row[k]||0)!==Number(old[k]||0))||String(row.status).toLowerCase()!=='cancelled'))throw Error('रद्द bill में बदलाव नहीं कर सकते');
+ if(String(row.status).toLowerCase()==='cancelled'&&Number(row.amount_paid||0)!==0)throw Error('Cancel से पहले Refund करें');
  if(old?.payment_history?.some(r=>!(row.payment_history||[]).some(x=>stable(x)===stable(r))))throw Error('Receipt history सुरक्षित रखें; नई correction entry जोड़ें');
  const prior=new Map((old?.payment_history||[]).map(r=>[r.id,r]));
  const dates=(row.payment_history||[]).filter(r=>stable(prior.get(r.id))!==stable(r)).map(r=>r.paid_at);

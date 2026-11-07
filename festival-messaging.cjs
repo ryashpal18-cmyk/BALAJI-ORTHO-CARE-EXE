@@ -5,11 +5,13 @@ const {familyNumber}=require('./family-profile.cjs');
 const CLINIC='Balaji Digital X-Ray & Ortho Care Center';
 const FESTIVALS=[['diwali','दीपावली','दीयों का उजाला आपके जीवन में सुख, समृद्धि और खुशियाँ लाए।'],['holi','होली','खुशियों के रंगों से आपका जीवन सदा रंगीन रहे।'],['rakhi','रक्षाबंधन','स्नेह और विश्वास का यह बंधन सदा अटूट रहे।'],['navratri','नवरात्रि','माँ दुर्गा आपके परिवार को सुख, शक्ति और अच्छा स्वास्थ्य दें।'],['dussehra','दशहरा','यह पर्व आपके जीवन में नई आशा और खुशियाँ लाए।'],['dhanteras','धनतेरस','आपके घर में सुख, समृद्धि और अच्छे स्वास्थ्य का वास हो।'],['bhaidooj','भाई दूज','भाई-बहन का स्नेह जीवन में खुशियाँ भरता रहे।'],['janmashtami','जन्माष्टमी','श्रीकृष्ण की कृपा से आपके घर में आनंद और शांति बनी रहे।'],['ganesh','गणेश चतुर्थी','श्रीगणेश आपके जीवन में मंगल और खुशियाँ लाएँ।'],['sankranti','मकर संक्रांति','यह पर्व आपके जीवन में नई उमंग और खुशियाँ लाए।'],['newyear','नव वर्ष','नया साल आपके लिए नई उम्मीदें और अच्छा स्वास्थ्य लेकर आए।'],['eid','ईद','आपके परिवार में अमन, खुशियाँ और बरकत बनी रहे।'],['christmas','क्रिसमस','आपके जीवन में प्रेम, शांति और खुशियाँ बनी रहें।'],['custom','अन्य त्योहार','']].map(([id,name,line])=>({id,name,whatsapp:`🙏 आप और आपके परिवार को ${name} की हार्दिक शुभकामनाएँ!\n\n${line}\nआप सभी स्वस्थ रहें और मुस्कुराते रहें।\n\nसादर,\n${CLINIC}`,sms:`आप और आपके परिवार को ${name} की हार्दिक शुभकामनाएँ। सुख, शांति और अच्छे स्वास्थ्य की मंगलकामनाएँ। — ${CLINIC}`}));
 const indiaDate=t=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(t));
-function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,intervalMs=30000,logger}){
- const report=createMessagingLog(logger,'festival-messaging',now);
- const key='festival:campaigns',blockKey='festival:excluded';let busy=false,nextSend={whatsapp:0,sms:0},gateway=null;
+function createFestivalService({store,allowed,whatsapp,sendSMS,smsReady=()=>false,now=Date.now,intervalMs=30000,workerPollMs=5000,logger}){
+ const report=createMessagingLog(logger,'festival-messaging',now),pollMs=Math.max(1,Number(workerPollMs)||5000);
+ const key='festival:campaigns',blockKey='festival:excluded';let busy=false,lastCampaignId=null,nextSend={whatsapp:0,sms:0};
  const list=()=>store.metaGet(key)||[],save=rows=>store.metaSet(key,rows);
- const pendingCount=campaigns=>campaigns.filter(c=>c.state==='active').reduce((n,c)=>n+c.jobs.filter(j=>['queued','sending'].includes(j.state)).length,0);
+ const pendingJobs=campaigns=>campaigns.filter(c=>c.state==='active').flatMap(c=>(c.jobs||[]).filter(j=>['queued','sending'].includes(j.state)));
+ const pendingCount=campaigns=>pendingJobs(campaigns).length;
+ const pendingByChannel=campaigns=>pendingJobs(campaigns).reduce((counts,j)=>(counts[j.channel]=(counts[j.channel]||0)+1,counts),{});
  const assert=()=>{if(!allowed())throw Error('Administrator login required');};
  save(list().map(c=>({...c,jobs:c.jobs.map(j=>j.state==='sending'?{...j,state:j.channel==='whatsapp'?'unconfirmed':'queued',error:'पिछली बार app बंद होने पर भेजने का परिणाम अनिश्चित था।'}:j)})));
  const exclusions=()=>store.metaGet(blockKey)||[];
@@ -27,12 +29,17 @@ function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
   rows.sort((a,b)=>a.mobile.localeCompare(b.mobile));return{rows,invalid,duplicates,excluded};
  }
  function audience(){return buildAudience(store.patientDirectoryRows(),exclusions());}
- function estimate(messageCount,scheduledAt,campaigns=list(),channelCounts){
-  const start=Math.max(now(),Date.parse(scheduledAt));
-  const pacedCount=channelCounts?Math.max(0,...Object.values(channelCounts)):messageCount;
-  const minimumSeconds=Math.max(0,pacedCount-1)*intervalMs/1000;
-  const earliestFinishAt=new Date(start+minimumSeconds*1000).toISOString(),day=indiaDate(Date.parse(scheduledAt)),dayEnd=Date.parse(day+'T23:59:59.999+05:30');
-  return{messageCount,minimumSeconds,earliestFinishAt,dayEnd:new Date(dayEnd).toISOString(),fitsDay:start+minimumSeconds*1000<=dayEnd,otherPending:pendingCount(campaigns)};
+ function estimate(messageCount,scheduledAt,campaigns=list(),channelCounts={},excludeCampaignId){
+  const start=Math.max(now(),Date.parse(scheduledAt)),day=indiaDate(Date.parse(scheduledAt));
+  const backlogCampaigns=(excludeCampaignId?campaigns.filter(c=>c.id!==excludeCampaignId):campaigns).filter(c=>c.date===day);
+  const backlogCounts=pendingByChannel(backlogCampaigns),counts={};
+  for(const channel of ['whatsapp','sms'])counts[channel]=(channelCounts[channel]||0)+(backlogCounts[channel]||0);
+  const activeChannels=['whatsapp','sms'].filter(channel=>counts[channel]>0).sort((a,b)=>counts[b]-counts[a]||a.localeCompare(b));
+  const total=activeChannels.reduce((sum,channel)=>sum+counts[channel],0),gateSlots=Math.ceil(intervalMs/pollMs);
+  const completionSlots=Math.max(0,total-1,...activeChannels.map((channel,index)=>index+Math.max(0,counts[channel]-1)*gateSlots));
+  const elapsed=completionSlots*pollMs;
+  const earliestFinishAt=new Date(start+elapsed).toISOString(),dayEnd=Date.parse(day+'T23:59:59.999+05:30');
+  return{messageCount,minimumSeconds:elapsed/1000,earliestFinishAt,dayEnd:new Date(dayEnd).toISOString(),fitsDay:start+elapsed<=dayEnd,otherPending:pendingCount(backlogCampaigns),pendingByChannel:backlogCounts};
  }
  function preview(input){assert();const data=inputData(input),a=audience(),campaigns=list();const fingerprint=createHash('sha256').update(JSON.stringify([data,a.rows,exclusions()])).digest('hex');const channelCounts=Object.fromEntries(data.channels.map(channel=>[channel,a.rows.length]));return{...data,...a,count:a.rows.length,fingerprint,estimate:estimate(a.rows.length*data.channels.length,data.scheduledAt,campaigns,channelCounts)};}
  function create(input){
@@ -48,32 +55,36 @@ function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
  }
  function review(cid,jid,action){assert();const all=list(),c=all.find(x=>x.id===cid),j=c?.jobs.find(x=>x.id===jid);if(!j||!['unconfirmed','failed'].includes(j.state))throw Error('इस संदेश की जाँच उपलब्ध नहीं है।');if(action==='sent')j.state='sent';else if(action==='cancel')j.state='cancelled';else throw Error('पहले WhatsApp/gateway में परिणाम जाँचें।');j.error='';save(all);}
  function setExclusions(numbers){assert();if(typeof numbers!=='string'||numbers.length>100000)throw Error('मोबाइल नंबरों की सूची सही नहीं है।');const values=numbers.split(/[\s,;]+/).filter(Boolean);const normalized=values.map(familyNumber);if(normalized.some(x=>!x))throw Error('हर नंबर 10 अंक या +91 के साथ लिखें; एक लाइन में एक नंबर।');store.metaSet(blockKey,[...new Set(normalized)].sort());}
- function configureSMS(config){assert();gateway={apiUrl:String(config?.apiUrl||''),apiKey:String(config?.apiKey||''),deviceId:String(config?.deviceId||'')};}
- function status(includeJobs=true){assert();const campaigns=list(),backlog=pendingCount(campaigns);return{festivals:FESTIVALS,exclusions:exclusions(),smsReady:!!(gateway?.apiUrl&&gateway.apiKey&&gateway.deviceId),campaigns:campaigns.slice().reverse().map(c=>{const {jobs=[],messages,...summary}=c;const pending=jobs.filter(j=>['queued','sending'].includes(j.state));const channelCounts=pending.reduce((counts,j)=>(counts[j.channel]=(counts[j.channel]||0)+1,counts),{});return{...summary,estimate:{...estimate(pending.length,c.scheduledAt,campaigns,channelCounts),otherPending:backlog},counts:jobs.reduce((a,j)=>(a[j.state]=(a[j.state]||0)+1,a),{}),...(includeJobs?{messages,jobs}:{})};})};}
+ function status(includeJobs=true){assert();const campaigns=list();return{festivals:FESTIVALS,exclusions:exclusions(),smsReady:!!smsReady(),campaigns:campaigns.slice().reverse().map(c=>{const {jobs=[],messages,...summary}=c;const pending=jobs.filter(j=>['queued','sending'].includes(j.state));const channelCounts=pending.reduce((counts,j)=>(counts[j.channel]=(counts[j.channel]||0)+1,counts),{});return{...summary,estimate:estimate(pending.length,c.scheduledAt,campaigns,channelCounts,c.id),counts:jobs.reduce((a,j)=>(a[j.state]=(a[j.state]||0)+1,a),{}),...(includeJobs?{messages,jobs}:{})};})};}
  function campaignJobs(id){assert();const campaign=list().find(c=>c.id===id);if(!campaign)throw Error('अभियान नहीं मिला।');return campaign.jobs||[];}
  async function tick(){
   if(busy||!allowed())return;busy=true;
   try{
    const tickNow=now(),all=list(),due=all.filter(c=>c.state==='active'&&Date.parse(c.scheduledAt)<=tickNow);
    if(!due.length)return;
+   const pivot=lastCampaignId?due.findIndex(c=>c.id===lastCampaignId):-1;
+   const ordered=pivot<0?due:[...due.slice(pivot+1),...due.slice(0,pivot+1)];
    const blockedNumbers=exclusions(),blocked=new Set(blockedNumbers),directory=store.patientDirectoryRows(),eligible=new Set(buildAudience(directory,blockedNumbers).rows.map(p=>p.mobile));
    const contacts=new Map(directory.map(p=>[String(p.id).replace(/^local_/,''),p]));let whatsappAvailable;
    let selected,dirty=false;
-   for(const c of due){
+   for(const c of ordered){
     if(c.date!==indiaDate(tickNow)){for(const j of c.jobs)if(j.state==='queued'){Object.assign(j,{state:'expired',error:'त्योहार का चुना हुआ दिन समाप्त हो गया।'});dirty=true;}continue;}
     for(const j of c.jobs){
      if(j.state!=='queued'||j.retryAt>tickNow||tickNow<(nextSend[j.channel]||0))continue;
      if(blocked.has(j.mobile)){Object.assign(j,{state:'cancelled',error:'इस नंबर पर शुभकामनाएँ बंद हैं।'});dirty=true;continue;}
      if(!eligible.has(j.mobile)){Object.assign(j,{state:'cancelled',error:'नंबर मरीज सूची से हट गया है।'});dirty=true;continue;}
      const contact=contacts.get(String(j.patientId).replace(/^local_/,''));if(contact?.workflow_data?.[j.channel]===false){Object.assign(j,{state:'cancelled',error:'मरीज की संपर्क पसंद के अनुसार रोका गया'});dirty=true;continue;}
-     if(j.channel==='sms'&&!(gateway?.apiUrl&&gateway.apiKey&&gateway.deviceId))continue;
-     if(j.channel==='whatsapp'){if(whatsappAvailable===undefined)whatsappAvailable=!!whatsapp.status().ready;if(!whatsappAvailable)continue;}
+     if(j.channel==='sms'&&(!smsReady()||typeof sendSMS.canSend==='function'&&!sendSMS.canSend()))continue;
+     if(j.channel==='whatsapp'){
+      if(whatsappAvailable===undefined)whatsappAvailable=typeof whatsapp.canSendText==='function'?whatsapp.canSendText():!!whatsapp.status().ready;
+      if(!whatsappAvailable)continue;
+     }
      selected={c,j};break;
     }
     if(selected)break;
    }
    if(!selected){if(dirty)save(all);return;}
-   const {c,j}=selected;j.state='sending';j.attempts=(j.attempts||0)+1;j.error='';save(all);
+   const {c,j}=selected;lastCampaignId=c.id;j.state='sending';j.attempts=(j.attempts||0)+1;j.error='';save(all);
    nextSend[j.channel]=now()+intervalMs;
    // Re-read once immediately before WhatsApp handoff so pause, cancellation,
    // exclusions and patient preferences can still stop an in-flight lookup.
@@ -86,12 +97,12 @@ function createFestivalService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
     return current.state==='active'?true:'wait';
    };
    let result,transportFailed=false;
-   try{result=j.channel==='whatsapp'?await whatsapp.sendText(j.mobile,c.messages.whatsapp,validate,{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',attempt:j.attempts}):await sendSMS({...gateway,requestId:'festival-'+j.id,mobile:j.mobile,message:c.messages.sms});}
+   try{result=j.channel==='whatsapp'?await whatsapp.sendText(j.mobile,c.messages.whatsapp,validate,{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',attempt:j.attempts}):await sendSMS({requestId:'festival-'+j.id,mobile:j.mobile,message:c.messages.sms});}
    catch(e){transportFailed=true;report('MSG-011','Campaign transport',e,{jobId:j.id,campaignId:c.id,kind:'festival',channel:j.channel,attempt:j.attempts,deliveryState:'unconfirmed'});result={ok:false,uncertain:true,error:'भेजने का परिणाम अनिश्चित है; चैट/gateway जाँचें।'};}
    if(!transportFailed&&j.channel==='sms'&&!result.ok&&!result.cancelled)report('MSG-011','Campaign SMS result',result.error||'SMS gateway did not accept request',{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',channel:'sms',attempt:j.attempts,deliveryState:result.uncertain?'unconfirmed':'queued',level:result.uncertain?'warn':undefined});
    patchJob(c.id,j.id,{state:result.ok?'sent':result.cancelled?'cancelled':result.uncertain?'unconfirmed':result.permanent?'failed':'queued',error:result.ok?'':result.error||'कनेक्शन की प्रतीक्षा में',retryAt:now()+60000,...(result.ok?{sentAt:new Date(now()).toISOString()}:{} )});
   }finally{busy=false;}
  }
- return{preview,create,status,campaignJobs,change,review,setExclusions,configureSMS,tick};
+ return{preview,create,status,campaignJobs,change,review,setExclusions,tick};
 }
 module.exports={createFestivalService,FESTIVALS,indiaDate};

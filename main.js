@@ -15,6 +15,8 @@ const { autoUpdater } = require('electron-updater');
 const logger = require('./logger.cjs');
 const sqliteStore = require('./sqlite-store.cjs');
 const access = require('./access-control.cjs');
+const { MAX_BACKUP_JSON_BYTES } = require('./backup-shape.cjs');
+const { verifyBackup } = require('./backup-verify.cjs');
 const authPublicConfig = require('./auth-public-config.json');
 let verifiedCloudToken = null;
 let authGeneration = 0;
@@ -142,6 +144,11 @@ const SETTINGS_FILE = path.join(BACKUP_DIR, 'settings.json');
 const FRACTURE_FILE = path.join(BACKUP_DIR, 'fractures.json');
 const XRAYS_DIR     = path.join(BACKUP_DIR, 'xray_images');
 const AUTH_FILE     = path.join(BACKUP_DIR, 'auth.json');
+const TEXTBEE_CONFIG_FILE = path.join(app.getPath('userData'), 'textbee-config.bin');
+const textBeeConfig = require('./textbee-config.cjs').createTextBeeConfig({
+  file: TEXTBEE_CONFIG_FILE, safeStorage, fs, logger,
+});
+const { normalizeWhatsAppUrl } = require('./whatsapp-url.cjs');
 
 const SEED_FILE = path.join(__dirname, 'public', 'patients_seed.json');
 
@@ -639,7 +646,8 @@ function createWindow() {
 }
 
 // ─── WHATSAPP WINDOW ─────────────────────────────────────────────────────────
-function openWhatsAppWindow(url) {
+function openWhatsAppWindow(inputUrl) {
+  const url = normalizeWhatsAppUrl(inputUrl);
   if (whatsappWindow && !whatsappWindow.isDestroyed()) {
     whatsappWindow.loadURL(url);
     whatsappWindow.show();
@@ -657,6 +665,7 @@ function openWhatsAppWindow(url) {
     webPreferences: {
       nodeIntegration:  false,
       contextIsolation: true,
+      sandbox:          true,
       webSecurity:      true,
       partition:        'persist:whatsapp',   // Session save — dobara QR scan nahi karni
       // Chrome 124+ user-agent — WhatsApp Web older Chrome ko reject karta hai
@@ -670,25 +679,37 @@ function openWhatsAppWindow(url) {
     callback({ requestHeaders: details.requestHeaders });
   });
 
+  const guardNavigation = (event, target) => {
+    try {
+      const safe = normalizeWhatsAppUrl(target);
+      if (safe !== target) {
+        event.preventDefault();
+        setImmediate(() => {
+          if (whatsappWindow && !whatsappWindow.isDestroyed()) whatsappWindow.loadURL(safe);
+        });
+      }
+    } catch { event.preventDefault(); }
+  };
+  whatsappWindow.webContents.on('will-navigate', guardNavigation);
+  whatsappWindow.webContents.on('will-redirect', guardNavigation);
+  whatsappWindow.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
+    try {
+      const safe = normalizeWhatsAppUrl(popupUrl);
+      setImmediate(() => {
+        if (whatsappWindow && !whatsappWindow.isDestroyed()) whatsappWindow.loadURL(safe);
+      });
+    } catch { /* reject non-WhatsApp popup */ }
+    return { action: 'deny' };
+  });
+
   whatsappWindow.loadURL(url);
 
-  // ✅ FIX: Offline hone par WhatsApp Web load fail hoti thi aur Chromium ka
-  // "no internet" error page dikhta tha (jo user ko "error" jaisa lagta tha).
-  // Ab is jagah ek simple, saaf message dikhate hain — koi error nahi,
-  // sirf batate hain ki internet aane par WhatsApp yahan khud khul jayega.
+  // Keep the failed official URL in place. Do not navigate this persistent
+  // remote-content window to data/file/custom schemes for an error page.
   whatsappWindow.webContents.on('did-fail-load', (_e, errorCode, _desc, _url, isMainFrame) => {
-    if (!isMainFrame) return;
-    if (errorCode === -3) return; // ERR_ABORTED — user ne khud navigate kiya, ignore
-    const offlineHtml = `
-      <html><body style="display:flex;align-items:center;justify-content:center;height:100vh;
-        margin:0;font-family:sans-serif;background:#1a3a6b;color:#fff;text-align:center;">
-        <div>
-          <h2>📶 Internet nahi hai</h2>
-          <p>WhatsApp yahan internet aane par automatically load ho jayega.</p>
-          <p style="opacity:0.8;font-size:14px;">Ye window ab band kar sakte hain — koi error nahi hai.</p>
-        </div>
-      </body></html>`;
-    whatsappWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(offlineHtml)}`);
+    if (!isMainFrame || errorCode === -3) return;
+    logger.logWarn('whatsapp', 'WhatsApp Web unavailable; waiting for an official HTTPS reload');
+    whatsappWindow.setTitle('WhatsApp Web — Internet unavailable');
   });
 
   // Hide on close — login session bacha rahega
@@ -836,13 +857,11 @@ ipcMain.handle('db:copyXrayImage', async (_event, srcPath) => {
   } catch (e) { return { success: false, error: e.message }; }
 });
 
-ipcMain.on('save-offline-data', (_event, fileName, data) => {
-  try { fs.writeFileSync(path.join(BACKUP_DIR, fileName), JSON.stringify(data, null, 2)); }
-  catch (e) { console.error('[legacy save-offline-data]', e.message); }
-});
-
 ipcMain.handle('db:getSettings', async ()              => ({ success: true, data: readJSON(SETTINGS_FILE, {}) }));
 ipcMain.handle('db:saveSettings', async (_e, settings) => { writeJSON(SETTINGS_FILE, settings); return { success: true }; });
+ipcMain.handle('textbee:status', async () => textBeeConfig.status());
+ipcMain.handle('textbee:save', async (_e, config) => textBeeConfig.save(config));
+ipcMain.handle('textbee:clear', async () => textBeeConfig.clear());
 ipcMain.handle('db:getPending',   async ()             => ({ success: true, data: readJSON(PENDING_FILE) }));
 ipcMain.handle('db:clearPending', async (_e, ids)      => {
   const p = readJSON(PENDING_FILE);
@@ -909,13 +928,15 @@ const TABLE_FILE_MAP = {
 
 ipcMain.handle('backup:writeSnapshot', async (_e, tables) => {
   try {
+    const tableNames = Object.keys(tables || {});
+    const unknownTables = tableNames.filter(tableName => !Object.hasOwn(TABLE_FILE_MAP, tableName));
+    if (unknownTables.length) throw new Error(`Unknown backup table: ${unknownTables.join(', ')}`);
     if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
     let written = 0;
     const failedTables = [];
     for (const [tableName, rows] of Object.entries(tables || {})) {
       if (!Array.isArray(rows)) continue;
-      const targetFile = TABLE_FILE_MAP[tableName]
-        || path.join(BACKUP_DIR, `${tableName}.json`);
+      const targetFile = TABLE_FILE_MAP[tableName];
       const res = writeJSONSafe(targetFile, rows, `writeSnapshot:${tableName}`);
       written += res.count;
       // 🚨 FIX (Phase 2.1): res.written===false + res.skipped===false ka
@@ -1088,27 +1109,43 @@ ipcMain.handle('backup:readSnapshot', async () => {
 });
 
 // ─── NEW APP DATA BACKUP (Settings → Backup tab) ──────────────────────────
+function safeBackupFileName(fileName,fallback,extension) {
+  const safeName=String(fileName||fallback).replace(/[/\\]/g,'_');
+  if(!safeName||safeName==='.'||safeName==='..'||safeName.length>240||!safeName.toLowerCase().endsWith(extension))throw Error('Invalid backup filename');
+  return safeName;
+}
+function requireValidBackup(jsonString) {
+  return verifyBackup(jsonString);
+}
 ipcMain.handle('backup:getDir', async () => {
   ensureAppBackupDir();
   return APP_BACKUP_DIR;
 });
 
-ipcMain.handle('backup:writeJson', async (_e, { fileName, jsonString }) => {
+ipcMain.handle('backup:writeJson', async (_e, input) => {
   try {
+    const jsonString=input?.jsonString;
+    requireValidBackup(jsonString);
+    const safeName=safeBackupFileName(input?.fileName,'backup.json','.json');
     ensureAppBackupDir();
-    const safeName = String(fileName || 'backup.json').replace(/[/\\]/g, '_');
     const fullPath = path.join(APP_BACKUP_DIR, safeName);
     atomicWriteFile(fullPath, jsonString);
     return { success: true, path: fullPath };
   } catch (e) { return { success: false, error: e.message }; }
 });
 
-ipcMain.handle('backup:writeBinary', async (_e, { fileName, base64Data }) => {
+ipcMain.handle('backup:writeBinary', async (_e, input) => {
   try {
+    // Re-verify the same JSON so XLSX cannot be written through this IPC independently.
+    requireValidBackup(input?.jsonString);
+    const base64Data=input?.base64Data;
+    if(typeof base64Data!=='string'||base64Data.length>Math.ceil(MAX_BACKUP_JSON_BYTES*4/3)+8||!/^[A-Za-z0-9+/]*={0,2}$/.test(base64Data)||base64Data.length%4)throw Error('Backup spreadsheet input is invalid or exceeds 200 MB');
+    const bytes=Buffer.from(base64Data,'base64');
+    if(bytes.length>MAX_BACKUP_JSON_BYTES)throw Error('Backup spreadsheet exceeds the 200 MB limit');
+    const safeName=safeBackupFileName(input?.fileName,'backup.xlsx','.xlsx');
     ensureAppBackupDir();
-    const safeName = String(fileName || 'backup.xlsx').replace(/[/\\]/g, '_');
     const fullPath = path.join(APP_BACKUP_DIR, safeName);
-    atomicWriteFile(fullPath, Buffer.from(base64Data, 'base64'));
+    atomicWriteFile(fullPath, bytes);
     return { success: true, path: fullPath };
   } catch (e) { return { success: false, error: e.message }; }
 });
@@ -1137,14 +1174,14 @@ ipcMain.on('open-external-url', (_e, url) => {
   if (typeof url === 'string' && /^https:\/\//.test(url)) shell.openExternal(url).catch(() => {});
 });
 
-ipcMain.on('open-whatsapp', (_e, payload) => {
-  let url = typeof payload === 'string' ? payload
-    : (payload && typeof payload === 'object') ? (payload.url || payload.webUrl || payload.desktopUrl || '') : '';
+ipcMain.on('open-whatsapp', (_e, url) => {
   openWhatsAppWindow(url || 'https://web.whatsapp.com');
 });
 
 // ─── SMS — Main process se bhejo (CORS issue fix) ────────────────────────────
-const sendDurableSMS = require('./sms-outbox.cjs').createSmsSender({ store: sqliteStore, logger });
+const sendDurableSMS = require('./sms-outbox.cjs').createSmsSender({
+  store: sqliteStore, logger, getConfig: () => textBeeConfig.get(),
+});
 ipcMain.handle('app:sendSMS', async (_e, input) => sendDurableSMS(input));
 
 // Diagnostic checks only read clinical data. Reports are separate, local files.
@@ -1337,7 +1374,7 @@ app.whenReady().then(() => {
   } catch (e) {
     logger.logError('app-lifecycle', `SQLite offline store init fail: ${e.message}`);
   }
-  try {require('./pc-messaging.cjs').registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store:sqliteStore,access,sendSMS:sendDurableSMS,logger});}
+  try {require('./pc-messaging.cjs').registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store:sqliteStore,access,sendSMS:sendDurableSMS,smsReady:()=>{try{return textBeeConfig.isConfigured();}catch{return false;}},logger});}
   catch(error){logger.logError('whatsapp','Messaging setup unavailable: '+error.message);}
   const attachmentCache=require('./attachment-cache.cjs').createAttachmentCache({cacheRoot:path.join(app.getPath('userData'),'clinical-photo-cache'),localRoots:[XRAYS_DIR,path.join(app.getPath('userData'),'clinical-files')],cloudOrigin:new URL(authPublicConfig.url).origin});
   ipcMain.handle('attachment:read',(_e,source)=>{if(access.getPrincipal()?.role!=='admin')throw Error('Administrator login required');return attachmentCache.read(source);});

@@ -45,6 +45,8 @@ files:
   - access-control.cjs
   - offline-login.cjs
   - cloud-sync.cjs
+  - textbee-config.cjs
+  - whatsapp-url.cjs
   - auth-public-config.json
   - package.json
 

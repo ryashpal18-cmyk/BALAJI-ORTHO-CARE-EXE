@@ -46,18 +46,26 @@ export function collectionRows(bills: any[], patients: any[] = [], includeAdvanc
   return receipts;
 }
 
+function moneyCents(value: unknown): number {
+  const amount = Number(value ?? 0);
+  if (!Number.isFinite(amount) || amount < 0) throw new Error('Amount, payment and discount must be non-negative numbers');
+  const scaled = amount * 100;
+  return Math.round(scaled + Number.EPSILON * Math.abs(scaled));
+}
+
 export function normalizeBill(changes: any, existing: any = {}) {
   const result = { ...changes };
   if ('discount' in result || !('id' in existing)) result.discount = Number(result.discount ?? 0);
   const bill = { ...existing, ...result };
-  if (String(existing.status).toLowerCase() === "cancelled" && (Object.entries(changes).some(([k,v]) => ["amount","discount","amount_paid"].includes(k) && Number(v||0)!==Number(existing[k]||0)) || (changes.status && changes.status!=="Cancelled"))) throw new Error("रद्द बिल में भुगतान या Edit नहीं कर सकते");
-  if (String(bill.status).toLowerCase()==="cancelled" && Number(bill.amount_paid||0)!==0) throw new Error("Cancel से पहले जमा राशि वापस करें");
-  for (const key of ['amount','amount_paid','discount']) {
-    const value = Number(bill[key] ?? 0);
-    if (!Number.isFinite(value) || value < 0) throw new Error('Amount, payment and discount must be non-negative numbers');
-  }
-  if (Number(bill.discount || 0) > Number(bill.amount || 0)) throw new Error('Discount cannot exceed bill amount');
-  const net = Number(bill.amount || 0) - Number(bill.discount || 0);
-  result.status = bill.status === 'Cancelled' ? 'Cancelled' : Number(bill.amount_paid || 0) >= net ? 'Paid' : Number(bill.amount_paid || 0) > 0 ? 'Partial' : 'Pending';
+  const cancelled = String(bill.status).toLowerCase() === "cancelled";
+  if (String(existing.status).toLowerCase() === "cancelled" && (Object.entries(changes).some(([k,v]) => ["amount","discount","amount_paid"].includes(k) && Number(v||0)!==Number(existing[k]||0)) || (changes.status && String(changes.status).toLowerCase() !== "cancelled"))) throw new Error("रद्द बिल में भुगतान या Edit नहीं कर सकते");
+  if (cancelled && Number(bill.amount_paid||0)!==0) throw new Error("Cancel से पहले जमा राशि वापस करें");
+  const amountCents = moneyCents(bill.amount);
+  const paidCents = moneyCents(bill.amount_paid);
+  const discountCents = moneyCents(bill.discount);
+  if (discountCents > amountCents) throw new Error('Discount cannot exceed bill amount');
+  const netCents = amountCents - discountCents;
+  if (!cancelled && paidCents > netCents) throw new Error('Payment cannot exceed bill amount after discount');
+  result.status = cancelled ? 'Cancelled' : paidCents >= netCents ? 'Paid' : paidCents > 0 ? 'Partial' : 'Pending';
   return result;
 }

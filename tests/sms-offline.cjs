@@ -32,11 +32,11 @@ const payment=load('src/lib/paymentLedger.ts',['paymentHistory','withPaymentHist
 const offline=load('src/lib/offlineQuery.ts',['offlineInsert','offlineUpdate','offlineDelete'],{...db,...payment,isOnline:async()=>false,runSync:noop});
 
 const {createSmsSender}=require('../sms-outbox.cjs');
-const config={apiUrl:'https://gateway.example.test/send',apiKey:'test-only',deviceId:'test-device'};
+const config={apiUrl:'https://api.textbee.dev/send',apiKey:'test-only',deviceId:'test-device'};
 (async()=>{
  let calls=0;
- const sender=createSmsSender({store,fetchImpl:async()=>{calls++;return {ok:true}}});
- windowMock.electron.sendSMS=input=>sender({...input,...config});
+ const sender=createSmsSender({store,getConfig:()=>config,fetchImpl:async url=>{assert.equal(url,config.apiUrl);calls++;return {ok:true}}});
+ windowMock.electron.sendSMS=input=>sender(input);
  const service=load('src/services/smsService.ts',['sendSMS'],{...db,isValidMobile:()=>true,normalizeIndianMobile:x=>'91'+x,runSync:async()=>{}});
  const saved=await service.sendSMS('9123456780','Fake SMS','Test Patient');assert.equal(saved.queued,true);assert.equal(calls,0);
  store.close();store.init(testDir);assert.equal(store.queueGetAll().length,1);
@@ -52,20 +52,26 @@ const config={apiUrl:'https://gateway.example.test/send',apiKey:'test-only',devi
  await cleanup.runSync();assert.equal(calls,2);failRemove=false;for(const q of store.queueGetAll())store.queueUpdate(q.id,{lastAttemptAt:0});await cleanup.runSync();assert.equal(calls,2);
  console.log('PASS queue cleanup failure retries without duplicate SMS');
  let timedCalls=0;
- const timeoutSender=createSmsSender({store,timeoutMs:10,fetchImpl:()=>{timedCalls++;return new Promise(()=>{})}});
- const ambiguous={...config,requestId:'ambiguous',mobile:'919123456780',message:'Timeout test'};
+ const timeoutSender=createSmsSender({store,getConfig:()=>config,timeoutMs:10,fetchImpl:()=>{timedCalls++;return new Promise(()=>{})}});
+ const ambiguous={requestId:'ambiguous',mobile:'919123456780',message:'Timeout test'};
  assert.equal((await timeoutSender(ambiguous)).uncertain,true);assert.equal((await timeoutSender(ambiguous)).uncertain,true);assert.equal(timedCalls,1);
  console.log('PASS timeout releases sender; ambiguous request is not resent');
  let writes=0,ackCalls=0;
- const badAck=createSmsSender({store:{metaGet:k=>store.metaGet(k),metaSet:(k,v)=>{if(v.state==='accepted')throw Error('disk ack failed');store.metaSet(k,v)}},fetchImpl:async()=>{ackCalls++;return {ok:true}}});
- const ack={...config,requestId:'bad-ack',mobile:'919123456780',message:'Ack test'};
+ const badAck=createSmsSender({store:{metaGet:k=>store.metaGet(k),metaSet:(k,v)=>{if(v.state==='accepted')throw Error('disk ack failed');store.metaSet(k,v)}},getConfig:()=>config,fetchImpl:async()=>{ackCalls++;return {ok:true}}});
+ const ack={requestId:'bad-ack',mobile:'919123456780',message:'Ack test'};
  assert.equal((await badAck(ack)).uncertain,true);assert.equal((await badAck(ack)).uncertain,true);assert.equal(ackCalls,1);
- const badDisk=createSmsSender({store:{metaGet:()=>null,metaSet:()=>{throw Error('disk full')}},fetchImpl:async()=>{writes++;return {ok:true}}});await badDisk({...ack,requestId:'bad-disk'});assert.equal(writes,0);
+ const badDisk=createSmsSender({store:{metaGet:()=>null,metaSet:()=>{throw Error('disk full')}},getConfig:()=>config,fetchImpl:async()=>{writes++;return {ok:true}}});await badDisk({...ack,requestId:'bad-disk'});assert.equal(writes,0);
  console.log('PASS disk failure before send prevents dispatch; failure after acceptance prevents resend');
  let rejectedCalls=0;
- const rejection=createSmsSender({store,fetchImpl:async()=>({ok:++rejectedCalls>1,status:429})});
+ const rejection=createSmsSender({store,getConfig:()=>config,fetchImpl:async()=>({ok:++rejectedCalls>1,status:429})});
  const reject={...ack,requestId:'rejected'};assert.equal((await rejection(reject)).ok,false);assert.equal((await rejection(reject)).ok,true);assert.equal(rejectedCalls,2);
- console.log('PASS explicit gateway rejection can retry');
+ let diverted=0;const pinned=createSmsSender({store,getConfig:()=>({apiUrl:'https://example.test/steal',apiKey:'secret',deviceId:'device'}),fetchImpl:async()=>{diverted++;return{ok:true}}});
+ const pinResult=await pinned({...ack,requestId:'host-pin',apiUrl:'https://api.textbee.dev/send'});assert.equal(pinResult.ok,false);assert.equal(diverted,0);
+ console.log('PASS explicit gateway rejection can retry; non-TextBee provider host cannot dispatch');
+ let concurrent=0,maxConcurrent=0,networkStarts=0,releases=[];
+ const serialSender=createSmsSender({store,getConfig:()=>config,fetchImpl:()=>{networkStarts++;concurrent++;maxConcurrent=Math.max(maxConcurrent,concurrent);return new Promise(resolve=>releases.push(()=>{concurrent--;resolve({ok:true});}));}});
+ const serialA=serialSender({...ack,requestId:'serial-a'}),serialB=serialSender({...ack,requestId:'serial-b'});await new Promise(setImmediate);assert.equal(networkStarts,1);assert.equal(serialSender.canSend(),false);releases.shift()();await new Promise(setImmediate);assert.equal(networkStarts,2);releases.shift()();await Promise.all([serialA,serialB]);assert.equal(maxConcurrent,1);assert.equal(serialSender.canSend(),true);
+ console.log('PASS different durable SMS requests share one serialized gateway lane');
  const rows=load('src/lib/smsLogRows.ts',['smsLogRows']).smsLogRows([{id:'done',status:'sent'}],[{id:1,op:'sms',payload:{messageId:'done'}},{id:2,op:'sms',payload:{messageId:'pending'}},{id:3,op:'sms',payload:{deliveryState:'unconfirmed'}}]);
  assert.equal(rows.length,3);assert.equal(rows.find(r=>r.id==='done').status,'sent');assert.match(rows.find(r=>r.id==='pending').status,/Pending/);assert.match(rows.find(r=>r.id==='queue-3').status,/unconfirmed/);
  console.log('PASS offline history shows pending, accepted and unconfirmed without duplicates');
@@ -81,16 +87,16 @@ const config={apiUrl:'https://gateway.example.test/send',apiKey:'test-only',devi
  // 1) Failures that provably happened before the request left this PC are retryable (no duplicate risk).
  const netErr=code=>Object.assign(new TypeError('fetch failed'),{cause:Object.assign(new Error(code),{code})});
  let netCalls=0;
- const flaky=createSmsSender({store,fetchImpl:async()=>{netCalls++;if(netCalls===1)throw netErr('ENOTFOUND');
+ const flaky=createSmsSender({store,getConfig:()=>config,fetchImpl:async()=>{netCalls++;if(netCalls===1)throw netErr('ENOTFOUND');
   if(netCalls===2)throw Object.assign(new TypeError('fetch failed'),{cause:new AggregateError([Object.assign(new Error('a'),{code:'ECONNREFUSED'}),Object.assign(new Error('b'),{code:'ENETUNREACH'})])});
   return {ok:true}}});
- const down={...config,requestId:'net-down',mobile:'919123456780',message:'Net test'};
+ const down={requestId:'net-down',mobile:'919123456780',message:'Net test'};
  const d1=await flaky(down),d2=await flaky(down);
  assert.equal(d1.ok,false);assert.ok(!d1.uncertain);assert.equal(d2.ok,false);assert.ok(!d2.uncertain);
  assert.equal((await flaky(down)).ok,true);assert.equal(netCalls,3);
  let resetCalls=0;
- const resetSender=createSmsSender({store,fetchImpl:async()=>{resetCalls++;throw netErr('ECONNRESET')}});
- const midReq={...config,requestId:'reset-mid',mobile:'919123456780',message:'Reset test'};
+ const resetSender=createSmsSender({store,getConfig:()=>config,fetchImpl:async()=>{resetCalls++;throw netErr('ECONNRESET')}});
+ const midReq={requestId:'reset-mid',mobile:'919123456780',message:'Reset test'};
  assert.equal((await resetSender(midReq)).uncertain,true);assert.equal((await resetSender(midReq)).uncertain,true);assert.equal(resetCalls,1);
  console.log('PASS DNS/refused/unreachable failures retry safely; mid-request reset stays unconfirmed and is never resent');
  // 2) A genuinely unconfirmed SMS is parked: gateway called once, no ERROR log, no lastError, no retry counter,

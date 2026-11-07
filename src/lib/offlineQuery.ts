@@ -123,10 +123,26 @@ export async function offlineUpdate(table: string, rowId: string, updates: any, 
     syncLater(); return saved;
   });
 }
+const DELETE_RELATION_FIELDS = new Set(["patients", "billing", "branches", "doctors"]);
+function expectedDeleteRow(row: any) {
+  return Object.fromEntries(Object.entries(row).filter(([key, value]) =>
+    key !== "id" && key !== "updated_at" && !key.startsWith("_") &&
+    !DELETE_RELATION_FIELDS.has(key) && value !== undefined));
+}
 export async function offlineDelete(table: string, rowId: string) {
-  const existing = await cacheGetRow(table, rowId);
-  rowId = existing?.id || rowId;
-  await serialize(`${table}::${rowId}`, () => commitMutation({ table, op: "delete", rowId }, null));
+  await serialize(`${table}::${rowId}`, async () => {
+    const existing = await cacheGetRow(table, rowId);
+    if (!existing) throw new Error("Record not available locally; refresh before deleting");
+    const resolvedId = existing.id || rowId;
+    const expectedRow = expectedDeleteRow(existing);
+    if (!Object.keys(expectedRow).length) throw new Error("Record revision unavailable; refresh before deleting");
+    await commitMutation({
+      table,
+      op: "delete",
+      rowId: resolvedId,
+      payload: { expectedUpdatedAt: existing.updated_at ?? null, expectedRow },
+    }, null);
+  });
   syncLater();
 }
 
