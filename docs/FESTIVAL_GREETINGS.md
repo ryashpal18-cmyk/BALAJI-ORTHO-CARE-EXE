@@ -38,9 +38,11 @@ report behavior is unchanged.
   Compiled Vite gateway credentials are passed to main memory after admin access
   checks and never stored in campaign metadata or exposed by festival status.
   A missing SMS configuration keeps SMS waiting, while WhatsApp may proceed.
-- The worker attempts one greeting every 30 seconds, including retries. It polls
-  every 5 seconds. Disconnected WhatsApp does not block an available SMS job.
-  A 100-number campaign with both channels needs at least about 100 minutes.
+- The worker keeps a 30-second safety interval **per channel**, including retries. It
+  polls every 5 seconds, so WhatsApp and SMS can alternate without either provider
+  exceeding that pace. Disconnected WhatsApp does not block an available SMS job.
+  WhatsApp-only campaigns still keep the conservative 30-second interval because
+  the connector is unofficial; two-channel campaigns no longer share one global gate.
 - Only sends during the selected IST calendar day. Queued messages expire after
   that day, including offline/restart backlogs, to avoid late seasonal greetings.
   Plan the start time accordingly. The screen states this expiry rule.

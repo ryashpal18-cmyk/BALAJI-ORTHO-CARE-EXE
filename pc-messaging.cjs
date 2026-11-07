@@ -64,7 +64,8 @@ function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,acces
     const error=await shell.openPath(file);if(error)throw Error(error);return{success:true};
   }));
   const festival=require('./festival-messaging.cjs').createFestivalService({store,allowed,whatsapp:service,sendSMS,logger});
-  ipcMain.handle('festival:status',admin(()=>festival.status()));
+  ipcMain.handle('festival:status',admin(()=>festival.status(false)));
+  ipcMain.handle('festival:jobs',admin((_e,id)=>festival.campaignJobs(id)));
   ipcMain.handle('festival:preview',admin((_e,input)=>festival.preview(input)));
   ipcMain.handle('festival:create',admin((_e,input)=>festival.create(input)));
   ipcMain.handle('festival:change',admin((_e,{id,action})=>festival.change(id,action)));

@@ -531,9 +531,14 @@ function patientStatementRows(id) {
 // Consistent read of all local account rows. Clinical data is never changed here.
 function patientDirectoryRows() {
   return getDb().transaction(() => {
+    const aliases = new Map();
+    for (const row of getDb().prepare(`SELECT key, value FROM meta WHERE key GLOB 'alias:patients:*'`).all()) {
+      let value; try { value = JSON.parse(row.value); } catch (_) { value = row.value; }
+      aliases.set(row.key.slice('alias:patients:'.length), value);
+    }
     const patients = new Map();
     for (const p of cacheGetAll('patients').sort((a,b)=>Number(!!b._pendingSync)-Number(!!a._pendingSync)||Number(String(a.id).startsWith('local_'))-Number(String(b.id).startsWith('local_')))) {
-      const id = String(metaGet('alias:patients:'+p.id)||p.id||'').replace(/^local_/,'');
+      const id = String(aliases.get(String(p.id))||p.id||'').replace(/^local_/,'');
       if (id && !patients.has(id)) patients.set(id,{...p,id});
     }
     return [...patients.values()];
