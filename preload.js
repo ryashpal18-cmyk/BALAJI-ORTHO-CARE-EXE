@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('electron', {
   },
   festival: {
     status: () => ipcRenderer.invoke('festival:status'),
+    jobs: id => ipcRenderer.invoke('festival:jobs', id),
     preview: input => ipcRenderer.invoke('festival:preview', input),
     create: input => ipcRenderer.invoke('festival:create', input),
     change: (id,action) => ipcRenderer.invoke('festival:change', {id,action}),
