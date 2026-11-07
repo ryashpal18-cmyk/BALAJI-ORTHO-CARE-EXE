@@ -136,7 +136,8 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
     const file=path.join(dir,crypto.createHash('sha256').update(INVOICE_TEMPLATE_VERSION+normId(bill.id)+fingerprint).digest('hex').slice(0,32)+'.pdf');
     fs.writeFileSync(file+'.tmp',bytes);fs.renameSync(file+'.tmp',file);return file;
   }
-  function status(){assertAllowed();return{state,ready,qr,error,auto:settings().auto!==false,paired:!!settings().paired,jobs:jobs().map(({pdfPath,...j})=>j).reverse()};}
+  function status(limit){assertAllowed();const stored=jobs(),count=Number.isInteger(limit)?Math.max(0,limit):stored.length;const recent=count>=stored.length?stored:stored.slice(Math.max(0,stored.length-count));return{state,ready,qr,error,auto:settings().auto!==false,paired:!!settings().paired,jobs:recent.map(({pdfPath,...j})=>j).reverse()};}
+  const canSendText=()=>!!(ready&&client&&!busy&&!stopped);
   async function connect(){
     assertAllowed();if(client||starting)return status();
     const executablePath=browserPath();if(!executablePath)throw Error('PC में Microsoft Edge या Google Chrome install करें।');
@@ -178,11 +179,11 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
       let handedOff=false,failureStage='PDF बनाना';
       try{
         const current=jobData(job),activeClient=client;
-        if((job.kind==='statement'||job.kind==='monthly'&&!job.automatic)&&job.fingerprint!==current.fingerprint)throw Error('STATEMENT-004: हिसाब बदला है; Patient Profile में फिर preview करके queue करें।');
+        if((job.kind==='statement'||job.kind==='monthly'&&!job.automatic)&&job.fingerprint!==current.fingerprint)throw Error(job.kind==='monthly'?'MONTHLY-004: हिसाब बदला है; फिर preview करके queue करें।':'STATEMENT-004: हिसाब बदला है; Patient Profile में फिर preview करके queue करें।');
         const pdfPath=job.kind==='monthly'?await createMonthlyPdf(job.month,current.fingerprint):job.kind==='statement'?await createStatementPdf(job.patientId,job.fingerprint):await createPdf(job.billId);
         if(!stillQueued(job))return;
         const fresh=jobData(job);
-        if(fresh.fingerprint!==current.fingerprint)throw Error(job.kind==='statement'?'STATEMENT-004: हिसाब बदला; फिर preview करें।':'Bill बदल गया; नवीनतम PDF दोबारा बनेगी');
+        if(fresh.fingerprint!==current.fingerprint)throw Error(job.kind==='statement'?'STATEMENT-004: हिसाब बदला; फिर preview करें।':job.kind==='monthly'&&!job.automatic?'MONTHLY-004: हिसाब बदला; फिर preview करें।':'Bill बदल गया; नवीनतम PDF दोबारा बनेगी');
         failureStage='WhatsApp नंबर जाँचना';
         const number=await bounded(activeClient.getNumberId('91'+familyNumber(fresh.patient.mobile)),30000);
         if(!stillQueued(job))return;
@@ -190,7 +191,7 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
         const chatId=serializedId(number);if(!chatId)throw Error('WhatsApp chat ID नहीं मिली; connector compatibility जाँचें');
         assertAllowed();if(client!==activeClient||!ready)throw Error('WhatsApp connection बदल गया');
         if(job.kind==='monthly')assertMonthlyJob(job);
-        if(jobData(job).fingerprint!==fresh.fingerprint)throw Error(job.kind==='statement'?'STATEMENT-004: हिसाब या mobile बदला; फिर preview करें।':'Bill या mobile बदला; PDF दोबारा बनेगी');
+        if(jobData(job).fingerprint!==fresh.fingerprint)throw Error(job.kind==='statement'?'STATEMENT-004: हिसाब या mobile बदला; फिर preview करें।':job.kind==='monthly'&&!job.automatic?'MONTHLY-004: हिसाब बदला; फिर preview करें।':'Bill या mobile बदला; PDF दोबारा बनेगी');
         if(!stillQueued(job))return;
         const media=mediaFactory?mediaFactory(pdfPath):require('whatsapp-web.js').MessageMedia.fromFilePath(pdfPath);
         patch(job.id,{state:'sending',pdfPath,mobile:familyNumber(fresh.patient.mobile),patientName:fresh.patient.name,fingerprint:fresh.fingerprint,attempts:(job.attempts||0)+1,error:''});
@@ -239,6 +240,6 @@ function createWhatsAppService({store,root,allowed,renderPdf,clientFactory,media
   function setAuto(value){assertAllowed();if(typeof value!=='boolean')throw Error('Invalid setting');store.metaSet(settingsKey,{...settings(),auto:value});return status();}
   function review(id,action){assertAllowed();const job=jobs().find(j=>j.id===id);if(!job||!['unconfirmed','failed','queued'].includes(job.state))throw Error('Job review उपलब्ध नहीं');if(!['sent','retry','cancel'].includes(action))throw Error('Invalid review');patch(id,{state:action==='retry'?'queued':action==='cancel'?'cancelled':'sent',retryAt:0,error:'',errorDetail:'',failureStage:'',reviewedAt:new Date(now()).toISOString(),reviewAction:action});return status();}
   async function stop(){stopped=true;ready=false;qr=null;state='disconnected';const old=client;client=null;if(old)await dispose(old);if(!clientFactory){const executablePath=browserPath();if(executablePath)try{await recoverBrowser({profile,executablePath});}catch(e){report('WA-010','WhatsApp browser shutdown',e);}}}
-  return{sendText,connect,disconnect,status,setAuto,enqueue,createPdf,previewStatement,enqueueStatement,createStatementPdf,getMonthlySettings,saveMonthlySettings,previewMonthly,enqueueMonthly,createMonthlyPdf,tick,review,stop};
+  return{sendText,canSendText,connect,disconnect,status,setAuto,enqueue,createPdf,previewStatement,enqueueStatement,createStatementPdf,getMonthlySettings,saveMonthlySettings,previewMonthly,enqueueMonthly,createMonthlyPdf,tick,review,stop};
 }
 module.exports={createWhatsAppService,findBrowser,serializedId};

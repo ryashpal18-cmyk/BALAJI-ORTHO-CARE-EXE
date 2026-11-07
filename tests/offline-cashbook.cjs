@@ -30,17 +30,17 @@ const source=fs.readFileSync(root+'/src/lib/paymentLedger.ts','utf8').replaceAll
 
  await pg.exec(`RESET ROLE; INSERT INTO auth.users VALUES('00000000-0000-4000-8000-000000000090'); INSERT INTO user_roles(user_id,role) VALUES('00000000-0000-4000-8000-000000000090','admin'); SELECT set_config('app.uid','00000000-0000-4000-8000-000000000090',false); SET ROLE authenticated;
  INSERT INTO payments(billing_id,amount_paid) VALUES('${bill}',100);`);
- await pg.query('SELECT delete_record_authorized($1,$2)',['patients',bill]);
- await pg.query('SELECT delete_record_authorized($1,$2)',['patients',bill]);
- assert.equal((await pg.query('SELECT * FROM patients WHERE id=$1',[bill])).rows.length,0);
- assert.equal((await pg.query('SELECT * FROM billing WHERE id=$1',[bill])).rows.length,0);
- assert.equal((await pg.query('SELECT * FROM payments WHERE billing_id=$1',[bill])).rows.length,0);
- assert.equal((await pg.query('SELECT * FROM deleted_records_log WHERE record_id=$1',[bill])).rows.length,1);
+ const patientRevision=(await pg.query('SELECT updated_at FROM patients WHERE id=$1',[bill])).rows[0].updated_at;
+ await assert.rejects(()=>pg.query('SELECT delete_record_authorized($1,$2,$3)',['patients',bill,patientRevision]),/archive/i);
+ assert.equal((await pg.query('SELECT * FROM patients WHERE id=$1',[bill])).rows.length,1);
+ assert.equal((await pg.query('SELECT * FROM billing WHERE id=$1',[bill])).rows.length,1);
+ assert.equal((await pg.query('SELECT * FROM payments WHERE billing_id=$1',[bill])).rows.length,1);
+ assert.equal((await pg.query('SELECT * FROM deleted_records_log WHERE record_id=$1',[bill])).rows.length,0);
  await pg.exec("INSERT INTO cash_book_entries(id,entry_date,entry_type,amount) VALUES('00000000-0000-4000-8000-000000000091','2026-10-07','expense',20); INSERT INTO cash_book_days(entry_date,status,calculated_closing,physical_cash) VALUES('2026-10-07','closed',80,80)");
  await assert.rejects(()=>pg.query('SELECT delete_record_authorized($1,$2)',['cash_book_entries','00000000-0000-4000-8000-000000000091']),/Reopen/);
  assert.equal((await pg.query("SELECT * FROM deleted_records_log WHERE record_id='00000000-0000-4000-8000-000000000091'")).rows.length,0);
  assert.equal((await pg.query("SELECT * FROM cash_book_entries WHERE id='00000000-0000-4000-8000-000000000091'")).rows.length,1);
- console.log('PASS delete audit + FK cascades are atomic, retry-safe, and roll back on rejection');
+ console.log('PASS patient archive and closed-day delete guards leave data and audit intact');
  await pg.close();
  const old={id:'day-1',status:'closed',physical_cash:100,calculated_closing:100};const store={cacheGetAll:t=>t==='patients'?[{id:'patient-a',branch_id:'branch-a',mobile:'9123456780'}]:[],cacheGetRow:(t,id)=>t==='cash_book_days'&&id==='day-1'?old:null};
  ac.setPrincipal({role:'staff',userId:'staff',pages:['/daily-cash-book'],branchIds:null,expiresAt:Date.now()+10000});

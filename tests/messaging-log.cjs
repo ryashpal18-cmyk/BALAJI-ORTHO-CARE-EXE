@@ -28,7 +28,7 @@ const makeStore=()=>{const meta=new Map();return{metaGet:k=>structuredClone(meta
  }finally{service.stop();}
  const {createFestivalService}=require('../festival-messaging.cjs'),{createOutreachService}=require('../outreach-service.cjs');
  for(const type of ['festival','outreach']){
-  const sms=async()=>{throw Error('Synthetic '+type+' gateway exception');};const opts={store:makeStore(),logger,now:()=>clock,allowed:()=>true,whatsapp:{status:()=>({ready:false})},sendSMS:sms};const s=type==='festival'?createFestivalService(opts):createOutreachService(opts);s.configureSMS({apiUrl:'https://synthetic.invalid',apiKey:'PRIVATE_KEY',deviceId:'private-device'});
+  const sms=async()=>{throw Error('Synthetic '+type+' gateway exception');};const opts={store:makeStore(),logger,now:()=>clock,allowed:()=>true,smsReady:()=>true,whatsapp:{status:()=>({ready:false})},sendSMS:sms};const s=type==='festival'?createFestivalService(opts):createOutreachService(opts);
   if(type==='festival'){const input={festival:'diwali',title:'Synthetic',scheduledAt:new Date(clock).toISOString(),channels:['sms'],sms:'PRIVATE_BODY'};s.create({...input,fingerprint:s.preview(input).fingerprint});}
   else{const input={requestId:'synthetic-request-123',title:'Synthetic',patientIds:['person'],channels:['sms'],sms:'PRIVATE_BODY'};s.enqueueBulk({...input,fingerprint:s.previewBulk(input).fingerprint});}
   await s.tick();assert.ok(events().some(e=>e.code==='MSG-011'&&e.message.includes(type+' gateway exception')&&e.stack&&e.detail.channel==='sms'));
@@ -36,8 +36,8 @@ const makeStore=()=>{const meta=new Map();return{metaGet:k=>structuredClone(meta
  console.log('PASS festival and outreach SMS exceptions log the real cause/stack without logging bodies or gateway credentials');
  const {createSmsSender}=require('../sms-outbox.cjs');
  const cause=Object.assign(Error('Synthetic DNS lookup failure'),{code:'ENOTFOUND'});
- const sender=createSmsSender({store:makeStore(),logger,fetchImpl:async()=>{throw Error('fetch failed',{cause});}});
- const retry=await sender({requestId:'synthetic-sms-request',apiUrl:'https://synthetic.invalid',apiKey:'PRIVATE_KEY',deviceId:'private-device',mobile:'9876543210',message:'PRIVATE_BODY'});
+ const sender=createSmsSender({store:makeStore(),logger,getConfig:()=>({apiUrl:'https://api.textbee.dev/send',apiKey:'PRIVATE_KEY',deviceId:'private-device'}),fetchImpl:async()=>{throw Error('fetch failed',{cause});}});
+ const retry=await sender({requestId:'synthetic-sms-request',mobile:'9876543210',message:'PRIVATE_BODY'});
  assert.equal(retry.uncertain,undefined);const smsEvent=events().find(e=>e.code==='SMS-010'&&e.detail.nativeCode==='ENOTFOUND');assert.ok(smsEvent);assert.equal(smsEvent.detail.nativeCause.code,'ENOTFOUND');assert.ok(smsEvent.stack);assert.equal(JSON.stringify(smsEvent).includes('PRIVATE_KEY'),false);console.log('PASS durable SMS sender preserves the actual nested network cause/code in disk logs');
  const timers=[];const app=new EventEmitter();app.getPath=()=>dir;app.setAsDefaultProtocolClient=()=>{};
  const registerModule={exports:{}};const serviceStub={tick:async()=>{throw Error('Synthetic worker tick fault')},stop(){}};

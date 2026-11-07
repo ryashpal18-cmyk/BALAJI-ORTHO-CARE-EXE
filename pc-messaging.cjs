@@ -3,7 +3,7 @@ const path=require('path'),fs=require('fs');
 const {loadPdfDocument}=require('./pdf-renderer.cjs');
 const {createMessagingLog}=require('./messaging-log.cjs');
 const {parseFamilyLink,familyGroups,familyRecords}=require('./family-profile.cjs');
-function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,access,sendSMS,logger}) {
+function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,access,sendSMS,smsReady,logger}) {
   const report=createMessagingLog(logger,'messaging-worker');
   let pending=null;
   const accept=args=>{for(const arg of args||[]){const id=parseFamilyLink(arg);if(id)pending=id;}};
@@ -34,12 +34,12 @@ function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,acces
   ipcMain.handle('family:list',admin(()=>familyGroups(store.cacheGetAll('patients'))));
   ipcMain.handle('family:profile',admin((_e,id)=>familyRecords(store,id)));
   ipcMain.handle('family:pending',admin(()=>{const id=pending;pending=null;return id;}));
-  ipcMain.handle('whatsapp:status',admin(()=>service.status()));
-  ipcMain.handle('whatsapp:connect',admin(()=>service.connect()));
-  ipcMain.handle('whatsapp:disconnect',admin(()=>service.disconnect()));
-  ipcMain.handle('whatsapp:auto',admin((_e,value)=>service.setAuto(value)));
+  ipcMain.handle('whatsapp:status',admin(()=>service.status(50)));
+  ipcMain.handle('whatsapp:connect',admin(async()=>{await service.connect();return service.status(50);}));
+  ipcMain.handle('whatsapp:disconnect',admin(async()=>{await service.disconnect();return service.status(50);}));
+  ipcMain.handle('whatsapp:auto',admin((_e,value)=>{service.setAuto(value);return service.status(50);}));
   ipcMain.handle('whatsapp:enqueue',admin((_e,billId)=>service.enqueue(billId)));
-  ipcMain.handle('whatsapp:review',admin((_e,{id,action})=>service.review(id,action)));
+  ipcMain.handle('whatsapp:review',admin((_e,{id,action})=>{service.review(id,action);return service.status(50);}));
   ipcMain.handle('whatsapp:pdf',admin(async(_e,{billId,save})=>{
     const file=await service.createPdf(billId);
     if(!allowed())throw Error('Administrator login required');
@@ -63,7 +63,8 @@ function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,acces
     if(save){const r=await dialog.showSaveDialog({defaultPath:'Balaji-Monthly-'+month+'.pdf',filters:[{name:'PDF',extensions:['pdf']}]});if(r.canceled)return{cancelled:true};if(!allowed())throw Error('Administrator login required');fs.copyFileSync(file,r.filePath);return{success:true};}
     const error=await shell.openPath(file);if(error)throw Error(error);return{success:true};
   }));
-  const festival=require('./festival-messaging.cjs').createFestivalService({store,allowed,whatsapp:service,sendSMS,logger});
+  const workerPollMs=5000;
+  const festival=require('./festival-messaging.cjs').createFestivalService({store,allowed,whatsapp:service,sendSMS,smsReady,workerPollMs,logger});
   ipcMain.handle('festival:status',admin(()=>festival.status(false)));
   ipcMain.handle('festival:jobs',admin((_e,id)=>festival.campaignJobs(id)));
   ipcMain.handle('festival:preview',admin((_e,input)=>festival.preview(input)));
@@ -71,18 +72,18 @@ function registerPcMessaging({app,BrowserWindow,ipcMain,dialog,shell,store,acces
   ipcMain.handle('festival:change',admin((_e,{id,action})=>festival.change(id,action)));
   ipcMain.handle('festival:review',admin((_e,{id,jobId,action})=>festival.review(id,jobId,action)));
   ipcMain.handle('festival:exclude',admin((_e,numbers)=>festival.setExclusions(numbers)));
-  const outreach=require('./outreach-service.cjs').createOutreachService({store,allowed,whatsapp:service,sendSMS,logger});
-  ipcMain.handle('outreach:status',admin(()=>outreach.status()));
+  const outreach=require('./outreach-service.cjs').createOutreachService({store,allowed,whatsapp:service,sendSMS,smsReady,logger});
+  ipcMain.handle('outreach:status',admin(()=>outreach.status(false)));
+  ipcMain.handle('outreach:jobs',admin((_e,{id,offset,limit})=>outreach.campaignJobs(id,offset,limit)));
   ipcMain.handle('outreach:preview',admin((_e,input)=>outreach.previewBulk(input)));
   ipcMain.handle('outreach:enqueue',admin((_e,input)=>outreach.enqueueBulk(input)));
-  ipcMain.handle('outreach:settings',admin((_e,input)=>outreach.setReceiptSettings(input)));
+  ipcMain.handle('outreach:settings',admin((_e,input)=>{outreach.setReceiptSettings(input);return outreach.status(false);}));
   ipcMain.handle('outreach:change',admin((_e,{id,action})=>outreach.change(id,action)));
   ipcMain.handle('outreach:review',admin((_e,{id,jobId,action})=>outreach.review(id,jobId,action)));
-  ipcMain.handle('festival:smsConfig',admin((_e,config)=>{festival.configureSMS(config);outreach.configureSMS(config);}));
   const worker=(kind,fn)=>()=>{void Promise.resolve().then(fn).catch(e=>report('MSG-010','Background messaging worker',e,{kind}));};
-  const outreachTimer=setInterval(worker('outreach',()=>outreach.tick()),5000);
+  const outreachTimer=setInterval(worker('outreach',()=>outreach.tick()),workerPollMs);
   app.on('before-quit',()=>clearInterval(outreachTimer));
-  const festivalTimer=setInterval(worker('festival',()=>festival.tick()),5000);
+  const festivalTimer=setInterval(worker('festival',()=>festival.tick()),workerPollMs);
   app.on('before-quit',()=>clearInterval(festivalTimer));
   const timer=setInterval(worker('whatsapp',()=>service.tick()),15000);
   let shutdownStarted=false,shutdownDone=false;

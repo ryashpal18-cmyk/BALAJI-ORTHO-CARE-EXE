@@ -24,11 +24,12 @@ function provablyNotSent(error) {
   return found.length > 0 && found.every(c => NOT_SENT_CODES.has(c));
 }
 // Persist BEFORE dispatch. A crash/timeout after dispatch is ambiguous, never an automatic resend.
-function createSmsSender({ store, fetchImpl = fetch, timeoutMs = 15000, logger }) {
+function createSmsSender({ store, getConfig, fetchImpl = fetch, timeoutMs = 15000, logger }) {
   const report = createMessagingLog(logger, 'sms-outbox');
   const active = new Map();
-  return async function send(input) {
-    const { requestId, apiUrl, apiKey, deviceId, mobile, message } = input || {};
+  let tail = Promise.resolve(), pending = 0;
+  async function dispatch(input) {
+    const { requestId, mobile, message } = input || {};
     if (!requestId || typeof requestId !== 'string') return { ok: false, error: 'Durable SMS request ID required' };
     const fingerprint = createHash('sha256').update(JSON.stringify([mobile, message])).digest('hex');
     const key = 'sms-dispatch:' + requestId;
@@ -39,9 +40,14 @@ function createSmsSender({ store, fetchImpl = fetch, timeoutMs = 15000, logger }
       if (prior && prior.fingerprint !== fingerprint) return { ok: false, uncertain: true, error: 'SMS request identity conflict' };
       if (prior?.state === 'accepted') return { ok: true, acceptedAt: prior.acceptedAt };
       if (prior && ['dispatching', 'uncertain'].includes(prior.state)) return { ok: false, uncertain: true, error: 'SMS delivery unconfirmed; check gateway before resending' };
+      let gateway;
+      try { gateway = getConfig?.(); }
+      catch { return { ok: false, error: 'Secure SMS gateway configuration unavailable' }; }
+      const { apiUrl, apiKey, deviceId } = gateway || {};
       if (!apiUrl || !apiKey || !deviceId) return { ok: false, error: 'SMS gateway configuration missing' };
       let url; try { url = new URL(apiUrl); } catch { return { ok: false, error: 'Invalid SMS gateway URL' }; }
-      if (url.protocol !== 'https:') return { ok: false, error: 'SMS gateway requires HTTPS' };
+      if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'api.textbee.dev' || (url.port && url.port !== '443'))
+        return { ok: false, error: 'SMS gateway must use api.textbee.dev over HTTPS' };
       const digits = String(mobile || '').replace(/\D/g, '');
       const num = digits.length === 10 ? '91' + digits : digits;
       if (!/^91[6-9]\d{9}$/.test(num) || !message) return { ok: false, error: 'Invalid SMS recipient or message' };
@@ -78,6 +84,14 @@ function createSmsSender({ store, fetchImpl = fetch, timeoutMs = 15000, logger }
       } finally { clearTimeout(timer); }
     } catch (error) { report('SMS-010', 'SMS local journal', error, { jobId:requestId, channel:'sms' }); return { ok: false, error: 'SMS local journal unavailable; no new dispatch confirmed' }; }
     finally { active.delete(key); }
-  };
+  }
+  function send(input) {
+    pending++;
+    const task = tail.then(() => dispatch(input));
+    tail = task.then(() => { pending--; }, () => { pending--; });
+    return task;
+  }
+  send.canSend = () => pending === 0;
+  return send;
 }
 module.exports = { createSmsSender };

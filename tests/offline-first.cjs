@@ -63,6 +63,8 @@ const offline=load('src/lib/offlineQuery.ts',['offlineInsert','offlineUpdate','o
  console.log('PASS Ortho edits use local commit regardless of network');
  for(const m of store.queueGetAll())store.queueRemove(m.id);
  const hooks=load('src/hooks/useDatabase.ts',['useDeleteBill','useDeletePatient'],{useMutation:v=>v,useQueryClient:()=>({invalidateQueries:noop}),offlineDelete:offline.offlineDelete,isOnline:()=>{throw Error('Delete must not wait for network')},supabase:{from:()=>{throw Error('Direct cloud write forbidden before local delete')}}});
+ store.cacheUpsertRow('billing',{id:'bill-local-test',amount:100,discount:0,amount_paid:0,status:'Pending',updated_at:'2026-01-01T00:00:00Z'},'id');
+ store.cacheUpsertRow('patients',{id:'patient-local-test',name:'Delete Test',updated_at:'2026-01-01T00:00:00Z'},'id');
  await hooks.useDeleteBill().mutationFn('bill-local-test');await hooks.useDeletePatient().mutationFn({id:'patient-local-test'});
  assert.equal(store.queueGetAll().filter(m=>m.op==='delete').length,2);
  console.log('PASS bill/patient delete commits locally without cloud preflight');

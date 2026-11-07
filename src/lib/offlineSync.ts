@@ -76,14 +76,14 @@ if (typeof window !== "undefined") {
 // Patients, billing, appointments — sab kuch IndexedDB mein save ho jayega
 // ─────────────────────────────────────────────────────────────────────────
 
-let downloadInProgress = false;
+let downloadPromise: Promise<void> | null = null;
 
-export async function downloadAllDataToCache(): Promise<void> {
-  if (downloadInProgress || !(await isOnline())) return;
-  if (!(await ensureCloudSession())) return;
-  // ensureCloudSession accepts the verified local owner API mode too.
-  downloadInProgress = true;
-  try {
+export function downloadAllDataToCache(): Promise<void> {
+  if (downloadPromise) return downloadPromise;
+  const shared = Promise.resolve().then(async () => {
+    if (!(await isOnline())) return;
+    if (!(await ensureCloudSession())) return;
+    // ensureCloudSession accepts the verified local owner API mode too.
     await warmInvoiceNumbers().catch(error=>cLog.warn("invoice",error.message));
     await warmRegistrationNumbers().catch(error => cLog.warn("registration", error.message));
     for (const table of OPERATIONAL_TABLES) {
@@ -98,7 +98,11 @@ export async function downloadAllDataToCache(): Promise<void> {
       } catch (error:any) { if(!error.cachedSchemaFailure)cLog.warn("sync", `${table}: complete refresh failed; existing cache preserved`, error); }
     }
     void queryClient.invalidateQueries();
-  } finally { downloadInProgress = false; }
+  }).finally(() => {
+    if (downloadPromise === shared) downloadPromise = null;
+  });
+  downloadPromise = shared;
+  return shared;
 }
 
 // ─── Sync engine ───
@@ -304,7 +308,12 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
   if (m.op === "delete") {
     if (!m.rowId) throw new Error("delete mutation missing rowId");
 
-    const { data, error } = await supabase.rpc("delete_record_authorized" as any, { p_table: table, p_id: m.rowId } as any);
+    const { data, error } = await supabase.rpc("delete_record_authorized" as any, {
+      p_table: table,
+      p_id: m.rowId,
+      p_expected_updated_at: m.payload?.expectedUpdatedAt ?? null,
+      p_expected_row: m.payload?.expectedRow ?? null,
+    } as any);
     if (error) throw error;
     if (data !== true) throw new Error("Delete was not acknowledged by the server");
     return;
@@ -335,9 +344,7 @@ async function applyMutation(m: QueuedMutation): Promise<void> {
     if (!m.payload.messageId) await queueUpdate(m.id!, { payload: { ...m.payload, messageId } });
     const electron = (window as any).electron;
     if (!electron?.sendSMS) throw new Error("Electron SMS handler unavailable");
-    const result = await electron.sendSMS({ requestId: messageId,
-      apiUrl: import.meta.env.VITE_TEXTBEE_API_URL, apiKey: import.meta.env.VITE_TEXTBEE_API_KEY,
-      deviceId: import.meta.env.VITE_TEXTBEE_DEVICE_ID, mobile, message });
+    const result = await electron.sendSMS({ requestId: messageId, mobile, message });
     if (!result?.ok) {
       if (result?.uncertain) {
         await queueUpdate(m.id!, { payload: { ...m.payload, messageId, deliveryState: "unconfirmed" }, lastError: "" });

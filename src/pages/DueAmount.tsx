@@ -31,8 +31,8 @@ function openWhatsAppDue(mobile: string, message: string) {
   let num: string;
   try { num = normalizeIndianMobile(cleanMobile); } catch { toast({ title: "Invalid mobile number", variant: "destructive" }); return; }
   const url = `https://wa.me/${num}?text=${encodeURIComponent(message)}`;
-  if ((window as any).ipcRenderer) {
-    (window as any).ipcRenderer.send("open-whatsapp", { url });
+  if ((window as any).electron?.openWhatsApp) {
+    (window as any).electron.openWhatsApp(url);
   } else {
     window.open(url, "_blank", "noopener,noreferrer");
   }

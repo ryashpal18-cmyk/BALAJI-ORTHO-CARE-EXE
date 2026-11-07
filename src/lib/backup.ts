@@ -1,5 +1,5 @@
-import { validateBackupShape } from "./backupShape";
-import { captureAttachments, restoreAttachmentData, compactAttachmentBackup } from "./attachmentBackup";
+import { assertBackupJsonSize, MAX_BACKUP_JSON_BYTES, summarizeBackupRecords } from "./backupShape";
+import { captureAttachments, restoreAttachmentData, compactAttachmentBackup, verifyAttachmentArchive } from "./attachmentBackup";
 import { fetchCompleteTable, OPERATIONAL_TABLES } from "./completeFetch";
 import { getLocalSnapshot, restoreLocalSnapshot } from "./offlineDb";
 import { businessDate } from "@/lib/businessDate";
@@ -32,14 +32,11 @@ function recordBackupResult(result: BackupResult): BackupResult {
   return result;
 }
 export function inspectBackup(json: string) {
+  assertBackupJsonSize(json);
   const backup = JSON.parse(json);
-  validateBackupShape(backup);
-  if (![2,3].includes(backup.formatVersion) || !backup.tables || !Array.isArray(backup.localSnapshot?.queue)) throw new Error("Version 2/3 JSON backup required");
-  if(backup.formatVersion===3&&(backup.attachmentFiles?.version!==2||!Array.isArray(backup.attachmentFiles.files)||!Array.isArray(backup.attachmentFiles.missing)))throw new Error('Version 3 photo archive missing or invalid');
-  const tables = Object.values(backup.tables);
-  if (tables.some(rows => !Array.isArray(rows))) throw new Error("Invalid backup table");
-  return { records: tables.reduce((sum: number, rows: any[]) => sum + rows.length, 0), pending:backup.localSnapshot.queue.length,
-    attachments:backup.attachmentFiles?.files?.length||0, missingAttachments:backup.attachmentFiles?.missing?.length||0, generatedAt:backup.generatedAt, warnings:Array.isArray(backup.warnings) ? backup.warnings : [] };
+  const summary = summarizeBackupRecords(backup);
+  return { records: summary.records, pending:summary.pending,
+    attachments:summary.attachments, missingAttachments:summary.missing, generatedAt:backup.generatedAt, warnings:summary.warnings };
 }
 
 export const BACKUP_STORAGE_KEYS = {
@@ -85,9 +82,31 @@ function clinicalLocalStorage() {
   const notes: Record<string, string> = {};
   for (let i=0; i<localStorage.length; i++) {
     const key = localStorage.key(i)!;
-    if ((key.startsWith("ortho_visits_") || key.startsWith("bocc_bill_draft:")) || ["bocc_service_catalog","bocc_selected_branch","bocc_dash_modules","bocc_app_theme"].includes(key)) notes[key] = localStorage.getItem(key)!;
+    if ((key.startsWith("ortho_visits_") || key.startsWith("bocc_bill_draft:")) || ["bocc_service_catalog","bocc_selected_branch","bocc_dash_modules","bocc_app_theme"].includes(key)) notes[key] = backupSafeStoredString(localStorage.getItem(key)!);
   }
   return notes;
+}
+const SECRET_BACKUP_KEY=/(?:password|passwd|secret|credential|authorization|api[_-]?key|private[_-]?key|(?:access|refresh|auth)[_-]?token|^token$)/i;
+function withoutBackupSecrets(value:any):any {
+  if(Array.isArray(value))return value.map(withoutBackupSecrets);
+  if(!value||typeof value!=='object')return value;
+  return Object.fromEntries(Object.entries(value).filter(([key])=>!SECRET_BACKUP_KEY.test(key)).map(([key,item])=>[key,withoutBackupSecrets(item)]));
+}
+function backupSafeStoredString(value:string){
+  try{return JSON.stringify(withoutBackupSecrets(JSON.parse(value)));}catch{return value;}
+}
+function backupSafeSnapshot(snapshot:any){
+  const safe=withoutBackupSecrets(snapshot);
+  if(Array.isArray(safe.meta))safe.meta=safe.meta.filter((entry:any)=>!SECRET_BACKUP_KEY.test(String(entry?.key||''))).map((entry:any)=>({...entry,value:typeof entry.value==='string'?backupSafeStoredString(entry.value):entry.value}));
+  return safe;
+}
+async function verifyBackupArtifact(json:string){
+  assertBackupJsonSize(json);
+  const backup=JSON.parse(json);
+  const localSummary=summarizeBackupRecords(backup);
+  await verifyAttachmentArchive(backup);
+  const desktopVerify=(window as any).electron?.verifyBackup;
+  return desktopVerify ? await desktopVerify(json) : localSummary;
 }
 function parkRestoredMessages(backup:any) {
   const snapshot=backup.localSnapshot;
@@ -108,8 +127,7 @@ function parkRestoredMessages(backup:any) {
   snapshot.meta=meta;
 }
 export async function restoreBackup(json: string) {
-  inspectBackup(json);
-  if((window as any).electron?.verifyBackup)await (window as any).electron.verifyBackup(json);
+  await verifyBackupArtifact(json);
   const currentData = await getLocalSnapshot();
   if (currentData.queue.length || Object.entries(currentData.cache).some(([table, rows]) => !["branches", "profiles", "user_roles"].includes(table) && (rows as any[]).length))
     throw new Error("Restore केवल खाली नए डिवाइस पर करें। मौजूदा मरीज और pending डेटा सुरक्षित है।");
@@ -167,13 +185,14 @@ async function performBackupNow(label: string, onProgress?:(done:number,total:nu
   }
   // One main-process SQLite transaction captures every table and the queue consistently.
   const localSnapshot = await getLocalSnapshot();
+  const backupSnapshot = backupSafeSnapshot(localSnapshot);
   const localStorageSnapshot = clinicalLocalStorage();
   for (const table of new Set([...BACKUP_TABLES, ...Object.keys(localSnapshot.cache)])) {
-    const rows = mergeBackupTable(table, remote[table] || [], localSnapshot, coverage[table] === "complete-server-plus-local");
+    const rows = withoutBackupSecrets(mergeBackupTable(table, remote[table] || [], localSnapshot, coverage[table] === "complete-server-plus-local"));
     backupData[table] = rows; recordCounts[table] = rows.length;
   }
 
-  const attachmentFiles = await captureAttachments({tables:backupData,queue:localSnapshot.queue},onProgress);
+  const attachmentFiles = await captureAttachments({tables:backupData,queue:backupSnapshot.queue},onProgress);
   if(attachmentFiles.missing.length)warnings.push(`${attachmentFiles.missing.length} फोटो/फाइल नहीं मिलीं; यह आंशिक बैकअप है। Missing सूची JSON में है।`);
   const photoResult={attachmentCount:attachmentFiles.files.length,attachmentMissing:attachmentFiles.missing.length,complete:attachmentFiles.complete};
   const now = new Date();
@@ -182,7 +201,7 @@ async function performBackupNow(label: string, onProgress?:(done:number,total:nu
 
   const fullJson = compactAttachmentBackup({
     formatVersion: 2,
-    coverage, warnings, localSnapshot, localStorage: localStorageSnapshot,
+    coverage, warnings, localSnapshot:backupSnapshot, localStorage: localStorageSnapshot,
     attachmentFiles,
     attachments: attachmentFiles.complete ? "Self-contained verified photo/PDF bytes included" : "PARTIAL: see attachmentFiles.missing",
     generatedAt: now.toISOString(),
@@ -191,6 +210,17 @@ async function performBackupNow(label: string, onProgress?:(done:number,total:nu
     tables: backupData,
   });
   const jsonString = JSON.stringify(fullJson, null, 2);
+
+  // Verify the exact serialized artifact before creating or writing either output.
+  let verifiedComplete=false;
+  try {
+    const verification=await verifyBackupArtifact(jsonString);
+    verifiedComplete=verification.complete===true;
+  } catch(error:any) {
+    const reason=error?.message||String(error);
+    const sizeError=/200 MB|200 MiB/i.test(reason);
+    return recordBackupResult({ok:false,mode:(window as any).electron?.verifyBackup?'electron':'browser',recordCounts,warnings,...photoResult,complete:false,error:sizeError?reason:`बैकअप सत्यापन असफल / Backup validation failed: ${reason}. Cloud data may have changed while reading; कृपया फिर प्रयास करें / please retry.`});
+  }
 
   // Excel: ek sheet per table, taaki Dr Excel mein khol kar seedha dekh sakein.
   const wb = XLSX.utils.book_new();
@@ -206,19 +236,20 @@ async function performBackupNow(label: string, onProgress?:(done:number,total:nu
     XLSX.utils.book_append_sheet(wb, sheet, table.slice(0, 31));
   }
   const xlsxArrayBuffer: ArrayBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  if(xlsxArrayBuffer.byteLength>MAX_BACKUP_JSON_BYTES)return recordBackupResult({ok:false,mode:(window as any).electron?.backupWriteJson?'electron':'browser',recordCounts,warnings,...photoResult,complete:false,error:'बैकअप spreadsheet 200 MB से बड़ी है / Backup spreadsheet exceeds the 200 MB limit. कोई फाइल सेव नहीं हुई / No file was saved.'});
 
   try {
     if (window.electron?.backupWriteJson && window.electron?.backupWriteBinary) {
       const jsonRes = await window.electron.backupWriteJson({ fileName: `${baseName}.json`, jsonString });
       const base64Data = arrayBufferToBase64(xlsxArrayBuffer);
-      const xlsxRes = await window.electron.backupWriteBinary({ fileName: `${baseName}.xlsx`, base64Data });
+      const xlsxRes = await window.electron.backupWriteBinary({ fileName: `${baseName}.xlsx`, base64Data, jsonString });
 
       if (!jsonRes.success || !xlsxRes.success) {
         throw new Error(jsonRes.error || xlsxRes.error || "Backup file likhne mein error aaya");
       }
 
       localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_BACKUP_AT, now.toISOString());
-      return recordBackupResult({ ok: true, mode: "electron", jsonPath: jsonRes.path, xlsxPath: xlsxRes.path, recordCounts, warnings, ...photoResult });
+      return recordBackupResult({ ok: true, mode: "electron", jsonPath: jsonRes.path, xlsxPath: xlsxRes.path, recordCounts, warnings, ...photoResult, complete:verifiedComplete });
     }
   } catch (e: any) {
     return recordBackupResult({ ok: false, mode: "electron", recordCounts, error: e?.message || String(e) });
@@ -229,7 +260,7 @@ async function performBackupNow(label: string, onProgress?:(done:number,total:nu
     downloadBlob(new Blob([jsonString], { type: "application/json" }), `${baseName}.json`);
     downloadBlob(new Blob([xlsxArrayBuffer], { type: "application/octet-stream" }), `${baseName}.xlsx`);
     localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_BACKUP_AT, now.toISOString());
-    return recordBackupResult({ ok: true, mode: "browser", recordCounts, warnings, ...photoResult });
+    return recordBackupResult({ ok: true, mode: "browser", recordCounts, warnings, ...photoResult, complete:verifiedComplete });
   } catch (e: any) {
     return recordBackupResult({ ok: false, mode: "browser", recordCounts, error: e?.message || String(e) });
   }
@@ -305,7 +336,7 @@ export function startAutoBackupScheduler() {
       const lastDaily = localStorage.getItem(BACKUP_STORAGE_KEYS.LAST_DAILY_BACKUP_DATE);
       if (lastDaily !== today) {
         const res = await runBackupNow("daily").catch((error: Error) => recordBackupResult({ok:false, mode:"browser", recordCounts:{}, error:error.message}));
-        if (res.ok && res.complete !== false) localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_DAILY_BACKUP_DATE, today);
+        if (res.ok && res.complete === true) localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_DAILY_BACKUP_DATE, today);
       }
     }
 
@@ -314,7 +345,7 @@ export function startAutoBackupScheduler() {
       const isSunday = new Date().getDay() === 0;
       if (isSunday && lastWeekly !== today) {
         const res = await runBackupNow("weekly").catch((error: Error) => recordBackupResult({ok:false, mode:"browser", recordCounts:{}, error:error.message}));
-        if (res.ok && res.complete !== false) localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_WEEKLY_BACKUP_DATE, today);
+        if (res.ok && res.complete === true) localStorage.setItem(BACKUP_STORAGE_KEYS.LAST_WEEKLY_BACKUP_DATE, today);
       }
     }
   };

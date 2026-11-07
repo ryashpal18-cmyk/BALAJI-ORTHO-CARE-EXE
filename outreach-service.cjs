@@ -2,9 +2,10 @@
 const {createMessagingLog}=require('./messaging-log.cjs');
 const {randomUUID,createHash}=require('crypto'),{familyNumber,normId}=require('./family-profile.cjs');
 const clinic='Balaji Digital X-Ray & Ortho Care Center';
-function createOutreachService({store,allowed,whatsapp,sendSMS,now=Date.now,intervalMs=30000,logger}){
+function createOutreachService({store,allowed,whatsapp,sendSMS,smsReady=()=>false,now=Date.now,intervalMs=30000,logger}){
  const report=createMessagingLog(logger,'outreach-service',now);
- const key='outreach:v1';let busy=false,nextSend=0,gateway=null;
+ const key='outreach:v1';let busy=false,lastKind=null;
+ const nextSend={whatsapp:0,sms:0},lastCampaign={receipt:null,bulk:null};
  const initial=()=>({settings:{channels:['whatsapp','sms'],enabled:true},seen:[],campaigns:[]});
  const read=()=>store.metaGet(key)||initial(),save=s=>store.metaSet(key,s),assert=()=>{if(!allowed())throw Error('Administrator login required');};
  const token=(bill,r)=>normId(bill.id)+':'+r.id;
@@ -27,9 +28,9 @@ function createOutreachService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
  function enqueueBulk(input){assert();const p=previewBulk(input);if(input.fingerprint!==p.fingerprint)throw Error('संदेश या नंबर बदले हैं; फिर preview देखें।');if(!p.count)throw Error('भेजने के लिए सही नंबर नहीं है।');const s=read(),same=s.campaigns.find(c=>c.kind==='bulk'&&c.fingerprint===p.fingerprint&&c.state!=='cancelled');if(same)return same.id;
   const c={id:randomUUID(),kind:'bulk',title:p.title,fingerprint:p.fingerprint,state:'active',createdAt:new Date(now()).toISOString(),jobs:p.rows.flatMap(r=>p.channels.map(channel=>({id:randomUUID(),...r,channel,message:p.messages[channel].replace(/\[NAME\]/g,()=>r.name),state:'queued',error:'',attempts:0})))};s.campaigns.push(c);save(s);return c.id;
  }
- function configureSMS(value){assert();gateway={apiUrl:String(value?.apiUrl||''),apiKey:String(value?.apiKey||''),deviceId:String(value?.deviceId||'')};}
  function setReceiptSettings(input){assert();if(typeof input?.enabled!=='boolean'||!Array.isArray(input.channels)||input.channels.some(c=>!['whatsapp','sms'].includes(c)))throw Error('सही notification settings चुनें।');if(input.enabled&&!input.channels.length)throw Error('कम से कम एक माध्यम चुनें।');const s=read();s.settings={enabled:input.enabled,channels:[...new Set(input.channels)]};if(!input.enabled)for(const c of s.campaigns.filter(c=>c.kind==='receipt'))for(const j of c.jobs)if(j.state==='queued')j.state='cancelled';save(s);return status();}
- function status(){assert();const s=read();return{settings:s.settings,smsReady:!!(gateway?.apiUrl&&gateway.apiKey&&gateway.deviceId),whatsappReady:!!whatsapp.status().ready,campaigns:s.campaigns.slice().reverse().map(c=>({...c,counts:c.jobs.reduce((a,j)=>(a[j.state]=(a[j.state]||0)+1,a),{})}))};}
+ function status(includeJobs=true){assert();const s=read();return{settings:s.settings,smsReady:!!smsReady(),whatsappReady:!!whatsapp.status(0).ready,campaigns:s.campaigns.slice().reverse().map(c=>{const {jobs=[],...summary}=c;return{...summary,counts:jobs.reduce((a,j)=>(a[j.state]=(a[j.state]||0)+1,a),{}),...(includeJobs?{jobs}:{})};})};}
+ function campaignJobs(id,offset=0,limit=50){assert();const campaign=read().campaigns.find(c=>c.id===id);if(!campaign)throw Error('अभियान नहीं मिला।');const safeOffset=Math.max(0,Number.isInteger(offset)?offset:0),safeLimit=Math.min(100,Math.max(1,Number.isInteger(limit)?limit:50)),all=campaign.jobs||[];return{jobs:all.slice(safeOffset,safeOffset+safeLimit),offset:safeOffset,limit:safeLimit,total:all.length,hasMore:safeOffset+safeLimit<all.length};}
  function patch(cid,jid,values){const s=read(),j=s.campaigns.find(c=>c.id===cid)?.jobs.find(j=>j.id===jid);if(j)Object.assign(j,values);save(s);}
  function change(id,action){assert();const s=read(),c=s.campaigns.find(c=>c.id===id);if(!c)throw Error('अभियान नहीं मिला।');if(action==='pause'&&c.state==='active')c.state='paused';else if(action==='resume'&&c.state==='paused')c.state='active';else if(action==='cancel'){c.state='cancelled';for(const j of c.jobs)if(j.state==='queued')j.state='cancelled';}else throw Error('कार्रवाई उपलब्ध नहीं है।');save(s);}
  function review(id,jobId,action){assert();const s=read(),j=s.campaigns.find(c=>c.id===id)?.jobs.find(j=>j.id===jobId);if(!j||!['unconfirmed','failed'].includes(j.state)||!['sent','cancel'].includes(action))throw Error('जाँच उपलब्ध नहीं है।');j.state=action==='sent'?'sent':'cancelled';j.error='';save(s);}
@@ -43,22 +44,39 @@ function createOutreachService({store,allowed,whatsapp,sendSMS,now=Date.now,inte
     s.campaigns.push({id:'receipt:'+identity,kind:'receipt',title:'बकाया भुगतान पुष्टि',state:'active',createdAt:new Date(now()).toISOString(),billId:normId(bill.id),receiptId:r.id,jobs:s.settings.channels.map(channel=>({id:randomUUID(),patientId:normId(person?.id),name:person?.name||'',mobile:mobile||'',channel,message,state:mobile?'queued':'failed',error:mobile?'':'मरीज का सही मोबाइल नंबर उपलब्ध नहीं है।',attempts:0}))});
   }}if(changed){s.seen=[...seen];save(s);}
  }
+ function rotate(rows,kind){const id=lastCampaign[kind],index=id?rows.findIndex(c=>c.id===id):-1;return index<0?rows:[...rows.slice(index+1),...rows.slice(0,index+1)];}
  async function tick(){if(busy||!allowed())return;busy=true;
-  try{scanReceipts();const state=read(),ordered=state.campaigns.filter(c=>c.state==='active').sort((a,b)=>Number(b.kind==='receipt')-Number(a.kind==='receipt'));const people=patients();let selected;
-   for(const c of ordered){if(c.kind==='bulk'&&now()<nextSend)continue;for(const j of c.jobs){if(j.state!=='queued'||j.retryAt>now())continue;
-    const person=people.find(p=>normId(p.id)===j.patientId);if(!person||c.kind==='bulk'&&person.workflow_data?.archived||familyNumber(person.mobile)!==j.mobile){patch(c.id,j.id,{state:'cancelled',error:'मरीज या उसका नंबर बदला है; पुराना संदेश रोका गया।'});continue;}
-    if(c.kind==='bulk'&&(store.metaGet('festival:excluded')||[]).includes(j.mobile)){patch(c.id,j.id,{state:'cancelled',error:'इस नंबर पर सामूहिक संदेश बंद हैं।'});continue;}
-    if(person.workflow_data?.[j.channel]===false || c.kind==='bulk' && person.workflow_data?.marketing===false){patch(c.id,j.id,{state:'cancelled',error:'मरीज की संपर्क पसंद के अनुसार संदेश रोका गया।'});continue;}
-    if(j.channel==='sms'&&!(gateway?.apiUrl&&gateway.apiKey&&gateway.deviceId)||j.channel==='whatsapp'&&!whatsapp.status().ready)continue;
-    selected={c,j};break;
-   }if(selected)break;}if(!selected)return;
-   const{c,j}=selected;patch(c.id,j.id,{state:'sending',attempts:j.attempts+1,error:''});if(c.kind==='bulk')nextSend=now()+intervalMs;
-   const validate=()=>{const current=read().campaigns.find(x=>x.id===c.id);if(!current||current.state==='cancelled')return 'cancelled';if(current.state!=='active')return 'wait';const person=patients().find(p=>normId(p.id)===j.patientId);if(!person||c.kind==='bulk'&&person.workflow_data?.archived||familyNumber(person.mobile)!==j.mobile||person.workflow_data?.[j.channel]===false||c.kind==='bulk'&&person.workflow_data?.marketing===false)return 'cancelled';if(c.kind==='bulk'&&(store.metaGet('festival:excluded')||[]).includes(j.mobile))return 'cancelled';if(c.kind==='receipt'){const bill=store.cacheGetAll('billing').find(b=>normId(b.id)===c.billId);if(!bill||['cancelled','canceled','deleted','void'].includes(String(bill.status).toLowerCase())||!bill.payment_history?.some(r=>r.id===c.receiptId))return 'cancelled';}return true;};
-   let result,transportFailed=false;try{result=j.channel==='whatsapp'?await whatsapp.sendText(j.mobile,j.message,validate,{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',attempt:j.attempts+1}):await sendSMS({...gateway,requestId:'outreach-'+j.id,mobile:j.mobile,message:j.message});}catch(e){transportFailed=true;report('MSG-011','Campaign transport',e,{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',channel:j.channel,attempt:j.attempts+1,deliveryState:'unconfirmed'});result={ok:false,uncertain:true,error:'भेजने का परिणाम अनिश्चित है; चैट/gateway जाँचें।'};}
-   if(!transportFailed&&j.channel==='sms'&&!result.ok&&!result.cancelled)report('MSG-011','Campaign SMS result',result.error||'SMS gateway did not accept request',{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',channel:'sms',attempt:j.attempts+1,deliveryState:result.uncertain?'unconfirmed':'queued',level:result.uncertain?'warn':undefined});
+  try{
+   scanReceipts();const state=read(),tickNow=now(),active=state.campaigns.filter(c=>c.state==='active'),people=patients();
+   const receipts=rotate(active.filter(c=>c.kind==='receipt'),'receipt'),bulk=rotate(active.filter(c=>c.kind==='bulk'),'bulk');
+   const groups=receipts.length&&bulk.length?(lastKind==='receipt'?[bulk,receipts]:[receipts,bulk]):[receipts,bulk];
+   let selected,dirty=false,whatsappAvailable,smsAvailable;
+   selection: for(const campaigns of groups)for(const c of campaigns){
+    for(const j of c.jobs){if(j.state!=='queued'||j.retryAt>tickNow||c.kind==='bulk'&&tickNow<(nextSend[j.channel]||0))continue;
+     const person=people.find(p=>normId(p.id)===j.patientId);
+     if(!person||c.kind==='bulk'&&person.workflow_data?.archived||familyNumber(person.mobile)!==j.mobile){Object.assign(j,{state:'cancelled',error:'मरीज या उसका नंबर बदला है; पुराना संदेश रोका गया।'});dirty=true;continue;}
+     if(c.kind==='bulk'&&(store.metaGet('festival:excluded')||[]).includes(j.mobile)){Object.assign(j,{state:'cancelled',error:'इस नंबर पर सामूहिक संदेश बंद हैं।'});dirty=true;continue;}
+     if(person.workflow_data?.[j.channel]===false||c.kind==='bulk'&&person.workflow_data?.marketing===false){Object.assign(j,{state:'cancelled',error:'मरीज की संपर्क पसंद के अनुसार संदेश रोका गया।'});dirty=true;continue;}
+     if(j.channel==='sms'){
+      if(smsAvailable===undefined)smsAvailable=!!smsReady()&&(typeof sendSMS.canSend!=='function'||sendSMS.canSend());
+      if(!smsAvailable)continue;
+     }
+     if(j.channel==='whatsapp'){
+      if(whatsappAvailable===undefined)whatsappAvailable=typeof whatsapp.canSendText==='function'?whatsapp.canSendText():!!whatsapp.status().ready;
+      if(!whatsappAvailable)continue;
+     }
+     selected={c,j};break;
+    }
+    if(selected)break selection;
+   }
+   if(!selected){if(dirty)save(state);return;}
+   const {c,j}=selected;lastKind=c.kind;lastCampaign[c.kind]=c.id;j.state='sending';j.attempts=(j.attempts||0)+1;j.error='';save(state);if(c.kind==='bulk')nextSend[j.channel]=now()+intervalMs;
+   const validate=()=>{const current=read().campaigns.find(x=>x.id===c.id),job=current?.jobs.find(x=>x.id===j.id);if(!current||current.state==='cancelled'||job?.state!=='sending')return 'cancelled';if(current.state!=='active')return 'wait';const person=patients().find(p=>normId(p.id)===j.patientId);if(!person||c.kind==='bulk'&&person.workflow_data?.archived||familyNumber(person.mobile)!==j.mobile||person.workflow_data?.[j.channel]===false||c.kind==='bulk'&&person.workflow_data?.marketing===false)return 'cancelled';if(c.kind==='bulk'&&(store.metaGet('festival:excluded')||[]).includes(j.mobile))return 'cancelled';if(c.kind==='receipt'){const bill=store.cacheGetAll('billing').find(b=>normId(b.id)===c.billId);if(!bill||['cancelled','canceled','deleted','void'].includes(String(bill.status).toLowerCase())||!bill.payment_history?.some(r=>r.id===c.receiptId))return 'cancelled';}return true;};
+   let result,transportFailed=false;try{result=j.channel==='whatsapp'?await whatsapp.sendText(j.mobile,j.message,validate,{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',attempt:j.attempts}):await sendSMS({requestId:'outreach-'+j.id,mobile:j.mobile,message:j.message});}catch(e){transportFailed=true;report('MSG-011','Campaign transport',e,{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',channel:j.channel,attempt:j.attempts,deliveryState:'unconfirmed'});result={ok:false,uncertain:true,error:'भेजने का परिणाम अनिश्चित है; चैट/gateway जाँचें।'};}
+   if(!transportFailed&&j.channel==='sms'&&!result.ok&&!result.cancelled)report('MSG-011','Campaign SMS result',result.error||'SMS gateway did not accept request',{jobId:j.id,campaignId:c.id,kind:c.kind||'festival',channel:'sms',attempt:j.attempts,deliveryState:result.uncertain?'unconfirmed':'queued',level:result.uncertain?'warn':undefined});
    patch(c.id,j.id,{state:result.ok?'sent':result.cancelled?'cancelled':result.uncertain?'unconfirmed':result.permanent?'failed':'queued',error:result.ok?'':result.error||'कनेक्शन की प्रतीक्षा',retryAt:now()+60000,...(result.ok?{sentAt:new Date(now()).toISOString()}: {})});
   }finally{busy=false;}
  }
- return{status,previewBulk,enqueueBulk,configureSMS,setReceiptSettings,change,review,tick};
+ return{status,campaignJobs,previewBulk,enqueueBulk,setReceiptSettings,change,review,tick};
 }
 module.exports={createOutreachService};

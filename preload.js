@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('electron', {
   attachment: {read: source => ipcRenderer.invoke('attachment:read', source), write: input => ipcRenderer.invoke('attachment:write', input)},
   outreach: {
     status: () => ipcRenderer.invoke('outreach:status'),
+    jobs: (id,offset=0,limit=50) => ipcRenderer.invoke('outreach:jobs', {id,offset,limit}),
     preview: input => ipcRenderer.invoke('outreach:preview', input),
     enqueue: input => ipcRenderer.invoke('outreach:enqueue', input),
     settings: input => ipcRenderer.invoke('outreach:settings', input),
@@ -39,7 +40,6 @@ contextBridge.exposeInMainWorld('electron', {
     change: (id,action) => ipcRenderer.invoke('festival:change', {id,action}),
     review: (id,jobId,action) => ipcRenderer.invoke('festival:review', {id,jobId,action}),
     exclude: numbers => ipcRenderer.invoke('festival:exclude', numbers),
-    configureSMS: config => ipcRenderer.invoke('festival:smsConfig', config),
   },
 
   monthly: {
@@ -93,6 +93,11 @@ contextBridge.exposeInMainWorld('electron', {
   // ── Settings ────────────────────────────────────────────────
   getSettings:     ()       => ipcRenderer.invoke('db:getSettings'),
   saveSettings:    (data)   => ipcRenderer.invoke('db:saveSettings', data),
+  textBee: {
+    status: () => ipcRenderer.invoke('textbee:status'),
+    save: config => ipcRenderer.invoke('textbee:save', config),
+    clear: () => ipcRenderer.invoke('textbee:clear'),
+  },
 
   // ── Sync ────────────────────────────────────────────────────
   getPending:      ()       => ipcRenderer.invoke('db:getPending'),
@@ -174,6 +179,7 @@ contextBridge.exposeInMainWorld('electron', {
   downloadUpdate: () => ipcRenderer.invoke('app:downloadUpdate'),
   installUpdate:  () => ipcRenderer.invoke('app:installUpdate'),
   openExternal:   (url) => ipcRenderer.invoke('app:openExternal', url),
+  openWhatsApp:   (url) => ipcRenderer.send('open-whatsapp', url),
 
   // ── Event Listeners ──────────────────────────────────────────
   on: (channel, callback) => {
@@ -192,14 +198,6 @@ contextBridge.exposeInMainWorld('electron', {
 
   // ✅ Bug-detection toast ke "View More" button se call hota hai
   openBugDetail: (detailPath) => ipcRenderer.invoke('bug:openDetail', detailPath),
-});
-
-// Legacy ipcRenderer
-contextBridge.exposeInMainWorld('ipcRenderer', {
-  send:   (channel, ...args) => ipcRenderer.send(channel, ...args),
-  on:     (channel, cb)      => ipcRenderer.on(channel, cb),
-  invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
-  removeAllListeners: (ch)   => ipcRenderer.removeAllListeners(ch),
 });
 
 contextBridge.exposeInMainWorld('__ELECTRON__', true);

@@ -29,8 +29,8 @@ export function openWhatsAppWeb(mobile: string, message: string) {
   const url = `https://web.whatsapp.com/send?phone=${num}&text=${encodeURIComponent(message)}`;
 
   // Electron mein IPC se bhejo
-  if ((window as any).ipcRenderer) {
-    (window as any).ipcRenderer.send("open-whatsapp", { url });
+  if ((window as any).electron?.openWhatsApp) {
+    (window as any).electron.openWhatsApp(url);
   } else if ((window as any).electron?.openExternal) {
     // fallback: electron.openExternal se default browser mein kholo
     (window as any).electron.openExternal(url);
