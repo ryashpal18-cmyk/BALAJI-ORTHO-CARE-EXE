@@ -129,42 +129,32 @@ export async function cacheSetRows(table: string, rows: any[], idField = "id") {
 }
 
 export async function cacheReplaceTable(table: string, rows: any[], idField = "id") {
-  const trustedBridge = electronOffline();
-  if (table === "cash_book_days" && trustedBridge?.refreshCashDays) { assertSuccess(await trustedBridge.refreshCashDays()); return; }
+  const bridge = electronOffline();
+  if (table === "cash_book_days" && bridge?.refreshCashDays) { assertSuccess(await bridge.refreshCashDays()); return; }
 
-  // 🚨 FIX: "payment update karo, ek baar dikhe, phir wapas gayab" bug —
-  // jab bhi koi local change (payment update, waghera) hua, wo turant
-  // cache mein save hota hai (_pendingSync: true) aur background mein
-  // server ko sync bhejta hai. Lekin USI WAQT agar koi doosri query
-  // Supabase se STALE (purana) data background mein fetch kar rahi thi
-  // (sync poora hone se pehle), to ye function poori table ko us purane
-  // data se REPLACE kar deta tha — abhi-abhi kiya gaya change reset ho
-  // jaata tha. Ab jab tak local change server ko confirm-sync nahi ho
-  // jaata (_pendingSync saaf nahi hota), tab tak us row ko background
-  // server-refresh se overwrite nahi karenge — local change hi jeetega.
+  // Electron main owns pending-row/deletion merging. Avoid cloning the entire
+  // table and queue to the renderer before sending the same server rows back.
   try {
-    const existing = await cacheGetAll(table);
+    if (bridge) {
+      assertSuccess(await bridge.cacheReplaceTable(table, rows, idField));
+      cLog.info("sqlite", `${table} cache replace — ${rows.length} server rows main process में merge हुई`);
+      return;
+    }
 
+    // Browser preview fallback keeps the same pending-data precedence.
+    const existing = await cacheGetAll(table);
     const pendingRows = existing.filter((r) => r && r._pendingSync);
     const pendingIds = new Set(pendingRows.flatMap((r) => [String(r[idField]), String(r[idField]).replace(/^local_/, "")]));
-
     const deleted = new Set((await queueGetAll()).filter(m => m.table === table && m.op === "delete").flatMap(m => [m.rowId, m.rowId?.replace(/^local_/, "")]));
     const finalRows = [
       ...pendingRows,
       ...rows.filter((row) => !pendingIds.has(String(row[idField]))),
     ].filter(row => !deleted.has(row[idField]));
 
-    const bridge = electronOffline();
-    if (!bridge) {
-      warnNoBridge();
-      const prefix = `${table}::`;
-      for (const k of Array.from(memCache.keys())) {
-        if (k.startsWith(prefix)) memCache.delete(k);
-      }
-      await cacheSetRows(table, finalRows, idField);
-    } else {
-      assertSuccess(await bridge.cacheReplaceTable(table, rows, idField));
-    }
+    warnNoBridge();
+    const prefix = `${table}::`;
+    for (const k of Array.from(memCache.keys())) if (k.startsWith(prefix)) memCache.delete(k);
+    await cacheSetRows(table, finalRows, idField);
     cLog.info("sqlite", `${table} cache replace — ${rows.length} rows save ho gayi${pendingIds.size ? ` (${pendingIds.size} pending local rows preserved)` : ""}`);
   } catch (err) {
     cLog.error("sqlite", `${table} cacheReplaceTable fail`, err);

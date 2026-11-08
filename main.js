@@ -304,19 +304,27 @@ function initFiles() {
 // rakh di jaati hai — .bak file ke upar ek extra safety layer, jo poore din
 // ka snapshot deta hai (na ki sirf last-write se pehle wali state).
 function takeDailySafetySnapshot() {
+  let tempDir = null;
   try {
     const today = new Date().toISOString().slice(0, 10);
     const dir   = path.join(SAFETY_SNAPSHOT_ROOT, today);
-    if (fs.existsSync(dir)) return; // aaj ka snapshot ho chuka hai
+    if (fs.existsSync(dir)) return; // aaj ka verified snapshot ho chuka hai
 
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(SAFETY_SNAPSHOT_ROOT, { recursive: true });
+    tempDir = path.join(SAFETY_SNAPSHOT_ROOT, `.${today}-${process.pid}.tmp`);
+    if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+    fs.mkdirSync(tempDir, { recursive: true });
     const files = [PATIENTS_FILE, BILLS_FILE, REPORTS_FILE, XRAYS_FILE, FRACTURE_FILE, SETTINGS_FILE, PENDING_FILE];
     for (const f of files) {
-      if (fs.existsSync(f)) fs.copyFileSync(f, path.join(dir, path.basename(f)));
+      if (fs.existsSync(f)) fs.copyFileSync(f, path.join(tempDir, path.basename(f)));
     }
+    fs.renameSync(tempDir, dir);
+    tempDir = null;
     logger.logInfo('safety-snapshot', `Daily snapshot saved: ${dir}`);
   } catch (e) {
     logger.logError('safety-snapshot', e.message);
+  } finally {
+    if (tempDir) try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
   }
 }
 
@@ -1008,9 +1016,13 @@ ipcMain.handle('offline:cacheSetRows', async (_e, { table, rows, idField }) => {
 ipcMain.handle('offline:cacheReplaceTable', async (_e, { table, rows, idField }) => {
   try {
     const principal = access.getPrincipal();
-    const all = sqliteStore.cacheGetAll(table);
-    const preserve = principal?.role === 'staff' ? all.filter(row => !access.rowAllowed(table, row, sqliteStore)) : [];
-    sqliteStore.cacheReplaceTable(table, [...rows, ...preserve], idField || 'id'); return { success: true };
+    let mergedRows = rows;
+    if (principal?.role === 'staff') {
+      const all = sqliteStore.cacheGetAll(table);
+      const preserve = all.filter(row => !access.rowAllowed(table, row, sqliteStore));
+      mergedRows = [...rows, ...preserve];
+    }
+    sqliteStore.cacheReplaceTable(table, mergedRows, idField || 'id'); return { success: true };
   }
   catch (e) { logger.logError('sqlite', `cacheReplaceTable(${table}) fail: ${e.message}`); return { success: false }; }
 });
@@ -1381,11 +1393,16 @@ app.whenReady().then(() => {
   ipcMain.handle('attachment:write',(_e,input)=>{if(access.getPrincipal()?.role!=='admin')throw Error('Administrator login required');return attachmentCache.write(input);});
   seedPatientsOnFirstRun();
   ensureAppBackupDir();
-  takeDailySafetySnapshot();
-  cleanupOldSnapshots();
-  logger.cleanOldLogs();
   logger.logInfo('app-lifecycle', `App started — version ${app.getVersion()}`);
   createWindow();
+  // Start the atomic daily copy on the first free event-loop turn, before
+  // cloud/legacy backup timers can rewrite its source files.
+  setTimeout(() => takeDailySafetySnapshot(), 0);
+  // Retention cleanup can wait until the clinic window is interactive.
+  setTimeout(() => {
+    try { cleanupOldSnapshots(); } catch (e) { logger.logError('backup', `Snapshot cleanup fail: ${e.message}`); }
+    try { logger.cleanOldLogs(); } catch (e) { logger.logWarn('logger', `Old log cleanup fail: ${e.message}`); }
+  }, 15000);
   // App ready hone ke 8 sec baad silently update check karo
   setTimeout(() => {
     autoUpdater.checkForUpdates().catch(e => logger.logWarn('auto-updater', `Startup check fail: ${e.message}`));

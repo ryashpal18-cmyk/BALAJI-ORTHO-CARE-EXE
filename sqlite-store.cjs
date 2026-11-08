@@ -149,6 +149,8 @@ function cacheReplaceTable(table, rows, idField) {
   const del = getDb().prepare(`DELETE FROM table_cache WHERE table_name = ?`);
   const runAll = getDb().transaction(() => {
     const previous = cacheGetAll(table);
+    const previousById = new Map(previous.map(row => [row[idField], row]));
+    const queued = queueGetAll();
     if (table === 'patients') {
       registration.observe(module.exports, rows, true);
       // Import only the authoritative registration field into pending edits.
@@ -158,16 +160,17 @@ function cacheReplaceTable(table, rows, idField) {
         if (server?.registration_number && !old.registration_number) old.registration_number = server.registration_number;
       }
       // Patients saved before initialization can now receive numbers atomically.
-      for (const m of queueGetAll().filter(m => m.table === 'patients' && m.op === 'insert')) {
-        const old = previous.find(p => p.id === m.tempId);
-        if (!old) continue;
-        if (old.registration_number) queueUpdate(m.id, { payload: { ...m.payload, registration_number: old.registration_number } });
+      for (const m of queued) {
+        if (m.table !== 'patients' || m.op !== 'insert') continue;
+        const old = previousById.get(m.tempId);
+        if (old?.registration_number) queueUpdate(m.id, { payload: { ...m.payload, registration_number: old.registration_number } });
       }
     }
-    rows = rows.map(row => { const old = previous.find(r => r[idField] === row[idField]); return old?._localFileUrl ? { ...row, _localFileUrl: old._localFileUrl } : row; });
-    const pending = previous.filter(row => row._pendingSync);
+    rows = rows.map(row => { const old = previousById.get(row[idField]); return old?._localFileUrl ? { ...row, _localFileUrl: old._localFileUrl } : row; });
+    const queuedInsertIds = new Set(queued.filter(m => m.op === 'insert' && m.table === table).flatMap(m => [m.tempId,m.rowId,m.payload?.[idField]]).filter(Boolean).map(id => String(id).replace(/^local_/,'')));
+    const pending = previous.filter(row => row._pendingSync || queuedInsertIds.has(String(row[idField]).replace(/^local_/,'')));
     const pendingIds = new Set(pending.flatMap(row => [String(row[idField]), String(row[idField]).replace(/^local_/, '')]));
-    const deleted = new Set(queueGetAll().filter(m => m.table === table && m.op === 'delete').flatMap(m => [m.rowId, m.rowId?.replace(/^local_/, '')]));
+    const deleted = new Set(queued.filter(m => m.table === table && m.op === 'delete').flatMap(m => [m.rowId, m.rowId?.replace(/^local_/, '')]));
     const combined = [...pending, ...rows.filter(row => !pendingIds.has(String(row[idField])))].filter(row => !deleted.has(row[idField]));
     del.run(table);
     cacheSetRows(table, combined, idField);
@@ -435,6 +438,7 @@ function commitMutation(mutation, row, idField = 'id') {
           metaSet('outreach:receipt-origin:' + String(saved.id).replace(/^local_/, '') + ':' + receipt.id, true);
       }
     }
+    if (mutation.op === 'insert') saved = { ...saved, _pendingSync: true };
     if(mutation.table==='billing' && mutation.op==='insert' && saved.invoice_number==null){
       const scope=metaGet('invoice-number:verified-scope')||metaGet('invoice-number:scope');const pools=metaGet('invoice-number:pools')||[];
       for(const pool of pools.filter(p=>p.scope===scope&&(!metaGet('invoice-number:owner')||!mutation.ownerUserId||mutation.ownerUserId===metaGet('invoice-number:owner')))){
@@ -589,6 +593,8 @@ function diagnosticSnapshot({ deep = false } = {}) {
 }
 /** Address-only local correction; no queue item, receipt or patient ID is removed. */
 function correctApprovedVillages(){
+ const marker='villages:'+VILLAGE_REVISION,prior=metaGet(marker);
+ if(prior?.completed)return {patients:0,queuePayloads:0,skipped:true};
  return getDb().transaction(()=>{
   const before=[];
   const update=getDb().prepare('UPDATE table_cache SET data=? WHERE _key=?');
@@ -602,7 +608,7 @@ function correctApprovedVillages(){
   for(const m of queueGetAll())if(m.table==='patients'&&typeof m.payload?.address==='string'){
    const address=canonicalVillage(m.payload.address);if(address!==m.payload.address){queueUpdate(m.id,{payload:{...m.payload,address}});queued++;}
   }
-  if(before.length||queued)metaSet('villages:'+VILLAGE_REVISION,{at:new Date().toISOString(),before,queued});
+  metaSet(marker,{at:new Date().toISOString(),before:before.length?before:prior?.before||[],queued,completed:true});
   return {patients:before.length,queuePayloads:queued};
  })();
 }
