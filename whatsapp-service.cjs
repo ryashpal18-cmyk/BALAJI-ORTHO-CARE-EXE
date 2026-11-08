@@ -33,11 +33,22 @@ function resolveAuthRoot(root,{localAppData=process.env.LOCALAPPDATA,fsImpl=fs}=
   for(const candidate of [...new Set(candidates)])if(writableDirectory(candidate,fsImpl))return candidate;
   throw Error('WhatsApp session folder writable नहीं है। Windows Security में Local AppData access allow करें।');
 }
-function createWhatsAppService({store,root,authRoot,allowed,renderPdf,clientFactory,mediaFactory,now=Date.now,timeoutMs=60000,initializeTimeoutMs=90000,browserPath=findBrowsers,logger,recoverBrowser=require('./whatsapp-browser.cjs').recoverWhatsAppBrowser}) {
+// WhatsApp Web build verified against this pinned connector version. Live Web
+// sometimes serves a different bundle whose module names the connector cannot
+// find, so prefer the archived build and keep live Web as the fallback.
+const PINNED_WEB_VERSION='2.3000.1053619311-alpha';
+const WEB_VERSION_ARCHIVE='https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html';
+const WEB_SOURCES=[
+  {label:'archived',options:{webVersion:PINNED_WEB_VERSION,webVersionCache:{type:'remote',remotePath:WEB_VERSION_ARCHIVE,strict:false}}},
+  {label:'live',options:{webVersionCache:{type:'none'}}},
+];
+const READINESS_MS=60000;
+const MAX_CONNECT_ATTEMPTS=3;
+function createWhatsAppService({store,root,authRoot,allowed,renderPdf,clientFactory,mediaFactory,now=Date.now,timeoutMs=60000,initializeTimeoutMs=110000,browserPath=findBrowsers,logger,recoverBrowser=require('./whatsapp-browser.cjs').recoverWhatsAppBrowser}) {
   const jobsKey='whatsapp:invoice-jobs',settingsKey='whatsapp:settings';
   const report=createMessagingLog(logger,'whatsapp',now);
   let client=null,ready=false,qr=null,state='disconnected',error='',busy=false,stopped=false,nextConnect=0,connectRequested=false;
-  let cleanup=Promise.resolve(),starting=null,connectionFailures=0,selectedBrowser='',connectionStage='idle',browserErrors=[];
+  let cleanup=Promise.resolve(),starting=null,connectionFailures=0,selectedBrowser='',selectedWebSource='',connectionStage='idle',browserErrors=[];
   const authDataPath=authRoot||(clientFactory?path.join(root,'whatsapp-auth'):resolveAuthRoot(root));
   const profile=path.join(authDataPath,'session-balaji-clinic');
   function dispose(candidate){
@@ -157,24 +168,26 @@ function createWhatsAppService({store,root,authRoot,allowed,renderPdf,clientFact
     const file=path.join(dir,crypto.createHash('sha256').update(INVOICE_TEMPLATE_VERSION+normId(bill.id)+fingerprint).digest('hex').slice(0,32)+'.pdf');
     fs.writeFileSync(file+'.tmp',bytes);fs.renameSync(file+'.tmp',file);return file;
   }
-  function status(limit){assertAllowed();const stored=jobs(),count=Number.isInteger(limit)?Math.max(0,limit):stored.length;const recent=count>=stored.length?stored:stored.slice(Math.max(0,stored.length-count));return{state,ready,qr,error,auto:settings().auto!==false,paired:!!settings().paired,browser:selectedBrowser?path.basename(selectedBrowser):'',connectionStage,browserErrors:[...browserErrors],jobs:recent.map(({pdfPath,...j})=>j).reverse()};}
+  function status(limit){assertAllowed();const stored=jobs(),count=Number.isInteger(limit)?Math.max(0,limit):stored.length;const recent=count>=stored.length?stored:stored.slice(Math.max(0,stored.length-count));return{state,ready,qr,error,auto:settings().auto!==false,paired:!!settings().paired,browser:selectedBrowser?path.basename(selectedBrowser):'',webSource:selectedWebSource,connectionStage,browserErrors:[...browserErrors],jobs:recent.map(({pdfPath,...j})=>j).reverse()};}
   const canSendText=()=>!!(ready&&client&&!busy&&!stopped);
   async function connect(){
     assertAllowed();connectRequested=true;if(client||starting)return status();
     const discovered=browserPath(),executables=[...new Set((Array.isArray(discovered)?discovered:[discovered]).filter(Boolean))];
     if(!executables.length)throw Error('PC में Microsoft Edge या Google Chrome install करें।');
     stopped=false;state='connecting';error='';qr=null;browserErrors=[];connectionStage='cleanup';
-    const factory=(executablePath)=>clientFactory?clientFactory({executablePath,authDataPath}):(()=>{const{Client,LocalAuth}=require('whatsapp-web.js');return new Client({authStrategy:new LocalAuth({clientId:'balaji-clinic',dataPath:authDataPath}),webVersionCache:{type:'none'},puppeteer:{executablePath,headless:true,timeout:45000}});})();
+    const factory=(executablePath,web)=>clientFactory?clientFactory({executablePath,authDataPath,webSource:web.label}):(()=>{const{Client,LocalAuth}=require('whatsapp-web.js');return new Client({authStrategy:new LocalAuth({clientId:'balaji-clinic',dataPath:authDataPath}),balajiReadinessMs:READINESS_MS,...web.options,puppeteer:{executablePath,headless:true,timeout:45000}});})();
+    const attempts=WEB_SOURCES.flatMap(web=>executables.map(executablePath=>({executablePath,web}))).slice(0,MAX_CONNECT_ATTEMPTS);
     // Reserve the whole fallback sequence so repeated clicks/timers cannot
     // launch two browsers against one LocalAuth profile.
     starting=Promise.resolve().then(async()=>{
       await cleanup;
-      for(const executablePath of executables){
+      for(const attempt of attempts){
+        const executablePath=attempt.executablePath,web=attempt.web;
         if(stopped||!allowed())return;
-        selectedBrowser=executablePath;connectionStage='browser-cleanup';
+        selectedBrowser=executablePath;selectedWebSource=web.label;connectionStage='browser-cleanup';
         if(!clientFactory)for(const staleExecutable of executables)try{await recoverBrowser({profile,executablePath:staleExecutable});}catch(e){report('WA-010','WhatsApp cleanup unavailable; trying browser launch',e,{level:'warn',browser:path.basename(staleExecutable)});}
         if(stopped||!allowed())return;
-        const candidate=factory(executablePath);client=candidate;let authenticationFailed=false;
+        const candidate=factory(executablePath,web);client=candidate;let authenticationFailed=false;
         const on=(name,fn)=>candidate.on(name,(...args)=>{if(client===candidate)fn(...args);});
         on('qr',value=>{qr=value;state='scan';ready=false;connectionStage='qr';});
         on('ready',()=>{connectionFailures=0;ready=true;state='connected';qr=null;error='';browserErrors=[];connectionStage='ready';store.metaSet(settingsKey,{...settings(),paired:true});void tick().catch(e=>report('WA-013','WhatsApp ready worker',e));});
@@ -190,19 +203,33 @@ function createWhatsAppService({store,root,authRoot,allowed,renderPdf,clientFact
           if(authenticationFailed)return;
           if(client===candidate)client=null;
           ready=false;qr=null;
-          const detail=errorDetail(e);browserErrors.push({browser:path.basename(executablePath),error:detail});
-          report('WA-010','WhatsApp initialize',e,{browser:path.basename(executablePath)});
+          const identity=await browserIdentity(candidate);
+          const detail=(errorDetail(e)+(identity?' | '+identity:'')).slice(0,700);
+          browserErrors.push({browser:path.basename(executablePath),source:web.label,error:detail});
+          report('WA-010','WhatsApp initialize',e,{browser:path.basename(executablePath),webSource:web.label});
           await dispose(candidate);
+          // A locked profile must back off instead of relaunching immediately.
+          if(/already running|userDataDir|profile/i.test(detail))break;
         }
       }
       connectionFailures++;
-      error=browserErrors.some(x=>/already running|userDataDir/i.test(x.error))?'WhatsApp browser session व्यस्त है। Balaji बंद करके PC restart करें; session delete न करें।':'Edge और Chrome दोनों से WhatsApp connection नहीं बना। कारण नीचे देखें।';
+      error=browserErrors.some(x=>/already running|userDataDir/i.test(x.error))?'WhatsApp browser session व्यस्त है। Balaji बंद करके PC restart करें; session delete न करें।'
+        :browserErrors.some(x=>/modules not ready/i.test(x.error))?'WhatsApp Web इस PC पर पूरा load नहीं हुआ। Internet speed जाँचें और Edge/Chrome update करें, फिर दोबारा जोड़ें। नीचे का तकनीकी विवरण भेजें।'
+        :'Edge और Chrome दोनों से WhatsApp connection नहीं बना। कारण नीचे देखें।';
       state='error';connectionStage='failed';nextConnect=now()+Math.min(60000*2**Math.min(connectionFailures-1,4),900000);
     }).catch(e=>{report('WA-010','WhatsApp browser recovery',e);state='error';connectionStage='failed';error='WhatsApp browser शुरू नहीं हुआ: '+errorDetail(e);nextConnect=now()+300000;}).finally(()=>{starting=null;});
     return status();
   }
   async function disconnect(){assertAllowed();connectRequested=false;store.metaSet(settingsKey,{...settings(),paired:false});stopped=true;const old=client;client=null;ready=false;qr=null;state='disconnected';connectionStage='idle';browserErrors=[];if(old){try{await bounded(Promise.resolve().then(()=>old.logout()),2000);}catch{}await dispose(old);}return status();}
   const bounded=(promise,ms)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Request timed out')),ms);})]).finally(()=>clearTimeout(timer));};
+  // Record the real browser build so a failing PC can be diagnosed without
+  // asking clinic staff to read Chromium internals.
+  async function browserIdentity(candidate){
+    const parts=[];
+    try{if(typeof candidate?.pupBrowser?.version==='function')parts.push(String(await bounded(Promise.resolve(candidate.pupBrowser.version()),3000)));}catch{}
+    try{if(typeof candidate?.pupPage?.evaluate==='function')parts.push(String(await bounded(Promise.resolve(candidate.pupPage.evaluate(()=>navigator.userAgent)),3000)));}catch{}
+    return parts.filter(Boolean).join(' | ').slice(0,300);
+  }
   async function tick(){
     if(stopped||busy||!allowed())return;
     busy=true;

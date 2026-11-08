@@ -38,47 +38,77 @@ ${anchor}`);
   return result;
 }
 function patchClient(source){
-  const marker='// Balaji compatibility: wait for WhatsApp auth and QR modules v2';
+  const marker='// Balaji compatibility: wait for WhatsApp Web modules v3';
   if(source.includes(marker))return source;
+  if(source.includes('// Balaji compatibility: wait for WhatsApp'))throw Error('An older WhatsApp readiness patch is installed; run a clean npm ci before building');
   const authAnchor='        await this.pupPage.evaluate(ExposeAuthStore);';
   const qrAnchor=`                await this.pupPage.evaluate(async () => {
                     const registrationInfo =`;
-  const legacyMarker='// Balaji compatibility: wait for WhatsApp auth modules';
-  if(source.includes(legacyMarker)){
-    const start=source.indexOf(legacyMarker),anchorAt=source.indexOf(authAnchor,start);
-    if(anchorAt<0)throw Error('Legacy WhatsApp auth readiness patch is incomplete; reinstall dependency before building');
-    source=source.slice(0,start)+authAnchor+source.slice(anchorAt+authAnchor.length);
-  }
   if(source.split(authAnchor).length!==2||source.split(qrAnchor).length!==2)throw Error('WhatsApp readiness patch anchor changed; review dependency before building');
   source=source.replace(authAnchor,`${marker}
+        // WhatsApp Web registers these modules only after its own bundles
+        // finish loading, which takes far longer than the 30s authentication
+        // timeout on a slow clinic connection. Wait separately, and report
+        // exactly what is missing when the page never becomes usable.
+        const balajiReadinessMs = Number(this.options.balajiReadinessMs) > 0
+            ? Number(this.options.balajiReadinessMs)
+            : 60000;
         const waitForBalajiModules = async (required, stage) => {
-            let ready = false;
             const startedAt = Date.now();
-            while (Date.now() - startedAt < this.options.authTimeoutMs) {
+            let report = null;
+            while (Date.now() - startedAt < balajiReadinessMs) {
                 try {
-                    ready = await this.pupPage.evaluate((requirements) => {
-                        return requirements.every(([moduleName, properties]) => {
+                    report = await this.pupPage.evaluate((requirements) => {
+                        const missing = [];
+                        for (const [moduleName, properties] of requirements) {
+                            let value;
                             try {
-                                let value = moduleName === '__AuthStore'
+                                value = moduleName === '__AuthStore'
                                     ? window.AuthStore
                                     : window.require(moduleName);
-                                for (const property of properties) {
-                                    if (value == null) return false;
-                                    value = value[property];
-                                }
-                                return value != null;
                             } catch {
-                                return false;
+                                value = null;
                             }
-                        });
+                            for (const property of properties) {
+                                value = value == null ? null : value[property];
+                            }
+                            if (value == null) {
+                                missing.push(properties.length
+                                    ? moduleName + '.' + properties.join('.')
+                                    : moduleName);
+                            }
+                        }
+                        return {
+                            missing,
+                            webVersion: window.Debug && window.Debug.VERSION
+                                ? String(window.Debug.VERSION)
+                                : null,
+                            hasRequire: typeof window.require === 'function',
+                            page: String(document.title || '').slice(0, 40),
+                            text: String((document.body && document.body.innerText) || '')
+                                .replace(/\\s+/g, ' ')
+                                .trim()
+                                .slice(0, 120),
+                        };
                     }, required);
-                } catch {
-                    ready = false;
+                } catch (evaluationError) {
+                    report = {
+                        missing: ['page-unavailable'],
+                        webVersion: null,
+                        hasRequire: false,
+                        page: '',
+                        text: String((evaluationError && evaluationError.message) || evaluationError).slice(0, 120),
+                    };
                 }
-                if (ready) return;
-                await new Promise((resolve) => setTimeout(resolve, 250));
+                if (report && report.missing.length === 0) return;
+                await new Promise((resolve) => setTimeout(resolve, 500));
             }
-            throw new Error(\`WhatsApp Web \${stage} modules did not become ready before timeout\`);
+            const detail = report || { missing: ['unknown'], webVersion: null, hasRequire: false, page: '', text: '' };
+            throw new Error(
+                \`WhatsApp Web \${stage} modules not ready after \${Math.round(balajiReadinessMs / 1000)}s\` +
+                \` [webVersion=\${detail.webVersion || 'none'} require=\${detail.hasRequire}\` +
+                \` missing=\${detail.missing.slice(0, 4).join(',')} page="\${detail.page}" \${detail.text}]\`,
+            );
         };
         await waitForBalajiModules([
             ['WAWebSocketModel', ['Socket']],
