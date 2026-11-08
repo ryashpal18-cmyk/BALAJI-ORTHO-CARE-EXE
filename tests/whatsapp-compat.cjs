@@ -6,6 +6,18 @@ const {createWhatsAppService,serializedId}=require('../whatsapp-service.cjs');
 const utils=fs.readFileSync(require.resolve('whatsapp-web.js/src/util/Injected/Utils.js'),'utf8');
 const legacy=utils.replace(/\n    \/\/ Balaji compatibility: MsgKey serialization[\s\S]*?\n    \/\*\*/, '\n    /**').replace(/\/\/ Balaji compatibility: keep MediaData.__x_id[^\n]*\n        delete message.__x_id;\n\n/, '');
 const patched=patchUtils(legacy);assert.equal(patchUtils(patched),patched);assert.throws(()=>patchUtils('unsupported source'),/anchor changed/);
+{
+ const {patchClient}=require('../whatsapp-compat.cjs');
+ const client=fs.readFileSync(require.resolve('whatsapp-web.js/src/Client.js'),'utf8');
+ assert.match(client,/wait for WhatsApp Web modules v3/);
+ assert.equal(patchClient(client),client);
+ assert.match(client,/balajiReadinessMs/);
+ assert.match(client,/modules not ready after/);
+ assert.match(client,/missing=/);
+ assert.throws(()=>patchClient('unsupported source'),/anchor changed/);
+ assert.throws(()=>patchClient('// Balaji compatibility: wait for WhatsApp auth modules'),/clean npm ci/);
+ console.log('PASS installed connector waits for WhatsApp Web modules with a bounded window and reports what is missing');
+}
 function browser(source,{oldKeys=false}={}){
  class Key {constructor(data){this.$1='true_'+data.to.$1+'_'+data.id;if(oldKeys)this._serialized=this.$1;}toString(){return this.$1;}static async newId(){return 'synthetic-id';}}
  const collection=new Map();let dispatches=0;
@@ -25,7 +37,13 @@ function browser(source,{oldKeys=false}={}){
  const old=browser(patched,{oldKeys:true});assert.ok(await old.send(true));assert.ok(Object.hasOwn(new old.Key({to:{$1:'chat'},id:'i'}),'_serialized'));
  console.log('PASS actual injected connector reproduces PDF private-ID failure and missing acknowledgment; both fixes work on old/new MsgKey models');
  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'balaji-wa-patch-'));
- try{fs.mkdirSync(path.join(temp,'src/util/Injected'),{recursive:true});fs.writeFileSync(path.join(temp,'package.json'),JSON.stringify({version:'1.34.7'}));fs.writeFileSync(path.join(temp,'src/Client.js'),'        await this.pupPage.evaluate(ExposeAuthStore);\n                await this.pupPage.evaluate(async () => {\n                    const registrationInfo =');const file=path.join(temp,'src/util/Injected/Utils.js');fs.writeFileSync(file,legacy);assert.equal(patchInstalledPackage(temp),true);assert.equal(patchInstalledPackage(temp),false);assert.equal(fs.readFileSync(file,'utf8'),patched);}finally{fs.rmSync(temp,{recursive:true,force:true});}
+ try{fs.mkdirSync(path.join(temp,'src/util/Injected'),{recursive:true});fs.writeFileSync(path.join(temp,'package.json'),JSON.stringify({version:'1.34.7'}));fs.writeFileSync(path.join(temp,'src/Client.js'),'        await this.pupPage.evaluate(ExposeAuthStore);\n                await this.pupPage.evaluate(async () => {\n                    const registrationInfo =');
+ const archivedSource=fs.readFileSync(path.join(__dirname,'../whatsapp-service.cjs'),'utf8');
+ assert.match(archivedSource,/wa-version\/main\/html\/\{version\}\.html/);
+ assert.match(archivedSource,/label:'archived'/);
+ // The archived build below is the one verified end-to-end against live WhatsApp Web.
+ assert.match(archivedSource,/PINNED_WEB_VERSION='2\.3000\.1053619311-alpha'/);
+ assert.match(archivedSource,/label:'live'/);const file=path.join(temp,'src/util/Injected/Utils.js');fs.writeFileSync(file,legacy);assert.equal(patchInstalledPackage(temp),true);assert.equal(patchInstalledPackage(temp),false);assert.equal(fs.readFileSync(file,'utf8'),patched);}finally{fs.rmSync(temp,{recursive:true,force:true});}
  assert.equal(serializedId({$1:'renamed-id'}),'renamed-id');assert.equal(serializedId({_serialized:'old-id'}),'old-id');assert.equal(serializedId({}),null);
  console.log('PASS installer patch persists, is idempotent, and acknowledgment IDs accept both connector formats');
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'balaji-wa-send-')),meta=new Map();let bills=[],clock=Date.now(),client,calls=0,fail=false;
