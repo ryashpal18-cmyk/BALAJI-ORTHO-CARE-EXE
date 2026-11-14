@@ -1,4 +1,5 @@
 import { attendedVisit } from "@/lib/followupState";
+import { isPlasterActive } from "@/lib/plasterActive";
 import { safeReportHtml, writeReportDocument, escapeHtml } from "@/lib/safeReportHtml";
 import { isOnline } from "@/lib/offlineSync";
 import { cacheGetAll } from "@/lib/offlineDb";
@@ -144,13 +145,13 @@ function printMonthlyReport(cases: any[], followups: any[]) {
   const today = todayIso();
   const monthStart = today.slice(0,7)+"-01";
   const thisMo = cases.filter(c => (c.plaster_date||"").startsWith(today.slice(0,7)));
-  const active = cases.filter(c => c.plaster_status==="Active");
-  const completed = cases.filter(c => c.plaster_status!=="Active");
-  const missed = followups.filter(f => f.next_followup_date && f.next_followup_date < today && f.plaster_status==="Active"&&!attendedVisit(f));
+  const active = cases.filter(c => isPlasterActive(c));
+  const completed = cases.filter(c => !isPlasterActive(c));
+  const missed = followups.filter(f => f.next_followup_date && f.next_followup_date < today && isPlasterActive(f)&&!attendedVisit(f));
   const bodyCount: Record<string,number> = {};
   cases.forEach(c => { if(c.body_part) bodyCount[c.body_part]=(bodyCount[c.body_part]||0)+1; });
   const topParts = Object.entries(bodyCount).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  const rows = thisMo.map(c => `<tr><td>${c.patients?.name||"—"}</td><td>${(c.side||"")+" "+(c.body_part||"")}</td><td>${c.fracture_type||"—"}</td><td>${fmtDate(c.plaster_date)}</td><td>${c.plaster_status==="Active"?"Active ✅":"Removed"}</td></tr>`).join("");
+  const rows = thisMo.map(c => `<tr><td>${c.patients?.name||"—"}</td><td>${(c.side||"")+" "+(c.body_part||"")}</td><td>${c.fracture_type||"—"}</td><td>${fmtDate(c.plaster_date)}</td><td>${isPlasterActive(c)?"Active ✅":c.plaster_status==="Active"?"Inactive (48+ din)":"Removed"}</td></tr>`).join("");
   writeReportDocument(win, `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Monthly Ortho Report</title>
   <style>
     @page{size:A4;margin:14mm} body{font-family:Arial,sans-serif;color:#1e293b}
@@ -809,9 +810,9 @@ function RescheduleDialog({ open, onClose, caseData }: { open: boolean; onClose:
 // ─── Analytics ────────────────────────────────
 function AnalyticsSection({ cases, followups }: { cases: any[]; followups: any[] }) {
   const today = todayIso();
-  const active    = cases.filter(c=>c.plaster_status==="Active");
-  const done      = cases.filter(c=>c.plaster_status!=="Active");
-  const missed    = followups.filter(f=>f.next_followup_date && f.next_followup_date<today && f.plaster_status==="Active"&&!attendedVisit(f));
+  const active    = cases.filter(c=>isPlasterActive(c));
+  const done      = cases.filter(c=>!isPlasterActive(c));
+  const missed    = followups.filter(f=>f.next_followup_date && f.next_followup_date<today && isPlasterActive(f)&&!attendedVisit(f));
   const bodyCount: Record<string,number> = {};
   const typeCount: Record<string,number> = {};
   const causeCount: Record<string,number> = {};
@@ -1018,11 +1019,11 @@ export default function Ortho() {
   // ── Stats ──
   const { todayFuList, missedFuList } = useMemo(()=>({
     todayFuList:  (followups as any[]).filter(c=>c.next_followup_date===today),
-    missedFuList: (followups as any[]).filter(c=>c.next_followup_date&&c.next_followup_date<today&&c.plaster_status==="Active"&&!attendedVisit(c)),
+    missedFuList: (followups as any[]).filter(c=>c.next_followup_date&&c.next_followup_date<today&&isPlasterActive(c)&&!attendedVisit(c)),
   }), [followups, today]);
 
-  const activeCases    = useMemo(()=>(cases as any[]).filter(c=>c.plaster_status==="Active"), [cases]);
-  const completedCases = useMemo(()=>(cases as any[]).filter(c=>c.plaster_status!=="Active"), [cases]);
+  const activeCases    = useMemo(()=>(cases as any[]).filter(c=>isPlasterActive(c)), [cases]);
+  const completedCases = useMemo(()=>(cases as any[]).filter(c=>!isPlasterActive(c)), [cases]);
 
   // ── Search ──
   const [activeSearch, setActiveSearch] = useState("");

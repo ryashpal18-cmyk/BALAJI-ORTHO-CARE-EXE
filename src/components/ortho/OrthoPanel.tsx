@@ -11,7 +11,7 @@ import {
   Bone, CalendarClock, AlertTriangle, Plus,
   MessageCircle, Search, Send, MessageSquare,
   CheckSquare, Square, Loader2, Pencil, CheckCircle2,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, Phone,
 } from "lucide-react";
 import { useFollowupsAround, useFractureCases, useUpdateFractureCase } from "@/hooks/useOrtho";
 import { useNavigate } from "react-router-dom";
@@ -20,6 +20,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { sendSMS } from "@/services/smsService";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { VillageMessagePanel } from "@/components/VillageMessagePanel";
+import { isPlasterActive, isPlasterExpired, PLASTER_ACTIVE_DAYS } from "@/lib/plasterActive";
 
 const todayStr = () => businessDate();
 const tomorrowStr = () => {
@@ -68,11 +70,18 @@ interface CustomSmsDialogProps {
   open: boolean;
   onClose: () => void;
   patients: SmsPatient[];
+  preselectAll?: boolean;
 }
 
-function CustomSmsDialog({ open, onClose, patients }: CustomSmsDialogProps) {
+function CustomSmsDialog({ open, onClose, patients, preselectAll }: CustomSmsDialogProps) {
   const { toast } = useToast();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Filter se khola gaya ho to saare filtered patients pehle se select ho jayein
+  useEffect(() => {
+    if (open && preselectAll) setSelected(new Set(patients.map((p) => p.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, preselectAll]);
   const [customBody, setCustomBody] = useState("");
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<{ name: string; ok: boolean; queued: boolean }[]>([]);
@@ -407,11 +416,218 @@ function CompletedPatientRow({ c }: { c: any }) {
         </p>
       </div>
       <Badge variant="secondary" className="text-[10px] shrink-0 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-        <CheckCircle2 className="h-3 w-3 mr-1" /> Removed
+        <CheckCircle2 className="h-3 w-3 mr-1" /> {isPlasterExpired(c) ? `Inactive (${PLASTER_ACTIVE_DAYS}+ din)` : "Removed"}
       </Badge>
     </div>
   );
 }
+
+// ──────────────────────────────────────────────
+// Date-range filter — last N days ke patients (bulk SMS + call list)
+// ──────────────────────────────────────────────
+const RANGE_PRESETS = [
+  { label: "7 din", days: 7 },
+  { label: "15 din", days: 15 },
+  { label: "1 mahina", days: 30 },
+  { label: "1.5 mahine", days: 45 },
+  { label: "2 mahine", days: 60 },
+];
+
+function daysAgoStr(n: number) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return businessDate(d);
+}
+
+function RangeFilterCard({ cases }: { cases: any[] }) {
+  const { toast } = useToast();
+  const [days, setDays] = useState<number | "custom">(15);
+  const [from, setFrom] = useState(daysAgoStr(15));
+  const [to, setTo] = useState(todayStr());
+  const [status, setStatus] = useState<"Active" | "All">("All");
+  const [smsOpen, setSmsOpen] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [showList, setShowList] = useState(true);
+
+  const range = useMemo(() => {
+    if (days === "custom") return { start: from, end: to };
+    return { start: daysAgoStr(days), end: todayStr() };
+  }, [days, from, to]);
+
+  // Patient ki date = plaster_date (nahi ho to case ban-ne ki date)
+  const filtered = useMemo(() => {
+    return (cases || [])
+      .filter((c: any) => {
+        if (status === "Active" && !isPlasterActive(c)) return false;
+        const d = (c.plaster_date || c.created_at || "").slice(0, 10);
+        return !!d && d >= range.start && d <= range.end;
+      })
+      .sort((a: any, b: any) =>
+        (b.plaster_date || b.created_at || "").localeCompare(a.plaster_date || a.created_at || ""));
+  }, [cases, range, status]);
+
+  // Same patient ke multiple case ho to ek hi baar gino (SMS/call dobara na jaye)
+  const uniquePatients = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const c of filtered) {
+      const key = c.patient_id || c.id;
+      if (!map.has(key)) map.set(key, c);
+    }
+    return [...map.values()];
+  }, [filtered]);
+
+  const withMobile = useMemo(
+    () => uniquePatients.filter((c: any) => c.patients?.mobile && c.patients?.name),
+    [uniquePatients],
+  );
+  const noMobileCount = uniquePatients.length - withMobile.length;
+
+  // Selection: default me sab; filter badalne par reset
+  useEffect(() => { setPicked(new Set(withMobile.map((c: any) => c.id))); }, [withMobile]);
+
+  const pickedCases = withMobile.filter((c: any) => picked.has(c.id));
+  const allPicked = withMobile.length > 0 && pickedCases.length === withMobile.length;
+  const toggle = (id: string) =>
+    setPicked((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const smsPatients: SmsPatient[] = pickedCases.map((c: any) => ({
+    id: c.id, name: c.patients.name, mobile: c.patients.mobile,
+    body_part: c.body_part, side: c.side, next_followup_date: c.next_followup_date,
+  }));
+
+  const copyNumbers = async () => {
+    const text = pickedCases.map((c: any) => `${c.patients.name} - ${c.patients.mobile}`).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({ title: "Copy ho gaya", description: `${pickedCases.length} patients ke naam + number copy hue.` });
+    } catch {
+      toast({ title: "Copy nahi hua", variant: "destructive" });
+    }
+  };
+
+  return (
+    <Card className="border-primary/30">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base font-heading flex items-center gap-2">
+          <CalendarClock className="h-4 w-4 text-primary" />
+          Patients by Date Range
+          <Badge className="ml-auto text-xs">{uniquePatients.length} patients</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap gap-1.5">
+          {RANGE_PRESETS.map((p) => (
+            <Button key={p.days} size="sm" variant={days === p.days ? "default" : "outline"}
+              className="h-7 text-xs" onClick={() => setDays(p.days)}>
+              Last {p.label}
+            </Button>
+          ))}
+          <Button size="sm" variant={days === "custom" ? "default" : "outline"} className="h-7 text-xs"
+            onClick={() => setDays("custom")}>Custom</Button>
+        </div>
+
+        {days === "custom" && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">From</Label>
+              <Input type="date" className="h-8 text-sm" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">To</Label>
+              <Input type="date" className="h-8 text-sm" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button size="sm" variant={status === "All" ? "default" : "outline"} className="h-7 text-xs" onClick={() => setStatus("All")}>
+            All cases
+          </Button>
+          <Button size="sm" variant={status === "Active" ? "default" : "outline"} className="h-7 text-xs" onClick={() => setStatus("Active")}>
+            Sirf Active plaster
+          </Button>
+          <span className="text-xs text-muted-foreground ml-auto">
+            {fmtDate(range.start)} → {fmtDate(range.end)} (plaster date ke hisab se)
+          </span>
+        </div>
+
+        {noMobileCount > 0 && (
+          <p className="text-xs text-amber-600">⚠️ {noMobileCount} patient(s) ka mobile number nahi hai — SMS/call list me nahi aayenge.</p>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" className="gap-1" disabled={pickedCases.length === 0} onClick={() => setSmsOpen(true)}>
+            <MessageSquare className="h-4 w-4" /> SMS to {pickedCases.length}
+          </Button>
+          <Button size="sm" variant="outline" className="gap-1" disabled={pickedCases.length === 0} onClick={copyNumbers}>
+            <Phone className="h-4 w-4" /> Copy Call List ({pickedCases.length})
+          </Button>
+          <Button size="sm" variant="ghost" className="gap-1 ml-auto" onClick={() => setShowList((v) => !v)}>
+            {showList ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />} List
+          </Button>
+        </div>
+
+        {showList && (
+          <div className="space-y-1.5">
+            {withMobile.length > 0 && (
+              <Button variant="ghost" size="sm" className="gap-1 text-xs h-7"
+                onClick={() => setPicked(allPicked ? new Set() : new Set(withMobile.map((c: any) => c.id)))}>
+                {allPicked ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
+                {allPicked ? "Deselect All" : "Select All"}
+              </Button>
+            )}
+            <ScrollArea className="max-h-72">
+              <div className="space-y-1.5 pr-2">
+                {uniquePatients.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">Is range me koi patient nahi.</p>
+                )}
+                {uniquePatients.map((c: any) => {
+                  const mobile = c.patients?.mobile;
+                  return (
+                    <div key={c.id} className="flex items-center gap-3 py-2 px-3 rounded-lg bg-muted/40 border border-border/40">
+                      <Checkbox checked={picked.has(c.id)} disabled={!mobile} onCheckedChange={() => toggle(c.id)} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate">{c.patients?.name || "—"}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {mobile || "No mobile"} · {[c.side, c.body_part].filter(Boolean).join(" ") || "-"} · {fmtDate(c.plaster_date || c.created_at)}
+                          {!isPlasterActive(c) && (isPlasterExpired(c) ? " · Inactive" : " · Removed")}
+                        </p>
+                      </div>
+                      {mobile && (
+                        <a href={`tel:${mobile}`} title={`Call ${mobile}`}
+                          className="shrink-0 inline-flex items-center gap-1 text-xs text-primary px-2 py-1 rounded-md hover:bg-primary/10">
+                          <Phone className="h-3.5 w-3.5" /> Call
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          </div>
+        )}
+      </CardContent>
+
+      <CustomSmsDialog open={smsOpen} onClose={() => setSmsOpen(false)} patients={smsPatients} preselectAll />
+    </Card>
+  );
+}
+
+// Bulk WhatsApp/SMS ke ready templates — [NAME] ki jagah patient ka naam lagta hai
+const LEAVE_TEMPLATES = [
+  {
+    label: "Leave suchna",
+    text: "नमस्ते [NAME] जी 🙏\nBalaji Ortho Care Center की सूचना: डॉक्टर साहब __ से __ तक छुट्टी पर हैं। इस दौरान क्लिनिक बंद रहेगा। आपका follow-up/प्लास्टर जाँच __ के बाद करवाएँ। ज़रूरत हो तो फ़ोन करें।\nधन्यवाद",
+  },
+  {
+    label: "Clinic wapas khula",
+    text: "नमस्ते [NAME] जी 🙏\nBalaji Ortho Care Center फिर से खुल गया है। कृपया अपना प्लास्टर follow-up करवाने आएँ।\nधन्यवाद",
+  },
+  {
+    label: "Khali (custom)",
+    text: "नमस्ते [NAME] जी 🙏\n\n— Balaji Ortho Care Center",
+  },
+];
 
 // ──────────────────────────────────────────────
 // Main OrthoPanel
@@ -430,17 +646,17 @@ export function OrthoPanel() {
   const { activePlaster, todayFu, missedFu, tomorrowFu } = useMemo(() => {
     const t = todayStr();
     const tm = tomorrowStr();
-    const activePlaster = (cases || []).filter((c: any) => c.plaster_status === "Active").length;
+    const activePlaster = (cases || []).filter((c: any) => isPlasterActive(c, t)).length;
     const list = followups || [];
     const todayFu = list.filter((c: any) => c.next_followup_date === t);
     const tomorrowFu = list.filter((c: any) => c.next_followup_date === tm);
-    const missedFu = list.filter((c: any) => c.next_followup_date && c.next_followup_date < t && c.plaster_status === "Active");
+    const missedFu = list.filter((c: any) => c.next_followup_date && c.next_followup_date < t && isPlasterActive(c, t));
     return { activePlaster, todayFu, missedFu, tomorrowFu };
   }, [cases, followups]);
 
   // Active patients — sorted newest first, then filtered by search
   const activeCases = useMemo(() => {
-    const filtered = (cases || []).filter((c: any) => c.plaster_status === "Active");
+    const filtered = (cases || []).filter((c: any) => isPlasterActive(c));
     if (!search.trim()) return filtered;
     const s = search.toLowerCase();
     return filtered.filter((c: any) =>
@@ -450,9 +666,19 @@ export function OrthoPanel() {
     );
   }, [cases, search]);
 
+  // Bulk WhatsApp/SMS ke liye saare active patients (search se alag), ek patient ek baar
+  const activePatientIds = useMemo(() => {
+    // Sirf woh patients jo local patient list me maujood hain (warna outreach preview poori list reject kar deta hai)
+    const ids = (cases || [])
+      .filter((c: any) => isPlasterActive(c) && c.patients?.id && !c.patients?.deleted_at)
+      .map((c: any) => String(c.patients.id));
+    return [...new Set(ids)];
+  }, [cases]);
+  const hasOutreach = typeof window !== "undefined" && !!(window as any).electron?.outreach;
+
   // Completed patients — sorted newest first
   const completedCases = useMemo(() => {
-    return (cases || []).filter((c: any) => c.plaster_status !== "Active");
+    return (cases || []).filter((c: any) => !isPlasterActive(c));
   }, [cases]);
 
   // Group by plaster_date descending
@@ -476,7 +702,7 @@ export function OrthoPanel() {
 
   const smsPatients: SmsPatient[] = useMemo(() => {
     return (cases || [])
-      .filter((c: any) => c.plaster_status === "Active" && c.patients?.mobile && c.patients?.name)
+      .filter((c: any) => isPlasterActive(c) && c.patients?.mobile && c.patients?.name)
       .map((c: any) => ({ id: c.id, name: c.patients.name, mobile: c.patients.mobile, body_part: c.body_part, side: c.side, next_followup_date: c.next_followup_date }));
   }, [cases]);
 
@@ -528,6 +754,38 @@ export function OrthoPanel() {
           <FuList title="Missed" items={missedFu} tone="destructive" icon={<AlertTriangle className="h-3 w-3" />} />
           {!todayFu.length && !tomorrowFu.length && !missedFu.length && (
             <p className="text-sm text-muted-foreground text-center py-2">No upcoming or missed follow-ups</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Date-range filter: last 15 din / 1 mahina / 1.5 mahine + bulk SMS / call list */}
+      <RangeFilterCard cases={cases || []} />
+
+      {/* Active plaster patients ko WhatsApp + SMS ek sath (leave / custom suchna) */}
+      <Card className="border-primary/30">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base font-heading flex items-center gap-2">
+            <MessageCircle className="h-4 w-4 text-primary" />
+            Active Plaster Patients ko WhatsApp + SMS
+            <Badge className="ml-auto text-xs">{activePatientIds.length} patients</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Sirf active plaster ({PLASTER_ACTIVE_DAYS} din tak) wale patients. Message likho, preview dekho, phir bhejo —
+            WhatsApp aur SMS dono apne aap queue se chale jayenge. WhatsApp page par QR se Connected hona chahiye.
+          </p>
+          {hasOutreach ? (
+            <VillageMessagePanel
+              patientIds={activePatientIds}
+              title="Active Plaster Patients"
+              buttonLabel={`${activePatientIds.length} active patients ko WhatsApp / SMS bhejein`}
+              defaultSms
+              defaultMessage={LEAVE_TEMPLATES[0].text}
+              templates={LEAVE_TEMPLATES}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">Ye suvidha Windows EXE me uplabdh hai.</p>
           )}
         </CardContent>
       </Card>
@@ -589,7 +847,7 @@ export function OrthoPanel() {
           >
             <CardTitle className="text-base font-heading flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-green-600" />
-              Completed Plaster Removed
+              Completed / Inactive Plaster
               <Badge variant="secondary" className="ml-1 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
                 {completedCases.length}
               </Badge>
@@ -683,7 +941,7 @@ export function OrthoPanel() {
                   <p className="text-sm font-medium">{c.patients?.name}</p>
                   <p className="text-xs text-muted-foreground">{c.side} {c.body_part} · {c.plaster_type}</p>
                 </div>
-                <Badge variant="outline">{c.plaster_status}</Badge>
+                <Badge variant="outline">{isPlasterActive(c) ? "Active" : isPlasterExpired(c) ? "Inactive" : c.plaster_status}</Badge>
               </div>
             ))}
           </div>
