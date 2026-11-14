@@ -1,4 +1,5 @@
 import { filterPatients } from '@/lib/patientDirectory';
+import { isPlasterActive } from "@/lib/plasterActive";
 import { businessDate } from "@/lib/businessDate";
 import { useState, useEffect, useRef } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -39,7 +40,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const t        = todayStr();
   const todayFu  = (followups || []).filter((c: any) => c.next_followup_date === t);
   const missedFu = (followups || []).filter(
-    (c: any) => c.next_followup_date && c.next_followup_date < t && c.plaster_status === "Active",
+    (c: any) => c.next_followup_date && c.next_followup_date < t && isPlasterActive(c, t),
   );
   const notifCount = todayFu.length + missedFu.length;
 

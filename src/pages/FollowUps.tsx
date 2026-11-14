@@ -1,4 +1,5 @@
 import { attendedVisit } from "@/lib/followupState";
+import { isPlasterActive } from "@/lib/plasterActive";
 import { offlineUpdate } from '@/lib/offlineQuery';
 import { VillageMessagePanel } from '@/components/VillageMessagePanel';
 import { useState } from "react";
@@ -24,7 +25,7 @@ export default function FollowUps() {
   const [filter, setFilter] = useState("due"), [search, setSearch] = useState("");
   const [editing, setEditing] = useState<any>(null), [saving, setSaving] = useState(false);
   const removalFor = (c: any) => appointments.find(a => a.notes === "cast-removal:" + String(c.id).replace(/^local_/, "") && a.status !== "Cancelled")?.date || "";
-  const rows = cases.filter(c => c.plaster_status === "Active" && (!selectedBranchId || c.patients?.branch_id === selectedBranchId))
+  const rows = cases.filter(c => isPlasterActive(c) && (!selectedBranchId || c.patients?.branch_id === selectedBranchId))
     .filter(c => !search || ((c.patients?.name || "") + " " + (c.patients?.mobile || "")).toLowerCase().includes(search.toLowerCase()))
     .filter(c => filter === "all" || (filter === "due" ? (!attendedVisit(c) && (c.next_followup_date && c.next_followup_date <= today)) || (removalFor(c) && removalFor(c) <= today) : !c.next_followup_date && !removalFor(c)))
     .sort((a, b) => (a.next_followup_date || "9999").localeCompare(b.next_followup_date || "9999"));
