@@ -10,6 +10,7 @@ import { Calendar, Plus, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppointments, useAddAppointment, usePatients, useUpdateAppointment } from "@/hooks/useDatabase";
 import { useState } from "react";
+import { useLocation } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
 import { appointmentMinutes } from "@/lib/appointmentTime";
 
@@ -24,7 +25,8 @@ export default function Appointments() {
   const { data: patients } = usePatients();
   const addAppointment = useAddAppointment();
   const updateAppointment = useUpdateAppointment();
-  const [open, setOpen] = useState(false);
+  const { state } = useLocation();
+  const [open, setOpen] = useState(() => state?.createAppointment === true);
   const [form, setForm] = useState({ patient_id: "", date: "", time_slot: "", notes: "" });
 
   const handleAdd = async (e: React.FormEvent) => {

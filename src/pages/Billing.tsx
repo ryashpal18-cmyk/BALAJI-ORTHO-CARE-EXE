@@ -372,7 +372,8 @@ function BillingContent() {
   const deleteBillAsync = deleteBill.mutateAsync;
   const updateBillStatus = updateBill.mutate;
   const { isAdmin } = useIsAdmin();
-  const [open, setOpen] = useState(false);
+  const [availableDraft,setAvailableDraft]=useState(readBillDraft);
+  const [open, setOpen] = useState(() => location.state?.createBill === true && !availableDraft);
   const [editOpen, setEditOpen] = useState(false);
   const [editingBill, setEditingBill] = useState<any>(null);
 
@@ -395,7 +396,6 @@ function BillingContent() {
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const navPatientConsumedRef = useRef(false);
-  const [availableDraft,setAvailableDraft]=useState(readBillDraft);
   const [draftError,setDraftError]=useState('');
   useEffect(()=>{
     if (!open || editingBill || availableDraft) return;

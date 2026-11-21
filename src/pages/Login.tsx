@@ -12,12 +12,15 @@ import bg1 from "@/assets/dash-bg1.png";
 import bg2 from "@/assets/dash-bg2.png";
 import bg3 from "@/assets/dash-bg3.png";
 import { STORAGE_KEYS } from "@/lib/appConfig";
+import { useTheme } from "@/lib/themeContext";
 import { displaySession, resetCloudConnection } from "@/lib/localSession";
 
 const BG_IMAGES = [bg1, bg2, bg3];
 
 
 export default function Login() {
+  const { mode: visualTheme } = useTheme();
+  const scifi = visualTheme === "scifi";
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -29,15 +32,20 @@ export default function Login() {
 
   // Slideshow — every 5 seconds
   useEffect(() => {
-    const timer = setInterval(() => {
+    if (scifi) return;
+    let transition: number | undefined;
+    const timer = window.setInterval(() => {
       setBgFade(false);
-      setTimeout(() => {
+      transition = window.setTimeout(() => {
         setBgIdx(i => (i + 1) % BG_IMAGES.length);
         setBgFade(true);
       }, 400);
     }, 5000);
-    return () => clearInterval(timer);
-  }, []);
+    return () => {
+      window.clearInterval(timer);
+      window.clearTimeout(transition);
+    };
+  }, [scifi]);
 
   const desktop = !!(window as any).electron?.offlineStatus;
   const [mode, setMode] = useState<"local" | "cloud">(desktop ? "local" : "cloud");
@@ -124,7 +132,7 @@ export default function Login() {
     }
   };
   return (
-    <div style={{
+    <div className="clinic-login" style={{
       minHeight: "100vh", width: "100%",
       display: "flex", flexDirection: "column",
       position: "relative", fontFamily: "'Segoe UI', sans-serif",
@@ -132,7 +140,7 @@ export default function Login() {
     }}>
 
       {/* ── Slideshow Background ── */}
-      {BG_IMAGES.map((src, i) => (
+      {!scifi && BG_IMAGES.map((src, i) => (
         <div key={i} style={{
           position: "absolute", inset: 0,
           backgroundImage: `url(${src})`,
@@ -213,7 +221,7 @@ export default function Login() {
         </div>
 
         {/* RIGHT: Colourful Login Card */}
-        <div style={{
+        <div className="clinic-login-card" style={{
           width: "clamp(360px, 30vw, 440px)",
           marginRight: "5vw", flexShrink: 0,
           borderRadius: "22px",
@@ -222,7 +230,7 @@ export default function Login() {
         }}>
 
           {/* Card Header */}
-          <div style={{
+          <div className="clinic-login-card-header" style={{
             background: "linear-gradient(135deg, #0d2351 0%, #1e57b0 52%, #0e7c4a 100%)",
             padding: "28px 32px 22px",
             display: "flex", flexDirection: "column", alignItems: "center",
@@ -267,7 +275,7 @@ export default function Login() {
           </div>
 
           {/* Card Body */}
-          <div style={{ background: "rgba(255,255,255,0.97)", padding: "24px 32px 28px" }}>
+          <div className="clinic-login-card-body" style={{ background: "rgba(255,255,255,0.97)", padding: "24px 32px 28px" }}>
 
             <p style={{ fontSize: "12px", color: "#5a6a84", marginBottom: "16px" }}>
               {mode === "local" ? (configured ? "Admin login bina internet chalega. Data pehle is PC par save hoga; cloud connected hone par background mein sync hoga." : "Pehli baar is PC par admin banayein. Apna email aur password set karein; internet zaroori nahi hai. Yeh setup clinic owner apne trusted PC par karein.") : "Staff / cloud account: login ke liye internet zaroori hai."}

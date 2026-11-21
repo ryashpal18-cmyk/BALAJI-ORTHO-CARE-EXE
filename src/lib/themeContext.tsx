@@ -1,8 +1,9 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 
-type ThemeMode = "light" | "dark";
+type ThemeMode = "scifi" | "light" | "dark";
+const themeOrder: ThemeMode[] = ["scifi", "light", "dark"];
 
-const THEME_KEY = "bocc_theme_mode";
+const THEME_KEY = "bocc_visual_theme";
 
 interface ThemeContextValue {
   mode: ThemeMode;
@@ -14,16 +15,12 @@ const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
 function getInitialMode(): ThemeMode {
   try {
-    const saved = localStorage.getItem(THEME_KEY) as ThemeMode | null;
-    if (saved === "light" || saved === "dark") return saved;
-    // System preference fallback
-    if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      return "dark";
-    }
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === "scifi" || saved === "light" || saved === "dark") return saved;
   } catch {
-    /* ignore */
+    // Some environments disable local storage.
   }
-  return "light";
+  return "scifi";
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -31,11 +28,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const root = document.documentElement;
-    if (mode === "dark") {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
+    root.classList.toggle("dark", mode !== "light");
+    root.dataset.visualTheme = mode;
     try {
       localStorage.setItem(THEME_KEY, mode);
     } catch {
@@ -44,7 +38,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [mode]);
 
   const setMode = (m: ThemeMode) => setModeState(m);
-  const toggleTheme = () => setModeState((prev) => (prev === "dark" ? "light" : "dark"));
+  const toggleTheme = () => setModeState((prev) => themeOrder[(themeOrder.indexOf(prev) + 1) % themeOrder.length]);
 
   return (
     <ThemeContext.Provider value={{ mode, toggleTheme, setMode }}>

@@ -28,7 +28,18 @@ export function useDashboardStats() {
       const [patients, appointments, billing, beds] = await Promise.all([
         readBranchTable("patients", selectedBranchId), readBranchTable("appointments", selectedBranchId),
         readBranchTable("billing", selectedBranchId), cacheGetAll("beds")]);
-      return { todayPatients: patients.length, todayAppointments: appointments.filter(a => a.date === today).length,
+      const billCounts = new Map<string, number>();
+      const weekStart = Date.parse(businessDayStart(today)) - 6 * 86_400_000;
+      const week = Array.from({ length: 7 }, (_, day) => businessDate(weekStart + day * 86_400_000));
+      for (const date of week) billCounts.set(date, 0);
+      for (const bill of billing) {
+        if (!bill.created_at) continue;
+        const date = businessDate(bill.created_at);
+        const count = billCounts.get(date);
+        if (count !== undefined) billCounts.set(date, count + 1);
+      }
+      return { weeklyBills: week.map(date => ({ date, count: billCounts.get(date) ?? 0 })),
+        todayPatients: patients.length, todayAppointments: appointments.filter(a => a.date === today).length,
         pendingPayments: billing.reduce((sum,b) => sum + billDue(b),0),
         todayRevenue: collectionRows(billing,patients).filter(b => businessDate(b.created_at) === today).reduce((sum,b) => sum+Number(b.amount_paid || 0),0),
         bedsOccupied: beds.filter(b => b.status === "occupied").length, totalBeds: beds.length };

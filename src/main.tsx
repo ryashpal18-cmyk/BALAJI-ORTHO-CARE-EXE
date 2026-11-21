@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
+import "./scifi.css";
 import { startAutoSync } from "./lib/offlineSync";
 import { startAutoBackupScheduler } from "./lib/backup";
 import { initErrorLogging } from "./lib/errorLogging";

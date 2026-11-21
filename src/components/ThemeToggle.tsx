@@ -1,15 +1,20 @@
-import { Moon, Sun } from "lucide-react";
+import { Moon, Orbit, Sun } from "lucide-react";
 import { useTheme } from "@/lib/themeContext";
 import { Button } from "@/components/ui/button";
 
 export function ThemeToggle({ collapsed }: { collapsed?: boolean }) {
   const { mode, toggleTheme } = useTheme();
 
+  const next = mode === "scifi" ? { label: "Light Mode", Icon: Sun }
+    : mode === "light" ? { label: "Dark Mode", Icon: Moon }
+    : { label: "Sci-Fi Mode", Icon: Orbit };
+
   return (
     <Button
       variant="ghost"
       onClick={toggleTheme}
-      title={mode === "dark" ? "Light mode" : "Dark mode"}
+      title={next.label}
+      aria-label={next.label}
       style={{
         display: "flex", alignItems: "center", gap: "10px",
         padding: "9px 10px", borderRadius: "10px",
@@ -18,12 +23,8 @@ export function ThemeToggle({ collapsed }: { collapsed?: boolean }) {
         background: "transparent", border: "none", fontSize: "13px",
       }}
     >
-      {mode === "dark" ? (
-        <Sun style={{ width: "16px", height: "16px" }} />
-      ) : (
-        <Moon style={{ width: "16px", height: "16px" }} />
-      )}
-      {!collapsed && <span>{mode === "dark" ? "Light Mode" : "Dark Mode"}</span>}
+      <next.Icon size={16} />
+      {!collapsed && <span>{next.label}</span>}
     </Button>
   );
 }

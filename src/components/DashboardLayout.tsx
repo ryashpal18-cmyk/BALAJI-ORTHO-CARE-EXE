@@ -14,6 +14,7 @@ import { isOnline } from "@/lib/offlineSync";
 import { cacheGetAll } from "@/lib/offlineDb";
 import { useNavigate } from "react-router-dom";
 import { useFollowupsAround } from "@/hooks/useOrtho";
+import { useTheme } from "@/lib/themeContext";
 import { SyncStatusBadge } from "@/components/SyncStatusBadge";
 import bg1 from "@/assets/dash-bg1.png";
 import bg2 from "@/assets/dash-bg2.png";
@@ -25,6 +26,8 @@ const todayStr = () => businessDate();
 const BG_IMAGES = [bg1, bg2, bg3];
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
+  const { mode } = useTheme();
+  const scifi = mode === "scifi";
   const [query, setQuery]       = useState("");
   const [results, setResults]   = useState<any[]>([]);
   const [showDrop, setShowDrop] = useState(false);
@@ -57,15 +60,21 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    if (scifi) return;
+    let transition: number | undefined;
+    const interval = window.setInterval(() => {
       setFading(true);
-      setTimeout(() => {
+      transition = window.setTimeout(() => {
         setBgIdx(prev => (prev + 1) % BG_IMAGES.length);
         setFading(false);
       }, 700);
     }, 6000);
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(transition);
+      setFading(false);
+    };
+  }, [scifi]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -94,32 +103,35 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
   return (
     <SidebarProvider>
-      <div style={{ minHeight: "100vh", display: "flex", width: "100%", position: "relative" }}>
+      <div className="clinic-shell" style={{ minHeight: "100vh", display: "flex", width: "100%", position: "relative" }}>
 
-        {/* ── Animated Background ── */}
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 0,
-            backgroundImage: `url(${BG_IMAGES[bgIdx]})`,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-            backgroundRepeat: "no-repeat",
-            opacity: fading ? 0 : 1,
-            transition: "opacity 0.7s ease-in-out",
-          }}
-        />
-        {/* Overlay — keeps text readable */}
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 1,
-            background: "rgba(235, 243, 255, 0.72)",
-            backdropFilter: "blur(1px)",
-          }}
-        />
+        {!scifi && <>
+          {/* ── Animated Background ── */}
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 0,
+              backgroundImage: `url(${BG_IMAGES[bgIdx]})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+              backgroundRepeat: "no-repeat",
+              opacity: fading ? 0 : 1,
+              transition: "opacity 0.7s ease-in-out",
+            }}
+          />
+          {/* Overlay — keeps text readable */}
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 1,
+              background: "rgba(235, 243, 255, 0.72)",
+              backdropFilter: "blur(1px)",
+            }}
+          />
+
+        </>}
 
         {/* Sidebar */}
         <div style={{ position: "relative", zIndex: 10 }}>
@@ -131,7 +143,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
           {/* ── TOP HEADER ── */}
           <header
-            className="no-print flex-wrap lg:flex-nowrap"
+            className="clinic-toolbar no-print flex-wrap lg:flex-nowrap"
             style={{
               minHeight: "56px",
               display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -226,7 +238,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               {/* ── Global Quick Action: New Patient Admission (har page se accessible) ── */}
               <button
                 onClick={() => navigate("/opd")}
-                className="gap-2 zoom-hover"
+                className="clinic-toolbar-action gap-2 zoom-hover"
                 style={{
                   display: "flex", alignItems: "center", gap: "6px",
                   height: "36px", padding: "0 14px",
@@ -244,7 +256,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               </button>
 
               {/* Slide dots */}
-              <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
+              {!scifi && <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
                 {BG_IMAGES.map((_, i) => (
                   <button
                     key={i}
@@ -259,7 +271,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     }}
                   />
                 ))}
-              </div>
+              </div>}
 
               {/* Offline / sync status */}
               <SyncStatusBadge />

@@ -1,0 +1,315 @@
+/* Clinic sci-fi visual theme. Print layouts use their existing styles. */
+@media screen {
+  :root[data-visual-theme="scifi"] {
+    color-scheme: dark;
+    --background: 209 48% 7%;
+    --foreground: 197 38% 94%;
+    --card: 207 41% 12%;
+    --card-foreground: 197 38% 94%;
+    --popover: 207 41% 12%;
+    --popover-foreground: 197 38% 94%;
+    --primary: 185 79% 56%;
+    --primary-foreground: 208 64% 10%;
+    --secondary: 257 39% 28%;
+    --secondary-foreground: 244 78% 94%;
+    --muted: 207 31% 17%;
+    --muted-foreground: 202 27% 72%;
+    --accent: 195 48% 19%;
+    --accent-foreground: 187 92% 81%;
+    --border: 198 34% 29%;
+    --input: 198 34% 29%;
+    --ring: 185 89% 57%;
+    --sidebar-background: 209 53% 9%;
+    --sidebar-foreground: 197 38% 94%;
+    --radius: 0.4rem;
+  }
+
+  [data-visual-theme="scifi"] :is(.clinic-shell, .clinic-login) {
+    background:
+      radial-gradient(ellipse at 80% 2%, #27305665, transparent 45%),
+      linear-gradient(#2d7c8c15 1px, transparent 1px),
+      linear-gradient(90deg, #2d7c8c15 1px, transparent 1px),
+      #09131d;
+    background-size: auto, 36px 36px, 36px 36px, auto;
+    background-attachment: fixed;
+  }
+
+  [data-visual-theme="scifi"] .clinic-login-card {
+    border: 1px solid #3b8ea4;
+    border-radius: 6px 20px !important;
+  }
+
+  [data-visual-theme="scifi"] .clinic-login-card-header {
+    background: linear-gradient(125deg, #162e45, #143a47 57%, #242649) !important;
+  }
+
+  [data-visual-theme="scifi"] .clinic-login-card-body {
+    background: #12232f !important;
+  }
+
+  [data-visual-theme="scifi"] .clinic-login-card-body :is(p, label):not([role="alert"]) {
+    color: #b9d5e2 !important;
+  }
+
+  [data-visual-theme="scifi"] .clinic-login-card-body [role="alert"] {
+    color: #ff9bab !important;
+  }
+
+  [data-visual-theme="scifi"] .clinic-toolbar,
+  [data-visual-theme="scifi"] [data-sidebar="sidebar"] {
+    background: linear-gradient(128deg, #101f2f, #08131e 72%) !important;
+    border-color: #2d6173 !important;
+  }
+
+  [data-visual-theme="scifi"] .clinic-toolbar {
+    box-shadow: 0 5px 26px #02070c80 !important;
+  }
+
+  [data-visual-theme="scifi"] [data-sidebar="sidebar"] {
+    box-shadow: inset -1px 0 #23606c;
+  }
+
+  [data-visual-theme="scifi"] .sidebar-link[aria-current="page"] {
+    background: linear-gradient(110deg, #145365, #143040) !important;
+    box-shadow: inset 0 0 0 1px #46dde3, 0 0 14px #30dfec28 !important;
+    color: #edfdff !important;
+  }
+
+  [data-visual-theme="scifi"] .sidebar-link:hover {
+    background-color: #193343 !important;
+    color: #f2fcff !important;
+  }
+
+  [data-visual-theme="scifi"] .module-header {
+    background: none;
+    color: #e5faff;
+    -webkit-text-fill-color: currentColor;
+  }
+
+  [data-visual-theme="scifi"] .dash-card,
+  [data-visual-theme="scifi"] .clinic-shell .bg-card {
+    background: linear-gradient(125deg, #112634, #0d1b28) !important;
+    color: #e7f5fb !important;
+    border: 1px solid #33596a !important;
+    border-radius: 7px !important;
+    box-shadow: 0 8px 22px #020a1380 !important;
+  }
+
+  [data-visual-theme="scifi"] :is(.card, [data-slot="card"])::before {
+    background: linear-gradient(90deg, #44dee9, #8a71dc);
+    animation: none;
+  }
+
+  [data-visual-theme="scifi"] .dash-card:hover {
+    transform: none !important;
+    box-shadow: 0 8px 25px #020711a0, 0 0 15px #4ddaea1c !important;
+  }
+
+  [data-visual-theme="scifi"] :is(.card-title, [data-slot="card-title"], table thead th) {
+    color: #bfdee9 !important;
+  }
+
+  [data-visual-theme="scifi"] table thead tr {
+    background: #18303e !important;
+  }
+
+  [data-visual-theme="scifi"] table tbody tr:hover {
+    background: #1b364588 !important;
+    transform: none !important;
+  }
+
+  [data-visual-theme="scifi"] :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+    background: #0c1924 !important;
+    color: #e7f6fc !important;
+    border-color: #375767 !important;
+    border-radius: 6px !important;
+  }
+
+  [data-visual-theme="scifi"] :is(input, select, textarea):focus {
+    border-color: #5be5f1 !important;
+    box-shadow: 0 0 0 3px #50dcf22b !important;
+  }
+
+  [data-visual-theme="scifi"] [role="tablist"] {
+    background: #0b1a26 !important;
+    border-color: #335767 !important;
+  }
+
+  [data-visual-theme="scifi"] [role="tab"]:not([data-state="active"]) {
+    color: #afc6d3 !important;
+  }
+
+  [data-visual-theme="scifi"] [role="tab"][data-state="active"],
+  [data-visual-theme="scifi"] :is(button.bg-primary, .btn-primary, .clinic-toolbar-action) {
+    background: linear-gradient(120deg, #15536a, #123344) !important;
+    animation: none !important;
+    color: #edfcff !important;
+    border: 1px solid #3fa6bc !important;
+    box-shadow: 0 4px 15px #0007, inset 0 0 14px #47e9ff12 !important;
+    border-radius: 6px !important;
+  }
+
+  [data-visual-theme="scifi"] :is(button.bg-primary, .clinic-toolbar-action):hover {
+    box-shadow: 0 0 15px #4eeaff55 !important;
+  }
+
+  .clinic-dashboard-hero {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding-left: clamp(1rem, 3vw, 2.5rem);
+    min-height: 10rem;
+    border: 1px solid #3c778e;
+    border-radius: 9px;
+    background: linear-gradient(105deg, #112c3c, #101c2be0 65%, #18253c);
+    overflow: hidden;
+  }
+
+  .clinic-dashboard-hero h1 {
+    color: #e6faff;
+    font-size: clamp(1.6rem, 3.2vw, 2.8rem);
+    font-weight: 800;
+    line-height: 1.12;
+    margin-bottom: 0.5rem;
+  }
+
+  .clinic-dashboard-hero p {
+    color: #a9c8d5;
+    font-size: 0.875rem;
+  }
+
+  .knee-hologram {
+    width: min(45%, 16rem);
+    display: grid;
+    place-items: center;
+    position: relative;
+    flex-shrink: 0;
+    padding-right: 0.5rem;
+    background: radial-gradient(ellipse at center, #1caed13a, transparent 67%);
+  }
+
+  .knee-hologram canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    cursor: grab;
+    touch-action: pan-y;
+    filter: drop-shadow(0 0 10px #48d6ff85);
+  }
+
+  .knee-hologram canvas:active { cursor: grabbing; }
+
+  .knee-hologram-control {
+    display: grid;
+    place-items: center;
+    position: absolute;
+    right: 0.65rem;
+    bottom: 0.55rem;
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid #428399;
+    border-radius: 5px;
+    color: #bdf5ff;
+    background: #102838;
+  }
+
+  .knee-hologram :focus-visible,
+  [data-visual-theme="scifi"] .clinic-action:focus-visible {
+    outline: 2px solid #a4f9ff;
+    outline-offset: -4px;
+  }
+
+  .clinic-dashboard-detail {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+    align-items: start;
+    gap: 1rem;
+  }
+
+  .clinic-dashboard-detail > * {
+    min-width: 0;
+  }
+
+  .clinic-dashboard-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+    gap: 0.85rem;
+  }
+
+  [data-visual-theme="scifi"] .clinic-action {
+    --hologram: #5be9f3;
+    --panel: #123748;
+    position: relative;
+    isolation: isolate;
+    gap: 0.65rem;
+    height: 4.5rem;
+    padding-inline: 0.75rem;
+    overflow: hidden;
+    font-size: 0.95rem;
+    background: linear-gradient(125deg, var(--panel), #102331) !important;
+    border: 1px solid color-mix(in srgb, var(--hologram) 67%, #152735) !important;
+    border-radius: 4px 13px !important;
+    box-shadow: inset 0 0 19px #76dffa13, 0 6px 14px #010b14a8 !important;
+  }
+
+  [data-visual-theme="scifi"] .clinic-action[data-tone="violet"] {
+    --hologram: #bca4ff;
+    --panel: #2b2650;
+  }
+
+  [data-visual-theme="scifi"] .clinic-action:hover {
+    box-shadow: inset 0 0 16px color-mix(in srgb, var(--hologram) 20%, transparent),
+      0 0 16px color-mix(in srgb, var(--hologram) 32%, transparent) !important;
+  }
+
+  [data-visual-theme="scifi"] .clinic-action svg,
+  [data-visual-theme="scifi"] .clinic-stat-icon svg {
+    color: var(--hologram, #61ebff) !important;
+    filter: drop-shadow(1px 2px 0 #143343) drop-shadow(0 0 5px currentColor);
+  }
+
+  [data-visual-theme="scifi"] .clinic-action svg {
+    width: 1.6rem;
+    height: 1.6rem;
+  }
+
+  .clinic-click-ring {
+    position: absolute;
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid var(--hologram);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+
+  [data-visual-theme="scifi"] .stat-card {
+    --hologram: #61ebff;
+    background: linear-gradient(120deg, #142e3c, #0e1e2e) !important;
+    border: 1px solid #3d727e !important;
+    border-radius: 4px 13px !important;
+    box-shadow: 0 6px 20px #030a12a0 !important;
+  }
+
+  [data-visual-theme="scifi"] .stat-card[data-tone="secondary"] { --hologram: #bca4ff; }
+  [data-visual-theme="scifi"] .stat-card[data-tone="success"] { --hologram: #7ff6bf; }
+  [data-visual-theme="scifi"] .stat-card[data-tone="warning"] { --hologram: #ffd68b; }
+  [data-visual-theme="scifi"] .stat-card[data-tone="destructive"] { --hologram: #ffa2ac; }
+
+  [data-visual-theme="scifi"] .clinic-stat-icon {
+    background: color-mix(in srgb, var(--hologram) 13%, #111f2e) !important;
+    border: 1px solid color-mix(in srgb, var(--hologram) 46%, #0d1b28);
+    box-shadow: inset 0 0 14px #a6e9ff21;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-visual-theme="scifi"] :is(.clinic-action, .stat-card, .dash-card, .zoom-hover, .dash-animate, .page-enter) {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+}
+
+@media print {
+  .knee-hologram { display: none !important; }
+}

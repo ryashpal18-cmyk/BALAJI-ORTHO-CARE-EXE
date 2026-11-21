@@ -30,6 +30,7 @@ export function StatCard({ title, value, icon: Icon, trend, variant = "default" 
   return (
     <div
       className="stat-card"
+      data-tone={variant}
       style={{
         background: gradients[variant],
         color: "white",
@@ -64,7 +65,7 @@ export function StatCard({ title, value, icon: Icon, trend, variant = "default" 
             </p>
           )}
         </div>
-        <div style={{
+        <div className="clinic-stat-icon" style={{
           height: "42px", width: "42px", borderRadius: "12px",
           background: iconBg[variant],
           display: "flex", alignItems: "center", justifyContent: "center",
