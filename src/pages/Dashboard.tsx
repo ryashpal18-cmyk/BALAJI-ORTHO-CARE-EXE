@@ -3,7 +3,6 @@ import { uniquePatientCount } from '@/lib/reportMetrics';
 import { billDue, netBillAmount } from "@/lib/billAmounts";
 import { normalizeIndianMobile } from "@/lib/mobile";
 import { ClinicHologramIcon } from "@/components/ClinicHologramIcon";
-import { KneeHologram } from "@/components/KneeHologram";
 import { useTheme } from "@/lib/themeContext";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { StatCard } from "@/components/StatCard";
@@ -20,8 +19,10 @@ import { useNavigate } from "react-router-dom";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { OrthoPanel } from "@/components/ortho/OrthoPanel";
 import logo from "@/assets/logo.png";
-import { useState, type PointerEvent } from "react";
+import { lazy, Suspense, useState, type PointerEvent } from "react";
 import { toast } from "@/hooks/use-toast";
+
+const ClinicHologram = lazy(() => import("@/components/ClinicHologram").then(module => ({ default: module.ClinicHologram })));
 
 const weekdayLabel = new Intl.DateTimeFormat("en-IN", { weekday: "short", timeZone: "Asia/Kolkata" });
 
@@ -153,26 +154,31 @@ export default function Dashboard() {
     <DashboardLayout>
       <div className={scifi ? "clinic-command-dashboard" : "space-y-6"}>
         {scifi ? (
-          <>
-            <div className="clinic-dashboard-hero">
-              <div className="clinic-hero-title">
-                <h1>Clinic Dashboard</h1>
-                <p>{new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+          <div className="clinic-dashboard-top">
+            <section className="clinic-dashboard-work" aria-label="Clinic dashboard">
+              <h1 className="clinic-dashboard-title">Clinic Dashboard</h1>
+              <div className="clinic-dashboard-actions">
+                <Button className="clinic-action" data-tone="cyan" onPointerDown={showClickRing} onClick={() => navigate("/opd")}>
+                  <ClinicHologramIcon kind="patient" /> <span>New Patient</span>
+                </Button>
+                <Button className="clinic-action" data-tone="teal" onPointerDown={showClickRing} onClick={() => navigate("/billing", { state: { createBill: true } })}>
+                  <ClinicHologramIcon kind="bill" /> <span>Create Bill</span>
+                </Button>
+                <Button className="clinic-action" onPointerDown={showClickRing} data-tone="violet" onClick={() => navigate("/appointments", { state: { createAppointment: true } })}>
+                  <ClinicHologramIcon kind="calendar" /> <span>Book Appointment</span>
+                </Button>
               </div>
-              <KneeHologram />
-            </div>
-            <div className="clinic-dashboard-actions">
-              <Button className="clinic-action" data-tone="cyan" onPointerDown={showClickRing} onClick={() => navigate("/opd")}>
-                <ClinicHologramIcon kind="patient" /> <span>New Patient</span>
-              </Button>
-              <Button className="clinic-action" onPointerDown={showClickRing} onClick={() => navigate("/billing", { state: { createBill: true } })}>
-                <ClinicHologramIcon kind="bill" /> <span>Create Bill</span>
-              </Button>
-              <Button className="clinic-action" onPointerDown={showClickRing} data-tone="violet" onClick={() => navigate("/appointments", { state: { createAppointment: true } })}>
-                <ClinicHologramIcon kind="calendar" /> <span>Book Appointment</span>
-              </Button>
-            </div>
-          </>
+              <div className="clinic-command-stats">
+                <CommandStat title="Patients Today" value={uniquePatientCount(todayBills || [])} icon="patients" />
+                <CommandStat title="Appointments" value={stats?.todayAppointments ?? 0} icon="calendar" violet />
+                <CommandStat title="Bills Today" value={todayBills?.length ?? 0} icon="bill" />
+                <CommandStat title="Today's Collection" value={`₹${todayTotalAmount.toLocaleString("en-IN")}`} icon="collection" violet />
+              </div>
+            </section>
+            <Suspense fallback={<div className="clinic-anatomy-panel" aria-hidden="true" />}>
+              <ClinicHologram />
+            </Suspense>
+          </div>
         ) : (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
@@ -205,14 +211,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {scifi ? (
-          <div className="clinic-command-stats">
-            <CommandStat title="Patients Today" value={uniquePatientCount(todayBills || [])} icon="patients" />
-            <CommandStat title="Appointments" value={stats?.todayAppointments ?? 0} icon="calendar" violet />
-            <CommandStat title="Bills Today" value={todayBills?.length ?? 0} icon="bill" />
-            <CommandStat title="Today's Collection" value={`₹${todayTotalAmount.toLocaleString("en-IN")}`} icon="collection" violet />
-          </div>
-        ) : (
+        {!scifi && (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 dash-animate dash-animate-1">
             <StatCard title="Today's Patients" value={uniquePatientCount(todayBills || [])} icon={Users} variant="primary" />
             <StatCard title="Appointments" value={stats?.todayAppointments ?? 0} icon={Calendar} variant="secondary" />

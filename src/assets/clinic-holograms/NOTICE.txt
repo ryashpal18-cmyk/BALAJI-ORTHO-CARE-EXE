@@ -1,0 +1,9 @@
+BodyParts3D, © The Database Center for Life Science licensed under
+CC Attribution 4.0 International.
+https://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html
+https://creativecommons.org/licenses/by/4.0/
+
+Knee STL conversion: https://github.com/Kevin-Mattheus-Moerman/BodyParts3D
+Spine and shoulder OBJ mirror: https://github.com/olivercase/body_parts_3d_api
+Mesh adaptations: cropped, repositioned, scaled, quantized and recolored
+for the Balaji Ortho Care dashboard. The preview images depict these meshes.
