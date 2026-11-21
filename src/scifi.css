@@ -153,49 +153,21 @@
     box-shadow: 0 0 15px #4eeaff55 !important;
   }
 
-  .clinic-dashboard-hero {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
-    padding-left: clamp(1rem, 3vw, 2.5rem);
-    min-height: 10rem;
-    border: 1px solid #3c778e;
-    border-radius: 9px;
-    background: linear-gradient(105deg, #112c3c, #101c2be0 65%, #18253c);
-    overflow: hidden;
-  }
-
-  .clinic-dashboard-hero h1 {
-    color: #e6faff;
-    font-size: clamp(1.6rem, 3.2vw, 2.8rem);
-    font-weight: 800;
-    line-height: 1.12;
-    margin-bottom: 0.5rem;
-  }
-
-  .clinic-dashboard-hero p {
+  .clinic-command-dashboard .clinic-dashboard-hero p {
     color: #a9c8d5;
     font-size: 0.875rem;
   }
 
   .knee-hologram {
-    width: min(45%, 16rem);
     display: grid;
     place-items: center;
-    position: relative;
-    flex-shrink: 0;
-    padding-right: 0.5rem;
-    background: radial-gradient(ellipse at center, #1caed13a, transparent 67%);
   }
 
   .knee-hologram canvas {
     display: block;
-    width: 100%;
     height: auto;
     cursor: grab;
     touch-action: pan-y;
-    filter: drop-shadow(0 0 10px #48d6ff85);
   }
 
   .knee-hologram canvas:active { cursor: grabbing; }
@@ -220,10 +192,9 @@
     outline-offset: -4px;
   }
 
-  .clinic-dashboard-detail {
+  .clinic-dashboard-detail,
+  .clinic-dashboard-actions {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
-    align-items: start;
     gap: 1rem;
   }
 
@@ -231,54 +202,12 @@
     min-width: 0;
   }
 
-  .clinic-dashboard-actions {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
-    gap: 0.85rem;
-  }
-
-  [data-visual-theme="scifi"] .clinic-action {
-    --hologram: #5be9f3;
-    --panel: #123748;
-    position: relative;
-    isolation: isolate;
-    gap: 0.65rem;
-    height: 4.5rem;
-    padding-inline: 0.75rem;
-    overflow: hidden;
-    font-size: 0.95rem;
-    background: linear-gradient(125deg, var(--panel), #102331) !important;
-    border: 1px solid color-mix(in srgb, var(--hologram) 67%, #152735) !important;
-    border-radius: 4px 13px !important;
-    box-shadow: inset 0 0 19px #76dffa13, 0 6px 14px #010b14a8 !important;
-  }
-
-  [data-visual-theme="scifi"] .clinic-action[data-tone="violet"] {
-    --hologram: #bca4ff;
-    --panel: #2b2650;
-  }
-
-  [data-visual-theme="scifi"] .clinic-action:hover {
-    box-shadow: inset 0 0 16px color-mix(in srgb, var(--hologram) 20%, transparent),
-      0 0 16px color-mix(in srgb, var(--hologram) 32%, transparent) !important;
-  }
-
-  [data-visual-theme="scifi"] .clinic-action svg,
-  [data-visual-theme="scifi"] .clinic-stat-icon svg {
-    color: var(--hologram, #61ebff) !important;
-    filter: drop-shadow(1px 2px 0 #143343) drop-shadow(0 0 5px currentColor);
-  }
-
-  [data-visual-theme="scifi"] .clinic-action svg {
-    width: 1.6rem;
-    height: 1.6rem;
-  }
-
   .clinic-click-ring {
     position: absolute;
     width: 1rem;
     height: 1rem;
     border: 2px solid var(--hologram);
+    box-shadow: 0 0 7px var(--hologram), inset 0 0 4px var(--hologram);
     border-radius: 50%;
     pointer-events: none;
   }
@@ -312,4 +241,297 @@
 
 @media print {
   .knee-hologram { display: none !important; }
+}
+
+@media screen {
+  [data-visual-theme="scifi"] {
+    --command-edge: #4b8e9e;
+    --command-cut: polygon(17px 0, calc(100% - 15px) 0, 100% 15px, 100% calc(100% - 17px), calc(100% - 17px) 100%, 0 100%, 0 17px);
+  }
+
+  [data-visual-theme="scifi"] .clinic-shell {
+    background:
+      radial-gradient(ellipse at 48% 0%, #102535 0%, transparent 52%),
+      repeating-linear-gradient(0deg, transparent 0 31px, #4ab4c20d 31px 32px),
+      repeating-linear-gradient(90deg, transparent 0 31px, #4ab4c20d 31px 32px),
+      #08121a;
+    background-attachment: fixed;
+  }
+
+  [data-visual-theme="scifi"] .clinic-toolbar {
+    border-bottom: 1px solid #52cde18a !important;
+  }
+
+  [data-visual-theme="scifi"] [data-command-dashboard="true"] .clinic-toolbar-action {
+    display: none !important;
+  }
+
+  [data-visual-theme="scifi"] .clinic-sidebar-brand > div {
+    background: linear-gradient(116deg, #123238, #101925 75%) !important;
+    border-bottom: 1px solid #67c8df65;
+  }
+
+  [data-visual-theme="scifi"] .sidebar-link[data-main-navigation="true"] {
+    width: calc(100% - 16px);
+    min-height: 42px;
+    color: #e1edf3 !important;
+    font-size: 14px !important;
+    border-radius: 4px !important;
+  }
+
+  [data-visual-theme="scifi"] .sidebar-link svg {
+    color: #9bf2fb !important;
+  }
+
+  [data-visual-theme="scifi"] .sidebar-link[aria-current="page"] {
+    clip-path: var(--command-cut);
+    background: linear-gradient(110deg, #174354, #0d2430) !important;
+  }
+
+  .clinic-command-dashboard {
+    display: grid;
+    gap: clamp(14px, 1.35vw, 24px);
+  }
+
+  .clinic-command-dashboard .clinic-dashboard-hero {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-height: clamp(104px, 9.2vw, 154px);
+    border: 0;
+    border-bottom: 1px solid #32667590;
+    border-radius: 0;
+    background: none;
+    padding: 0 0 0 8px;
+  }
+
+  .clinic-hero-title {
+    position: relative;
+    z-index: 1;
+  }
+
+  .clinic-command-dashboard .clinic-dashboard-hero h1 {
+    font-size: clamp(1.75rem, 3vw, 3rem);
+    letter-spacing: -.04em;
+    font-weight: 800;
+    line-height: 1.12;
+    text-shadow: 0 2px 20px #5698c53d;
+    margin-bottom: 7px;
+  }
+
+  .clinic-command-dashboard .knee-hologram {
+    position: absolute;
+    inset: 0 clamp(12px, 7vw, 125px) 0 auto;
+    width: min(53%, 380px);
+    padding: 0;
+    overflow: hidden;
+    background: repeating-radial-gradient(ellipse at center, #349db62d 0 1px, transparent 2px 24px);
+    mask-image: linear-gradient(90deg, transparent, black 18% 90%, transparent);
+  }
+
+  .clinic-command-dashboard .knee-hologram canvas {
+    position: absolute;
+    width: 100%;
+    max-width: 340px;
+    top: 50%;
+    transform: translateY(-50%);
+    filter: drop-shadow(0 0 7px #28d8fb88) drop-shadow(0 0 16px #159bc154);
+  }
+
+  .clinic-command-dashboard .knee-hologram-control {
+    right: 11%;
+    bottom: 8px;
+    z-index: 1;
+  }
+
+  .clinic-command-dashboard .clinic-dashboard-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: clamp(10px, 1.15vw, 20px);
+  }
+
+  [data-visual-theme="scifi"] .clinic-command-dashboard button.clinic-action,
+  [data-visual-theme="scifi"] .clinic-command-stat,
+  [data-visual-theme="scifi"] .clinic-command-panel {
+    --glass-hi: #122b37;
+    --glass-lo: #0a1821;
+    --glass-rim: #66bbc9;
+    --hologram: #72ebfb;
+    position: relative;
+    isolation: isolate;
+    clip-path: var(--command-cut);
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: linear-gradient(120deg, var(--glass-rim), #335466 43%, var(--glass-rim)) !important;
+    box-shadow: none !important;
+  }
+
+  [data-visual-theme="scifi"] :is(button.clinic-action, .clinic-command-stat, .clinic-command-panel)::before {
+    position: absolute;
+    content: "";
+    inset: 1.25px;
+    z-index: -1;
+    clip-path: var(--command-cut);
+    background: linear-gradient(122deg, var(--glass-hi), var(--glass-lo) 82%);
+    pointer-events: none;
+  }
+
+  [data-visual-theme="scifi"] .clinic-command-dashboard button.clinic-action {
+    display: flex;
+    justify-content: center;
+    overflow: hidden;
+    gap: clamp(8px, 1vw, 21px);
+    height: clamp(94px, 8.7vw, 145px);
+    padding: 6px clamp(10px, 1.4vw, 22px);
+    color: #effbff !important;
+    font-size: clamp(1rem, 1.75vw, 1.85rem);
+    letter-spacing: -.035em;
+    font-weight: 750 !important;
+    transition: transform 145ms ease, filter 145ms ease !important;
+    white-space: normal;
+    text-align: left;
+    line-height: 1.1;
+  }
+
+  [data-visual-theme="scifi"] .clinic-command-dashboard button.clinic-action[data-tone="cyan"] {
+    --glass-hi: #07374e;
+    --glass-lo: #071d2b;
+    --glass-rim: #59f2ff;
+    --hologram: #61eeff;
+  }
+
+  [data-visual-theme="scifi"] .clinic-command-dashboard button.clinic-action[data-tone="violet"],
+  [data-visual-theme="scifi"] .clinic-command-stat[data-tone="violet"] {
+    --glass-hi: #252744;
+    --glass-lo: #13182a;
+    --glass-rim: #b89bff;
+    --hologram: #b89bff;
+  }
+
+  [data-visual-theme="scifi"] .clinic-command-dashboard button.clinic-action:hover {
+    transform: translateY(-2px) !important;
+    filter: brightness(1.22);
+  }
+
+  [data-visual-theme="scifi"] .clinic-command-dashboard button.clinic-action:active {
+    transform: scale(.98) !important;
+    filter: brightness(1.32);
+  }
+
+  [data-visual-theme="scifi"] .clinic-hologram-icon,
+  [data-visual-theme="scifi"] .clinic-command-dashboard button.clinic-action .clinic-hologram-icon {
+    color: var(--hologram) !important;
+    width: clamp(59px, 7.1vw, 116px);
+    height: auto;
+    flex: 0 0 auto;
+    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--hologram) 48%, transparent));
+  }
+
+  .clinic-command-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: clamp(10px, 1.1vw, 20px);
+  }
+
+  .clinic-command-stat {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: clamp(6px, 1vw, 16px);
+    min-height: clamp(91px, 8vw, 135px);
+    padding: 10px clamp(6px, 1vw, 18px);
+  }
+
+  [data-visual-theme="scifi"] .clinic-command-stat .clinic-hologram-icon {
+    width: clamp(38px, 5.3vw, 85px);
+  }
+
+  .clinic-command-stat-copy {
+    min-width: 0;
+    border-left: 1px solid #83bdcf55;
+    padding-left: clamp(7px, 1vw, 16px);
+  }
+
+  .clinic-command-stat-copy p {
+    font-size: clamp(.73rem, 1.18vw, 1.15rem);
+    line-height: 1.12;
+    color: #d0e5ee;
+  }
+
+  .clinic-command-stat-copy strong {
+    display: block;
+    margin-top: 6px;
+    font-size: clamp(1.1rem, 2.35vw, 2.55rem);
+    line-height: 1;
+    letter-spacing: -.045em;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+
+  .clinic-command-dashboard .clinic-dashboard-detail {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  [data-visual-theme="scifi"] .clinic-command-panel {
+    --glass-hi: #10242e;
+    --glass-lo: #0b1922;
+    --glass-rim: #64b5c3;
+  }
+
+  [data-visual-theme="scifi"] .clinic-command-panel h3 {
+    font-size: clamp(1.18rem, 1.65vw, 1.8rem) !important;
+    color: #edf8fc !important;
+    letter-spacing: -.025em;
+  }
+
+  .clinic-recent-entries {
+    max-height: 215px;
+    overflow: auto;
+  }
+
+  .clinic-recent-entries table {
+    width: 100%;
+    min-width: 21rem;
+    font-size: .86rem;
+  }
+
+  .clinic-recent-entries th,
+  .clinic-recent-entries td {
+    text-align: left;
+    padding: 9px 8px;
+    border-bottom: 1px solid #355669;
+  }
+
+  .clinic-recent-entries th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #18313e;
+  }
+
+  .clinic-entry-status {
+    display: inline-block;
+    border: 1px solid #ae8ef0;
+    border-radius: 999px;
+    padding: 2px 8px;
+    color: #efe5ff;
+    background: linear-gradient(125deg, #422e61, #231e40);
+  }
+
+  .clinic-entry-status[data-paid="true"] {
+    border-color: #44bdc3;
+    color: #daffff;
+    background: linear-gradient(125deg, #12615d, #123e4d);
+  }
+
+  @media (max-width: 1050px) {
+    .clinic-command-dashboard .clinic-dashboard-detail { grid-template-columns: minmax(0, 1fr); }
+    .clinic-command-stat-copy strong { font-size: clamp(.9rem, 1.95vw, 1.8rem); }
+  }
+
+  @media (max-width: 690px) {
+    .clinic-command-dashboard .clinic-dashboard-actions { grid-template-columns: minmax(0, 1fr); }
+    .clinic-command-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .clinic-command-dashboard .knee-hologram { right: 0; opacity: .7; }
+  }
 }

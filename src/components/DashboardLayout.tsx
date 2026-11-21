@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { supabase } from "@/integrations/supabase/client";
 import { isOnline } from "@/lib/offlineSync";
 import { cacheGetAll } from "@/lib/offlineDb";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useFollowupsAround } from "@/hooks/useOrtho";
 import { useTheme } from "@/lib/themeContext";
 import { SyncStatusBadge } from "@/components/SyncStatusBadge";
@@ -28,6 +28,8 @@ const BG_IMAGES = [bg1, bg2, bg3];
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const { mode } = useTheme();
   const scifi = mode === "scifi";
+  const { pathname } = useLocation();
+  const commandDashboard = scifi && pathname === "/dashboard";
   const [query, setQuery]       = useState("");
   const [results, setResults]   = useState<any[]>([]);
   const [showDrop, setShowDrop] = useState(false);
@@ -103,7 +105,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
   return (
     <SidebarProvider>
-      <div className="clinic-shell" style={{ minHeight: "100vh", display: "flex", width: "100%", position: "relative" }}>
+      <div className="clinic-shell" data-command-dashboard={commandDashboard} style={{ minHeight: "100vh", display: "flex", width: "100%", position: "relative" }}>
 
         {!scifi && <>
           {/* ── Animated Background ── */}

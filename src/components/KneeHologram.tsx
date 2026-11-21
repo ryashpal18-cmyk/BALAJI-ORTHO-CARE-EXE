@@ -5,10 +5,19 @@ type Point = { x: number; y: number; z: number };
 type Ring = [height: number, width: number, depth: number, x?: number, z?: number, split?: number];
 type Face = [number, number, number, number];
 
-const segments = 20;
+const segments = 32;
 const mesh = { points: [] as Point[], faces: [] as Face[] };
 
 function addBone(rings: Ring[]) {
+  // Interpolate cross sections to keep the rim and joint contours smooth in motion.
+  rings = rings.flatMap((ring, index) => {
+    const following = rings[index + 1];
+    if (!following) return [ring];
+    const middle = Array.from({ length: 6 }, (_, field) =>
+      ((ring[field] ?? 0) + (following[field] ?? 0)) / 2,
+    ) as Ring;
+    return [ring, middle];
+  });
   const start = mesh.points.length;
   for (const [y, width, depth, x = 0, z = 0, split = 0] of rings) {
     for (let i = 0; i < segments; i++) {
@@ -55,35 +64,39 @@ addBone([
 
 function renderKnee(ctx: CanvasRenderingContext2D, width: number, height: number, yaw: number) {
   ctx.clearRect(0, 0, width, height);
-  const scale = height / 7.2;
+  const scale = height / 5.8;
   const sin = Math.sin(yaw);
   const cos = Math.cos(yaw);
   const projected = mesh.points.map(({ x, y, z }) => {
-    const rotatedX = x * cos + z * sin;
+    const rotatedX = (x * cos + z * sin) * 1.22;
     const rotatedZ = -x * sin + z * cos;
     const depth = rotatedZ * .993 + y * .12;
     const perspective = 8 / (8 - depth);
     return {
-      x: width / 2 + rotatedX * scale * perspective,
-      y: height / 2 - (y * .993 - rotatedZ * .12) * scale * perspective,
+      x: width / 2 + (rotatedX * .984 + y * .178) * scale * perspective,
+      y: height / 2 - (y * .975 - rotatedX * .176 - rotatedZ * .12) * scale * perspective,
       z: depth,
     };
   });
 
   const faces = mesh.faces.map(vertices => {
     const points = vertices.map(index => projected[index]);
-    return { points, depth: points.reduce((total, point) => total + point.z, 0) / 4 };
+    const [a, b, c] = points;
+    const winding = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    return { points, winding, depth: points.reduce((total, point) => total + point.z, 0) / 4 };
   }).sort((a, b) => a.depth - b.depth);
 
-  ctx.lineWidth = Math.max(.55, height / 360);
-  for (const { points, depth } of faces) {
+  ctx.lineWidth = Math.max(.55, height / 395);
+  for (const { points, winding, depth } of faces) {
     ctx.beginPath();
     ctx.moveTo(points[0].x, points[0].y);
     for (const point of points.slice(1)) ctx.lineTo(point.x, point.y);
     ctx.closePath();
     const light = Math.max(0, Math.min(1, (depth + 1.1) / 2.6));
-    ctx.fillStyle = `rgba(14, ${Math.round(55 + light * 107)}, ${Math.round(83 + light * 129)}, 0.48)`;
-    ctx.strokeStyle = `rgba(107, 239, 255, ${.11 + light * .52})`;
+    const facing = Math.abs(winding) / (height * height / 900);
+    const rim = Math.max(0, 1 - facing);
+    ctx.fillStyle = `rgba(12, ${Math.round(35 + light * 105 + rim * 40)}, ${Math.round(62 + light * 110 + rim * 35)}, ${winding > 0 ? .19 : .61})`;
+    ctx.strokeStyle = `rgba(120, 245, 255, ${.05 + light * .23 + rim * .25})`;
     ctx.fill();
     ctx.stroke();
   }
@@ -128,8 +141,8 @@ export function KneeHologram() {
     <div className="knee-hologram">
       <canvas
         ref={canvas}
-        width={480}
-        height={304}
+        width={620}
+        height={320}
         tabIndex={0}
         aria-label="3D knee illustration. Drag or use the left and right arrow keys to rotate."
         onPointerDown={event => {

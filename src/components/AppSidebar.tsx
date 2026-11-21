@@ -15,6 +15,7 @@ import {
   SidebarFooter, SidebarHeader, useSidebar,
 } from "@/components/ui/sidebar";
 import { getCurrentRole, getCurrentPerms } from "@/lib/appConfig";
+import { useTheme } from "@/lib/themeContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BranchSelector } from "@/components/BranchSelector";
 import { resetCloudConnection } from "@/lib/localSession";
@@ -54,8 +55,14 @@ const ALL_MENU_ITEMS = [
   { title: "Settings",            url: "/settings",            icon: Settings },
 ];
 
+const SCI_FI_MENU_ORDER = [
+  "/dashboard", "/patient-search", "/appointments", "/billing",
+  "/reports", "/physiotherapy", "/daily-cash-book", "/settings",
+];
+
 export function AppSidebar() {
   const { state } = useSidebar();
+  const { mode } = useTheme();
   const collapsed  = state === "collapsed";
   const location   = useLocation();
   const navigate   = useNavigate();
@@ -69,6 +76,13 @@ export function AppSidebar() {
     if (item.url === "/settings" || item.url === "/audit-log" || item.url === "/branches") return false;
     return perms.includes(item.url);
   });
+  if (mode === "scifi") {
+    const order = (url: string) => {
+      const index = SCI_FI_MENU_ORDER.indexOf(url);
+      return index === -1 ? SCI_FI_MENU_ORDER.length : index;
+    };
+    menuItems.sort((a, b) => order(a.url) - order(b.url));
+  }
 
   const handleLogout = async () => {
     queryClient.clear();
@@ -88,7 +102,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
-      <SidebarHeader style={{ padding: "0", background: "transparent" }}>
+      <SidebarHeader className="clinic-sidebar-brand" style={{ padding: "0", background: "transparent" }}>
         <div style={{
           padding: collapsed ? "16px 10px" : "16px",
           borderBottom: "1px solid rgba(255,255,255,0.08)",
@@ -159,6 +173,7 @@ export function AppSidebar() {
                         }}
                         activeClassName=""
                         className="sidebar-link zoom-hover"
+                        data-main-navigation={SCI_FI_MENU_ORDER.includes(item.url)}
                       >
                         <item.icon style={{
                           width: "16px", height: "16px", flexShrink: 0,

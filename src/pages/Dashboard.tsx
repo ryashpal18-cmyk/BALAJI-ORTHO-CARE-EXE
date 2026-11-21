@@ -2,6 +2,7 @@ import { CollectPayment } from '@/components/CollectPayment';
 import { uniquePatientCount } from '@/lib/reportMetrics';
 import { billDue, netBillAmount } from "@/lib/billAmounts";
 import { normalizeIndianMobile } from "@/lib/mobile";
+import { ClinicHologramIcon } from "@/components/ClinicHologramIcon";
 import { KneeHologram } from "@/components/KneeHologram";
 import { useTheme } from "@/lib/themeContext";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -42,6 +43,23 @@ function showClickRing(event: PointerEvent<HTMLButtonElement>) {
     { transform: "translate(-50%, -50%) scale(5)", opacity: 0 },
   ], { duration: 420, easing: "ease-out" });
   animation.onfinish = animation.oncancel = () => ring.remove();
+}
+
+function CommandStat({ title, value, icon, violet = false }: {
+  title: string;
+  value: string | number;
+  icon: "patients" | "calendar" | "bill" | "collection";
+  violet?: boolean;
+}) {
+  return (
+    <div className="clinic-command-stat" data-tone={violet ? "violet" : "teal"}>
+      <ClinicHologramIcon kind={icon} />
+      <div className="clinic-command-stat-copy">
+        <p>{title}</p>
+        <strong>{value}</strong>
+      </div>
+    </div>
+  );
 }
 
 export default function Dashboard() {
@@ -133,28 +151,25 @@ export default function Dashboard() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className={scifi ? "clinic-command-dashboard" : "space-y-6"}>
         {scifi ? (
           <>
             <div className="clinic-dashboard-hero">
-              <div>
+              <div className="clinic-hero-title">
                 <h1>Clinic Dashboard</h1>
                 <p>{new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
               </div>
               <KneeHologram />
             </div>
             <div className="clinic-dashboard-actions">
-              <Button className="clinic-action" onPointerDown={showClickRing} onClick={() => navigate("/opd")}>
-                <UserPlus aria-hidden="true" /> New Patient
+              <Button className="clinic-action" data-tone="cyan" onPointerDown={showClickRing} onClick={() => navigate("/opd")}>
+                <ClinicHologramIcon kind="patient" /> <span>New Patient</span>
               </Button>
               <Button className="clinic-action" onPointerDown={showClickRing} onClick={() => navigate("/billing", { state: { createBill: true } })}>
-                <Receipt aria-hidden="true" /> Create Bill
+                <ClinicHologramIcon kind="bill" /> <span>Create Bill</span>
               </Button>
               <Button className="clinic-action" onPointerDown={showClickRing} data-tone="violet" onClick={() => navigate("/appointments", { state: { createAppointment: true } })}>
-                <Calendar aria-hidden="true" /> Book Appointment
-              </Button>
-              <Button className="clinic-action" onPointerDown={showClickRing} onClick={() => navigate("/daily-cash-book")}>
-                <Wallet aria-hidden="true" /> Daily Cash Book
+                <ClinicHologramIcon kind="calendar" /> <span>Book Appointment</span>
               </Button>
             </div>
           </>
@@ -190,23 +205,32 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 dash-animate dash-animate-1">
-          <StatCard title="Today's Patients" value={uniquePatientCount(todayBills || [])} icon={Users} variant="primary" />
-          <StatCard title="Appointments" value={stats?.todayAppointments ?? 0} icon={Calendar} variant="secondary" />
-          <StatCard title="Pending Payments" value={`₹${pendingTotal.toLocaleString()}`} icon={Receipt} variant="warning" />
-          <StatCard title="आज प्राप्त / Collected" value={`₹${todayTotalAmount.toLocaleString()}`} icon={IndianRupee} variant="success" />
-        </div>
+        {scifi ? (
+          <div className="clinic-command-stats">
+            <CommandStat title="Patients Today" value={uniquePatientCount(todayBills || [])} icon="patients" />
+            <CommandStat title="Appointments" value={stats?.todayAppointments ?? 0} icon="calendar" violet />
+            <CommandStat title="Bills Today" value={todayBills?.length ?? 0} icon="bill" />
+            <CommandStat title="Today's Collection" value={`₹${todayTotalAmount.toLocaleString("en-IN")}`} icon="collection" violet />
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 dash-animate dash-animate-1">
+            <StatCard title="Today's Patients" value={uniquePatientCount(todayBills || [])} icon={Users} variant="primary" />
+            <StatCard title="Appointments" value={stats?.todayAppointments ?? 0} icon={Calendar} variant="secondary" />
+            <StatCard title="Pending Payments" value={`₹${pendingTotal.toLocaleString()}`} icon={Receipt} variant="warning" />
+            <StatCard title="आज प्राप्त / Collected" value={`₹${todayTotalAmount.toLocaleString()}`} icon={IndianRupee} variant="success" />
+          </div>
+        )}
 
         <div className={scifi ? "clinic-dashboard-detail" : undefined}>
           {scifi && (
-            <Card className="dash-card">
+            <Card className="dash-card clinic-command-panel">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Weekly Activity</CardTitle>
               </CardHeader>
               <CardContent>
                 {stats?.weeklyBills ? (
                   <div role="img" aria-label={stats.weeklyBills.map(({ date, count }) => `${formatChartDay(date)}: ${count} bills`).join(", ")}>
-                    <ResponsiveContainer width="100%" height={205} minWidth={0}>
+                    <ResponsiveContainer width="100%" height={215} minWidth={0}>
                       <AreaChart data={stats.weeklyBills} margin={{ top: 8, right: 20, bottom: 0, left: 0 }}>
                         <defs>
                           <linearGradient id="weekly-bills-fill" x1="0" y1="0" x2="0" y2="1">
@@ -214,11 +238,11 @@ export default function Dashboard() {
                             <stop offset="100%" stopColor="#43e3ee" stopOpacity={0.04} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid vertical={false} stroke="#2e5262" />
+                        <CartesianGrid stroke="#244555" strokeOpacity={0.75} />
                         <XAxis dataKey="date" tickFormatter={formatChartDay} stroke="#a8c5cf" tickLine={false} />
                         <YAxis allowDecimals={false} domain={[0, dataMax => Math.max(1, dataMax)]} width={32} stroke="#a8c5cf" tickLine={false} />
                         <Tooltip labelFormatter={formatChartDay} contentStyle={{ background: "#101e2a", borderColor: "#3d727e" }} labelStyle={{ color: "#e8f7fc" }} />
-                        <Area dataKey="count" name="Bills" type="linear" stroke="#62efff" fill="url(#weekly-bills-fill)" strokeWidth={2} isAnimationActive={false} />
+                        <Area dataKey="count" name="Bills" type="monotone" stroke="#54edff" dot={{ r: 3.2, fill: "#ddfcff", stroke: "#54edff" }} fill="url(#weekly-bills-fill)" strokeWidth={2} isAnimationActive={false} />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
@@ -227,44 +251,65 @@ export default function Dashboard() {
             </Card>
           )}
           {/* Today's Patients */}
-          <Card className="dash-card dash-animate dash-animate-2">
+          <Card className={scifi ? "dash-card clinic-command-panel" : "dash-card dash-animate dash-animate-2"}>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base font-heading flex items-center gap-2">
-                  <Receipt className="h-4 w-4 text-primary" />
+                  {!scifi && <Receipt className="h-4 w-4 text-primary" />}
                   {scifi ? "Recent Entries" : "Today's Patients"}
                 </CardTitle>
                 <Button variant="ghost" size="sm" className="text-primary text-xs" onClick={() => navigate("/billing")}>View All</Button>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                {!todayBills?.length && <p className="text-sm text-muted-foreground text-center py-4">No bills today</p>}
-                {todayBills?.slice(0, 8).map((bill) => {
-                  const displayService = bill.service.includes("|")
-                    ? bill.service.split("|").map((s: string) => s.split(":")[0].trim()).join(", ")
-                    : bill.service;
-                  return (
-                    <div key={bill.id} className="flex items-center justify-between py-2 border-b last:border-0">
-                      <div>
-                        <p className="text-sm font-medium">{(bill.patients as any)?.name}</p>
-                        <p className="text-xs text-muted-foreground truncate max-w-[180px]">{displayService}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-primary">₹{Number(bill.amount).toLocaleString()}</p>
-                        <Badge variant="secondary" className={`text-[10px] border-0 ${bill.status === "Paid" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>
-                          {bill.status}
-                        </Badge>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {todayBills && todayBills.length > 0 && (
-                <div className="mt-4 p-3 bg-primary/10 rounded-lg flex justify-between items-center">
-                  <span className="text-sm font-medium">Total ({todayBills.length} patients)</span>
-                  <span className="text-lg font-bold text-primary">₹{todayTotalAmount.toLocaleString()}</span>
+              {scifi ? (
+                <div className="clinic-recent-entries">
+                  <table>
+                    <thead><tr><th>Patient</th><th>Service</th><th>Amount</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {!todayBills?.length && <tr><td colSpan={4}>No bills today</td></tr>}
+                      {todayBills?.slice(0, 8).map(bill => (
+                        <tr key={bill.id}>
+                          <td>{(bill.patients as any)?.name || "—"}</td>
+                          <td>{bill.service.split("|").map(service => service.split(":")[0].trim()).join(", ")}</td>
+                          <td>₹{Number(bill.amount).toLocaleString("en-IN")}</td>
+                          <td><span className="clinic-entry-status" data-paid={bill.status === "Paid"}>{bill.status}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    {!todayBills?.length && <p className="text-sm text-muted-foreground text-center py-4">No bills today</p>}
+                    {todayBills?.slice(0, 8).map((bill) => {
+                      const displayService = bill.service.includes("|")
+                        ? bill.service.split("|").map((s: string) => s.split(":")[0].trim()).join(", ")
+                        : bill.service;
+                      return (
+                        <div key={bill.id} className="flex items-center justify-between py-2 border-b last:border-0">
+                          <div>
+                            <p className="text-sm font-medium">{(bill.patients as any)?.name}</p>
+                            <p className="text-xs text-muted-foreground truncate max-w-[180px]">{displayService}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-primary">₹{Number(bill.amount).toLocaleString()}</p>
+                            <Badge variant="secondary" className={`text-[10px] border-0 ${bill.status === "Paid" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>
+                              {bill.status}
+                            </Badge>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {todayBills && todayBills.length > 0 && (
+                    <div className="mt-4 p-3 bg-primary/10 rounded-lg flex justify-between items-center">
+                      <span className="text-sm font-medium">Total ({todayBills.length} patients)</span>
+                      <span className="text-lg font-bold text-primary">₹{todayTotalAmount.toLocaleString()}</span>
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
