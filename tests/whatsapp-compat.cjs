@@ -9,11 +9,24 @@ const patched=patchUtils(legacy);assert.equal(patchUtils(patched),patched);asser
 {
  const {patchClient}=require('../whatsapp-compat.cjs');
  const client=fs.readFileSync(require.resolve('whatsapp-web.js/src/Client.js'),'utf8');
- assert.match(client,/wait for WhatsApp Web modules v3/);
+ assert.match(client,/wait for WhatsApp Web modules v4/);
  assert.equal(patchClient(client),client);
  assert.match(client,/balajiReadinessMs/);
  assert.match(client,/modules not ready after/);
  assert.match(client,/missing=/);
+ const resolver = client.match(/function exposeSocketResolver\(\)[\s\S]*?\n\}/)[0];
+ const socket = {state:'UNPAIRED', on(){}, off(){}};
+ const window = {require:()=>({}), importNamespace:()=>({Socket:socket})};
+ vm.runInNewContext(`(${resolver})()`, {window});
+ assert.equal(window.balajiGetWhatsAppSocket(), socket);
+ window.require = () => ({Socket:socket});
+ window.importNamespace = () => {throw Error('Unavailable');};
+ assert.equal(window.balajiGetWhatsAppSocket(), socket);
+ window.require = () => ({});
+ assert.equal(window.balajiGetWhatsAppSocket(), undefined);
+ const authStore = fs.readFileSync(require.resolve('whatsapp-web.js/src/util/Injected/AuthStore/AuthStore.js'),'utf8');
+ assert.match(authStore,/AppState = window.balajiGetWhatsAppSocket\(\)/);
+ assert.doesNotMatch(client,/window\s*\.require\('WAWebSocketModel'\)\s*\.Socket/);
  assert.throws(()=>patchClient('unsupported source'),/anchor changed/);
  assert.throws(()=>patchClient('// Balaji compatibility: wait for WhatsApp auth modules'),/clean npm ci/);
  console.log('PASS installed connector waits for WhatsApp Web modules with a bounded window and reports what is missing');
@@ -37,7 +50,7 @@ function browser(source,{oldKeys=false}={}){
  const old=browser(patched,{oldKeys:true});assert.ok(await old.send(true));assert.ok(Object.hasOwn(new old.Key({to:{$1:'chat'},id:'i'}),'_serialized'));
  console.log('PASS actual injected connector reproduces PDF private-ID failure and missing acknowledgment; both fixes work on old/new MsgKey models');
  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'balaji-wa-patch-'));
- try{fs.mkdirSync(path.join(temp,'src/util/Injected'),{recursive:true});fs.writeFileSync(path.join(temp,'package.json'),JSON.stringify({version:'1.34.7'}));fs.writeFileSync(path.join(temp,'src/Client.js'),'        await this.pupPage.evaluate(ExposeAuthStore);\n                await this.pupPage.evaluate(async () => {\n                    const registrationInfo =');
+ try{fs.mkdirSync(path.join(temp,'src/util/Injected/AuthStore'),{recursive:true});fs.writeFileSync(path.join(temp,'src/util/Injected/AuthStore/AuthStore.js'),"window.AuthStore.AppState = window.require('WAWebSocketModel').Socket;");fs.writeFileSync(path.join(temp,'package.json'),JSON.stringify({version:'1.34.7'}));fs.writeFileSync(path.join(temp,'src/Client.js'),'        await this.pupPage.evaluate(ExposeAuthStore);\n                await this.pupPage.evaluate(async () => {\n                    const registrationInfo =');
  const archivedSource=fs.readFileSync(path.join(__dirname,'../whatsapp-service.cjs'),'utf8');
  assert.match(archivedSource,/wa-version\/main\/html\/\{version\}\.html/);
  assert.match(archivedSource,/label:'archived'/);

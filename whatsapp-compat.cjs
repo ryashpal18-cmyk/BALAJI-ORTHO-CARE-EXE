@@ -37,19 +37,46 @@ ${anchor}`);
   }
   return result;
 }
+// WhatsApp's module loader can expose a named export via importNamespace
+// even when require returns the module's default export.
+function exposeSocketResolver(){
+    window.balajiGetWhatsAppSocket = () => {
+        for (const load of [
+            () => window.require('WAWebSocketModel'),
+            () => window.importNamespace('WAWebSocketModel'),
+        ]) {
+            try {
+                const module = load();
+                const socket = module?.Socket ?? module?.default?.Socket ?? module?.default ?? module;
+                if (typeof socket?.state === 'string' &&
+                    typeof socket.on === 'function' && typeof socket.off === 'function') return socket;
+            } catch {
+                // The loader or module may still be starting.
+            }
+        }
+        return undefined;
+    };
+}
+
+function replaceSocketAccess(source){
+  return source.replace(/window\s*\.require\('WAWebSocketModel'\)\s*\.Socket/g,
+    'window.balajiGetWhatsAppSocket()');
+}
+
 function patchClient(source){
-  const marker='// Balaji compatibility: wait for WhatsApp Web modules v3';
+  const marker='// Balaji compatibility: wait for WhatsApp Web modules v4';
   if(source.includes(marker))return source;
   if(source.includes('// Balaji compatibility: wait for WhatsApp'))throw Error('An older WhatsApp readiness patch is installed; run a clean npm ci before building');
   const authAnchor='        await this.pupPage.evaluate(ExposeAuthStore);';
   const qrAnchor=`                await this.pupPage.evaluate(async () => {
                     const registrationInfo =`;
   if(source.split(authAnchor).length!==2||source.split(qrAnchor).length!==2)throw Error('WhatsApp readiness patch anchor changed; review dependency before building');
-  source=source.replace(authAnchor,`${marker}
+  source=replaceSocketAccess(source).replace(authAnchor,`${marker}
         // WhatsApp Web registers these modules only after its own bundles
         // finish loading, which takes far longer than the 30s authentication
         // timeout on a slow clinic connection. Wait separately, and report
         // exactly what is missing when the page never becomes usable.
+        await this.pupPage.evaluate(${exposeSocketResolver.toString()});
         const balajiReadinessMs = Number(this.options.balajiReadinessMs) > 0
             ? Number(this.options.balajiReadinessMs)
             : 60000;
@@ -63,9 +90,13 @@ function patchClient(source){
                         for (const [moduleName, properties] of requirements) {
                             let value;
                             try {
-                                value = moduleName === '__AuthStore'
-                                    ? window.AuthStore
-                                    : window.require(moduleName);
+                                if (moduleName === 'WAWebSocketModel') {
+                                    value = {Socket: window.balajiGetWhatsAppSocket()};
+                                } else {
+                                    value = moduleName === '__AuthStore'
+                                        ? window.AuthStore
+                                        : window.require(moduleName);
+                                }
                             } catch {
                                 value = null;
                             }
@@ -133,6 +164,7 @@ function patchInstalledPackage(packageRoot=path.dirname(require.resolve('whatsap
   if(version!=='1.34.7')throw Error('Review WhatsApp compatibility patches for dependency version '+version);
   const files=[
     [path.join(packageRoot,'src/Client.js'),patchClient],
+    [path.join(packageRoot,'src/util/Injected/AuthStore/AuthStore.js'),replaceSocketAccess],
     [path.join(packageRoot,'src/util/Injected/Utils.js'),patchUtils],
   ];
   let changed=false;
