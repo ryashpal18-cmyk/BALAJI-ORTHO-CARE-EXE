@@ -35,11 +35,11 @@ function resolveAuthRoot(root,{localAppData=process.env.LOCALAPPDATA,fsImpl=fs}=
 }
 // WhatsApp Web build verified against this pinned connector version. Live Web
 // sometimes serves a different bundle whose module names the connector cannot
-// find, so prefer the archived build and keep live Web as the fallback.
+// find. Keep archive failures separate so the next attempt can try live Web.
 const PINNED_WEB_VERSION='2.3000.1053619311-alpha';
 const WEB_VERSION_ARCHIVE='https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html';
 const WEB_SOURCES=[
-  {label:'archived',options:{webVersion:PINNED_WEB_VERSION,webVersionCache:{type:'remote',remotePath:WEB_VERSION_ARCHIVE,strict:false}}},
+  {label:'archived',options:{webVersion:PINNED_WEB_VERSION,webVersionCache:{type:'remote',remotePath:WEB_VERSION_ARCHIVE,strict:true}}},
   {label:'live',options:{webVersionCache:{type:'none'}}},
 ];
 const READINESS_MS=60000;
@@ -175,7 +175,17 @@ function createWhatsAppService({store,root,authRoot,allowed,renderPdf,clientFact
     const discovered=browserPath(),executables=[...new Set((Array.isArray(discovered)?discovered:[discovered]).filter(Boolean))];
     if(!executables.length)throw Error('PC में Microsoft Edge या Google Chrome install करें।');
     stopped=false;state='connecting';error='';qr=null;browserErrors=[];connectionStage='cleanup';
-    const factory=(executablePath,web)=>clientFactory?clientFactory({executablePath,authDataPath,webSource:web.label}):(()=>{const{Client,LocalAuth}=require('whatsapp-web.js');return new Client({authStrategy:new LocalAuth({clientId:'balaji-clinic',dataPath:authDataPath}),balajiReadinessMs:READINESS_MS,...web.options,puppeteer:{executablePath,headless:true,timeout:45000}});})();
+    const factory = (executablePath, web) => {
+      if (clientFactory) return clientFactory({executablePath,authDataPath,webSource:web.label});
+      const {Client, LocalAuth} = require('whatsapp-web.js');
+      return new Client({
+        authStrategy: new LocalAuth({clientId:'balaji-clinic',dataPath:authDataPath}),
+        balajiReadinessMs: READINESS_MS,
+        userAgent: false,
+        ...web.options,
+        puppeteer: {executablePath,headless:true,timeout:45000},
+      });
+    };
     const attempts=WEB_SOURCES.flatMap(web=>executables.map(executablePath=>({executablePath,web}))).slice(0,MAX_CONNECT_ATTEMPTS);
     // Reserve the whole fallback sequence so repeated clicks/timers cannot
     // launch two browsers against one LocalAuth profile.
@@ -214,7 +224,7 @@ function createWhatsAppService({store,root,authRoot,allowed,renderPdf,clientFact
       }
       connectionFailures++;
       error=browserErrors.some(x=>/already running|userDataDir/i.test(x.error))?'WhatsApp browser session व्यस्त है। Balaji बंद करके PC restart करें; session delete न करें।'
-        :browserErrors.some(x=>/modules not ready/i.test(x.error))?'WhatsApp Web इस PC पर पूरा load नहीं हुआ। Internet speed जाँचें और Edge/Chrome update करें, फिर दोबारा जोड़ें। नीचे का तकनीकी विवरण भेजें।'
+        :browserErrors.some(x=>/modules not ready/i.test(x.error))?'WhatsApp Web के login modules उपलब्ध नहीं हुए। नीचे का तकनीकी विवरण सहायता के लिए भेजें।'
         :'Edge और Chrome दोनों से WhatsApp connection नहीं बना। कारण नीचे देखें।';
       state='error';connectionStage='failed';nextConnect=now()+Math.min(60000*2**Math.min(connectionFailures-1,4),900000);
     }).catch(e=>{report('WA-010','WhatsApp browser recovery',e);state='error';connectionStage='failed';error='WhatsApp browser शुरू नहीं हुआ: '+errorDetail(e);nextConnect=now()+300000;}).finally(()=>{starting=null;});

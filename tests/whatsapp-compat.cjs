@@ -41,6 +41,8 @@ function browser(source,{oldKeys=false}={}){
  const archivedSource=fs.readFileSync(path.join(__dirname,'../whatsapp-service.cjs'),'utf8');
  assert.match(archivedSource,/wa-version\/main\/html\/\{version\}\.html/);
  assert.match(archivedSource,/label:'archived'/);
+ assert.match(archivedSource,/remotePath:WEB_VERSION_ARCHIVE,strict:true/);
+ assert.match(archivedSource,/userAgent: false/);
  // The archived build below is the one verified end-to-end against live WhatsApp Web.
  assert.match(archivedSource,/PINNED_WEB_VERSION='2\.3000\.1053619311-alpha'/);
  assert.match(archivedSource,/label:'live'/);const file=path.join(temp,'src/util/Injected/Utils.js');fs.writeFileSync(file,legacy);assert.equal(patchInstalledPackage(temp),true);assert.equal(patchInstalledPackage(temp),false);assert.equal(fs.readFileSync(file,'utf8'),patched);}finally{fs.rmSync(temp,{recursive:true,force:true});}
